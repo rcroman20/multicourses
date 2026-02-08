@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "default": "historiassinnombre"
+  },
+  "targets": {
+    "historiassinnombre": {
+      "hosting": {
+        "unisucre": [
+          "./unisucre"
+        ],
+        "multicourses": [
+          "./unisucre/dist"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

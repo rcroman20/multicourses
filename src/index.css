@@ -1,0 +1,401 @@
+/* src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Sistema de Diseño Académico Juvenil y Moderno */
+/* Paleta vibrante pero profesional para estudiantes universitarios */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@layer base {
+  :root {
+    /* Colores base vibrantes pero profesionales */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 16%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 16%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 16%;
+
+    /* Primary: Azul vibrante y juvenil */
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary: Cyan moderno */
+    --secondary: 190 90% 50%;
+    --secondary-foreground: 222 47% 16%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent: Púrpura energético */
+    --accent: 262 83% 58%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.75rem;
+
+    /* Colores académicos vibrantes */
+    --success: 142 76% 45%;
+    --success-foreground: 0 0% 100%;
+    
+    --warning: 38 92% 55%;
+    --warning-foreground: 0 0% 100%;
+    
+    --danger: 0 84% 60%;
+    --danger-foreground: 0 0% 100%;
+
+    /* Colores de progreso académico vibrantes */
+    --passing: 142 76% 45%;
+    --at-risk: 38 92% 55%;
+    --failing: 0 84% 60%;
+
+    /* Colores adicionales para la nueva paleta */
+    --cyan: 190 90% 50%;
+    --purple: 262 83% 58%;
+    --pink: 330 81% 60%;
+    --amber: 38 92% 55%;
+
+    /* Sidebar moderno */
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 262 83% 58%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 217 32% 20%;
+    --sidebar-ring: 217 91% 60%;
+
+    /* Gradientes juveniles */
+    --gradient-primary: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(190 90% 50%) 100%);
+    --gradient-success: linear-gradient(135deg, hsl(142 76% 45%) 0%, hsl(142 76% 35%) 100%);
+    --gradient-warning: linear-gradient(135deg, hsl(38 92% 55%) 0%, hsl(38 92% 45%) 100%);
+    --gradient-danger: linear-gradient(135deg, hsl(0 84% 60%) 0%, hsl(0 84% 50%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(210 40% 98%) 100%);
+    --gradient-sidebar: linear-gradient(180deg, hsl(222 47% 11%) 0%, hsl(222 47% 8%) 100%);
+
+    /* Sombras más pronunciadas para profundidad */
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    --shadow-card: 0 8px 30px rgba(0, 0, 0, 0.12);
+  }
+
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 47% 11%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 217 91% 65%;
+    --primary-foreground: 222 47% 8%;
+
+    --secondary: 190 90% 55%;
+    --secondary-foreground: 222 47% 8%;
+
+    --muted: 217 32% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 262 83% 65%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 65%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 217 32% 20%;
+    --input: 217 32% 20%;
+    --ring: 217 91% 65%;
+
+    --sidebar-background: 222 47% 6%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 217 91% 65%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 262 83% 65%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 217 32% 18%;
+    --sidebar-ring: 217 91% 65%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(217 91% 65%) 0%, hsl(190 90% 55%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(222 47% 11%) 0%, hsl(222 47% 8%) 100%);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold tracking-tight;
+    letter-spacing: -0.025em;
+  }
+
+  /* Tipografía moderna */
+  .heading-display {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    @apply font-bold tracking-tight;
+  }
+}
+
+@layer components {
+  /* Tarjetas modernas con gradientes sutiles */
+  .modern-card {
+    @apply bg-card rounded-2xl border border-border p-6 transition-all duration-300 backdrop-blur-sm;
+    background: linear-gradient(145deg, hsl(0 0% 100%) 0%, hsl(210 40% 98%) 100%);
+    box-shadow: var(--shadow-card);
+  }
+  
+  .modern-card:hover {
+    @apply border-primary/30;
+    box-shadow: var(--shadow-xl);
+    transform: translateY(-2px);
+  }
+
+  /* Estados de progreso académico con gradientes */
+  .status-passing {
+    background: linear-gradient(135deg, hsl(142 76% 45% / 0.1) 0%, hsl(142 76% 45% / 0.05) 100%);
+    @apply text-green-700 border border-green-200;
+  }
+  
+  .status-at-risk {
+    background: linear-gradient(135deg, hsl(38 92% 55% / 0.1) 0%, hsl(38 92% 55% / 0.05) 100%);
+    @apply text-amber-700 border border-amber-200;
+  }
+  
+  .status-failing {
+    background: linear-gradient(135deg, hsl(0 84% 60% / 0.1) 0%, hsl(0 84% 60% / 0.05) 100%);
+    @apply text-red-700 border border-red-200;
+  }
+
+  /* Badge moderno con gradiente */
+  .modern-badge {
+    @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold tracking-wide uppercase;
+    background: linear-gradient(135deg, var(--secondary) 0%, var(--primary) 100%);
+    @apply text-white border-0;
+  }
+
+  /* Barra de progreso moderna */
+  .progress-modern {
+    @apply h-3 rounded-full bg-gray-200 overflow-hidden;
+  }
+  
+  .progress-modern-fill {
+    @apply h-full rounded-full transition-all duration-700 ease-out;
+    background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+  }
+
+  /* Input moderno */
+  .input-modern {
+    @apply w-full px-4 py-3 rounded-xl border-2 border-gray-300 bg-white text-foreground;
+    @apply placeholder:text-gray-400;
+    @apply focus:outline-none focus:ring-4 focus:ring-primary/20 focus:border-primary;
+    @apply transition-all duration-300 ease-out;
+  }
+
+  /* Botón principal moderno */
+  .btn-modern {
+    @apply inline-flex items-center justify-center gap-3 px-6 py-3.5 rounded-xl font-semibold tracking-wide;
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    @apply text-white shadow-lg hover:shadow-xl;
+    @apply hover:scale-[1.02] active:scale-[0.98];
+    @apply transition-all duration-300 ease-out;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none;
+  }
+
+  /* Botón secundario con borde */
+  .btn-modern-outline {
+    @apply inline-flex items-center justify-center gap-3 px-6 py-3.5 rounded-xl border-2 font-semibold tracking-wide;
+    @apply bg-white text-gray-800 border-gray-300;
+    @apply hover:bg-gradient-to-r hover:from-primary/5 hover:to-secondary/5 hover:border-primary;
+    @apply hover:shadow-lg active:scale-[0.98];
+    @apply transition-all duration-300 ease-out;
+  }
+
+  /* Sidebar link moderno */
+  .sidebar-modern {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-sidebar-foreground/90;
+    @apply hover:bg-sidebar-accent/30 hover:text-sidebar-foreground;
+    @apply transition-all duration-300;
+  }
+  
+  .sidebar-modern.active {
+    @apply bg-gradient-to-r from-sidebar-primary/20 to-sidebar-accent/20 text-sidebar-primary font-semibold;
+    @apply border-l-4 border-sidebar-primary;
+  }
+
+  /* Tabla moderna */
+  .table-modern {
+    @apply w-full text-sm rounded-xl overflow-hidden;
+  }
+  
+  .table-modern thead {
+    @apply bg-gradient-to-r from-primary/10 to-secondary/10;
+  }
+  
+  .table-modern th {
+    @apply px-6 py-4 text-left font-bold text-foreground tracking-wide;
+  }
+  
+  .table-modern td {
+    @apply px-6 py-4 border-b border-border;
+  }
+  
+  .table-modern tbody tr:hover {
+    @apply bg-gradient-to-r from-primary/5 to-secondary/5;
+  }
+
+  /* Animación de fade in mejorada */
+  .fade-in-up {
+    animation: fadeInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Animación de slide in mejorada */
+  .slide-in-left {
+    animation: slideInLeft 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  @keyframes slideInLeft {
+    from {
+      opacity: 0;
+      transform: translateX(-30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  /* Efecto de brillo */
+  .shine-effect {
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .shine-effect::after {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(
+      to right,
+      transparent 0%,
+      rgba(255, 255, 255, 0.3) 50%,
+      transparent 100%
+    );
+    transform: rotate(30deg);
+    transition: transform 0.6s;
+  }
+  
+  .shine-effect:hover::after {
+    transform: rotate(30deg) translateX(100%);
+  }
+}
+
+@layer utilities {
+  /* Utilidades para gradientes */
+  .bg-gradient-primary {
+    background: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(190 90% 50%) 100%);
+  }
+  
+  .bg-gradient-success {
+    background: linear-gradient(135deg, hsl(142 76% 45%) 0%, hsl(142 76% 35%) 100%);
+  }
+  
+  .bg-gradient-warning {
+    background: linear-gradient(135deg, hsl(38 92% 55%) 0%, hsl(38 92% 45%) 100%);
+  }
+  
+  .bg-gradient-danger {
+    background: linear-gradient(135deg, hsl(0 84% 60%) 0%, hsl(0 84% 50%) 100%);
+  }
+
+  /* Texto con gradiente */
+  .text-gradient-primary {
+    background: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(190 90% 50%) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* Utilidades para sombras */
+  .shadow-soft {
+    box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.08);
+  }
+  
+  .shadow-medium {
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  }
+  
+  .shadow-hard {
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+  }
+
+  /* Utilidades de accesibilidad */
+  .focus-visible-ring {
+    @apply focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/30 focus-visible:ring-offset-2;
+  }
+  
+  .sr-only {
+    @apply absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  /* Utilidades para truncar texto */
+  .line-clamp-1 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+  }
+  
+  .line-clamp-2 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  
+  .line-clamp-3 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+}

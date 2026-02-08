@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    
+    <!-- Título y descripción optimizados para SEO -->
+    <title>MultiCourses</title>
+    <meta name="description" content="Plataforma académica digital para gestión de múltiples cursos y programas universitarios. Sistema integral para docentes y estudiantes." />
+    <meta name="keywords" content="plataforma académica, gestión de cursos, educación digital, universidad, docentes, estudiantes, Colombia, e-learning" />
+    <meta name="author" content="Roberto Roman" />
+  
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/logo.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/logo.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/logo-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/logo.png" />
+    
+    <!-- Preconnect para recursos externos -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://firestore.googleapis.com" />
+    <link rel="preconnect" href="https://firebasestorage.googleapis.com" />
+    
+    <!-- Structured Data para SEO -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "MultiCourses",
+      "url": "https://multicourses.web.app/",
+      "description": "Plataforma académica digital para gestión de múltiples cursos universitarios",
+      "applicationCategory": "EducationalApplication",
+      "operatingSystem": "Web",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "author": {
+        "@type": "Organization",
+        "name": "MultiCourses Platform"
+      },
+      "countriesSupported": ["CO"],
+      "inLanguage": ["es", "en"]
+    }
+    </script>
+    
+    <!-- Preload críticos -->
+    <link rel="preload" as="style" href="/src/index.css" />
+    
+    <!-- Estilos críticos inline (opcional) -->
+    <style>
+      /* Estilos de carga inicial */
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+      }
+      
+      #root {
+        min-height: 100vh;
+      }
+      
+      /* Loading animation */
+      .app-loading {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        color: white;
+        flex-direction: column;
+        gap: 20px;
+      }
+      
+      .spinner {
+        width: 50px;
+        height: 50px;
+        border: 5px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: white;
+        animation: spin 1s ease-in-out infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Loading state inicial -->
+    <div id="loading" class="app-loading">
+      <div class="spinner"></div>
+      <h1 style="margin: 0; font-weight: 300;">MultiCourses</h1>
+      <p style="margin: 0; opacity: 0.8;">Cargando plataforma académica...</p>
+    </div>
+    
+    <!-- Aplicación React -->
+    <div id="root"></div>
+    
+    <!-- Script principal -->
+    <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- Script para remover loading state -->
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        // Remover loading después de que React cargue
+        setTimeout(function() {
+          const loadingEl = document.getElementById('loading');
+          if (loadingEl) {
+            loadingEl.style.opacity = '0';
+            loadingEl.style.transition = 'opacity 0.3s';
+            setTimeout(() => loadingEl.remove(), 300);
+          }
+        }, 1000);
+      });
+      
+      // Registrar service worker para PWA
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/service-worker.js').catch(error => {
+            console.log('Service Worker registration failed:', error);
+          });
+        });
+      }
+    </script>
+    
+   
+  </body>
+</html>
