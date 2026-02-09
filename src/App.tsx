@@ -22,9 +22,10 @@ import TeacherDashboard from "./pages/teacher/TeacherDashboard";
 import CoursesPage from "./pages/shared/CoursesPage";
 import GradesPage from "./pages/shared/GradesPage";
 import SlidesPage from "./pages/shared/SlidesPage";
-import CourseFilesPage from "./pages/shared/CourseFilesPage";
 import AssessmentsPage from "./pages/shared/AssessmentsPage";
 import AssessmentDetailPage from "./pages/shared/AssessmentDetailPage";
+
+import FileManager from "./pages/shared/FileManager";
 
 // 4. Páginas exclusivas de profesores (organizadas por categoría)
 // 4.1 Gestión de cursos
@@ -99,7 +100,7 @@ const App = () => (
                 path="/courses/:courseCode/files"
                 element={
                   <ProtectedRoute>
-                    <CourseFilesPage />
+                    <FileManager />
                   </ProtectedRoute>
                 }
               />
@@ -141,6 +142,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+          
 
               {/* ========== RUTAS EXCLUSIVAS DE PROFESORES ========== */}
               {/* Gestión de Cursos */}

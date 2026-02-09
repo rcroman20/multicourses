@@ -461,7 +461,7 @@ export default function StudentDashboard() {
     <div className="flex items-center justify-between">
       <div className="w-full sm:w-auto text-center sm:text-left">
         <p className="text-xs font-semibold mb-1 text-blue-600 tracking-wide">Total Courses</p>
-        <p className="text-2xl md:text-3xl font-bold text-gray-900">
+        <p className="text-2xl md:text-2xl font-bold text-gray-900">
           {totalCourses}
         </p>
       </div>
@@ -475,7 +475,7 @@ export default function StudentDashboard() {
     <div className="flex items-center justify-between">
       <div className="w-full sm:w-auto text-center sm:text-left">
         <p className="text-xs font-semibold mb-1 text-purple-600 tracking-wide">Academic Average</p>
-        <p className="text-2xl md:text-3xl font-bold text-gray-900">
+        <p className="text-2xl md:text-2xl font-bold text-gray-900">
           {averageGrade > 0 ? averageGrade.toFixed(1) : "0.0"}
         </p>
       </div>
@@ -489,7 +489,7 @@ export default function StudentDashboard() {
     <div className="flex items-center justify-between">
       <div className="w-full sm:w-auto text-center sm:text-left">
         <p className="text-xs font-semibold mb-1 text-green-600 tracking-wide">Courses Passed</p>
-        <p className="text-2xl md:text-3xl font-bold text-gray-900">
+        <p className="text-2xl md:text-2xl font-bold text-gray-900">
           {completedCourses}
         </p>
       </div>
@@ -503,7 +503,7 @@ export default function StudentDashboard() {
     <div className="flex items-center justify-between">
       <div className="w-full sm:w-auto text-center sm:text-left">
         <p className="text-xs font-semibold mb-1 text-amber-600 tracking-wide">Attention Needed</p>
-        <p className="text-2xl md:text-3xl font-bold text-gray-900">
+        <p className="text-2xl md:text-2xl font-bold text-gray-900">
           {atRiskCourses + failingCourses}
         </p>
       </div>

@@ -215,7 +215,7 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
             {!isCollapsed && (
               <div className="flex flex-col flex-1 min-w-0">
                 <span className="text-sm font-semibold text-white truncate">
-                  StudyHub
+                  Multicourses
                 </span>
                 <span className="text-xs text-gray-300 truncate">
                   Academic Platform

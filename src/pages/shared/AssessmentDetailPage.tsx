@@ -125,50 +125,55 @@ export default function AssessmentDetailPage() {
   }
 }, [submissionText]);
 
-  const loadAssessment = async () => {
-    setLoading(true);
-    try {
-      const assessmentData = await assessmentService.getAssessmentById(assessmentId!);
-      
-      if (!assessmentData) {
-        console.error('No se encontró la evaluación');
-        setAssessment(null);
-        return;
-      }
-      
-      setAssessment(assessmentData);
-      await loadDynamicData(assessmentData);
+const loadAssessment = async () => {
+  setLoading(true);
+  try {
+    const assessmentData = await assessmentService.getAssessmentById(assessmentId!);
+    
+    if (!assessmentData) {
+      console.error('No se encontró la evaluación');
+      setAssessment(null);
+      return;
+    }
+    
+    console.log('🎯 Assessment data loaded:', assessmentData);
+    console.log('📊 Max points:', assessmentData.maxPoints);
+    console.log('📝 Type:', assessmentData.type);
+    
+    setAssessment(assessmentData);
+    await loadDynamicData(assessmentData);
 
-      if (isTeacher && assessmentData.gradeSheetId) {
-        try {
-          const sheet = await gradeSheetService.getById(assessmentData.gradeSheetId);
-          setGradeSheet(sheet);
-          
-          if (sheet && sheet.students) {
-            const gradesData = await extractGradesFromSheet(sheet, assessmentData);
-            setGrades(gradesData);
-            calculateStats(gradesData);
-          } else {
-            setGrades([]);
-            calculateStats([]);
-          }
-        } catch (sheetError) {
-          console.error('Error cargando hoja de calificaciones:', sheetError);
+    if (isTeacher && assessmentData.gradeSheetId) {
+      try {
+        const sheet = await gradeSheetService.getById(assessmentData.gradeSheetId);
+        setGradeSheet(sheet);
+        
+        if (sheet && sheet.students) {
+          const gradesData = await extractGradesFromSheet(sheet, assessmentData);
+          console.log('📈 Grades data extracted:', gradesData);
+          setGrades(gradesData);
+          calculateStats(gradesData);
+        } else {
           setGrades([]);
           calculateStats([]);
         }
-      } else {
+      } catch (sheetError) {
+        console.error('Error cargando hoja de calificaciones:', sheetError);
         setGrades([]);
         calculateStats([]);
       }
-    } catch (error) {
-      console.error('Error loading assessment:', error);
-      toast.error('Error al cargar los datos de la evaluación');
-      setAssessment(null);
-    } finally {
-      setLoading(false);
+    } else {
+      setGrades([]);
+      calculateStats([]);
     }
-  };
+  } catch (error) {
+    console.error('Error loading assessment:', error);
+    toast.error('Error al cargar los datos de la evaluación');
+    setAssessment(null);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const loadStudentSubmission = async () => {
     try {
@@ -696,151 +701,216 @@ export default function AssessmentDetailPage() {
     return colorClasses[color as keyof typeof colorClasses]?.[type] || colorClasses.emerald[type];
   };
 
-  const extractGradesFromSheet = async (sheet: any, assessment: any) => {
-    const gradesList: any[] = [];
-    
-    if (!sheet.students || sheet.students.length === 0) {
-      return gradesList;
+const extractGradesFromSheet = async (sheet: any, assessment: any) => {
+  const gradesList: any[] = [];
+  
+  if (!sheet.students || sheet.students.length === 0) {
+    return gradesList;
+  }
+
+  const activity = sheet.activities?.find((act: any) => 
+    act.name === assessment.name || 
+    act.id === assessment.id ||
+    act.assessmentId === assessmentId
+  );
+
+  if (!activity) {
+    console.log('⚠️ No se encontró actividad en la hoja de calificaciones');
+    return gradesList;
+  }
+
+  // DETERMINAR EL MAX SCORE
+  let maxScore = 5; // Valor por defecto
+  if (activity.maxScore && activity.maxScore > 0) {
+    maxScore = activity.maxScore;
+    console.log('✅ Usando maxScore de la actividad:', maxScore);
+  } else if (assessment.maxPoints && assessment.maxPoints > 0) {
+    maxScore = assessment.maxPoints;
+    console.log('✅ Usando maxPoints del assessment:', maxScore);
+  } else {
+    console.log('⚠️ Usando valor por defecto para maxScore:', maxScore);
+  }
+
+  console.log('📊 Actividad encontrada:', activity);
+  console.log('🎯 Max Score determinado:', maxScore);
+
+  sheet.students.forEach((student: any) => {
+    if (student.grades && student.grades[activity.id]) {
+      const gradeData = student.grades[activity.id];
+      const score = gradeData.value;
+      
+      // Calcular porcentaje correctamente
+      let percentage = null;
+      if (score !== undefined && maxScore > 0) {
+        percentage = parseFloat(((score / maxScore) * 100).toFixed(1));
+        console.log(`📊 ${student.name || student.studentId}: Score=${score}, Percentage=${percentage}%`);
+      }
+      
+      gradesList.push({
+        id: `${student.studentId}_${activity.id}`,
+        studentId: student.studentId,
+        studentName: student.name || `Student ${student.studentId.substring(0, 8)}`,
+        studentEmail: student.email || '',
+        score: score,
+        maxScore: maxScore,
+        comment: gradeData.comment || '',
+        status: score !== undefined ? 'graded' : 'pending',
+        gradedAt: gradeData.submittedAt?.toDate?.() || new Date(),
+        activityId: activity.id,
+        activityName: activity.name,
+        percentage: percentage
+      });
+    } else {
+      gradesList.push({
+        id: `${student.studentId}_${activity.id}`,
+        studentId: student.studentId,
+        studentName: student.name || `Student ${student.studentId.substring(0, 8)}`,
+        studentEmail: student.email || '',
+        score: null,
+        maxScore: maxScore,
+        comment: '',
+        status: 'pending',
+        gradedAt: null,
+        activityId: activity.id,
+        activityName: activity.name,
+        percentage: null
+      });
     }
+  });
 
-    const activity = sheet.activities?.find((act: any) => 
-      act.name === assessment.name || 
-      act.id === assessment.id ||
-      act.assessmentId === assessmentId
-    );
-
-    if (!activity) {
-      return gradesList;
-    }
-
-    sheet.students.forEach((student: any) => {
-      if (student.grades && student.grades[activity.id]) {
-        const gradeData = student.grades[activity.id];
-        
-        gradesList.push({
-          id: `${student.studentId}_${activity.id}`,
-          studentId: student.studentId,
-          studentName: student.name || `Student ${student.studentId.substring(0, 8)}`,
-          studentEmail: student.email || '',
-          score: gradeData.value,
-          maxScore: activity.maxScore || assessment.maxPoints,
-          comment: gradeData.comment || '',
-          status: gradeData.value !== undefined ? 'graded' : 'pending',
-          gradedAt: gradeData.submittedAt?.toDate?.() || new Date(),
-          activityId: activity.id,
-          activityName: activity.name,
-          percentage: gradeData.value !== undefined ? 
-            ((gradeData.value / (activity.maxScore || assessment.maxPoints)) * 100).toFixed(1) : null
-        });
-      } else {
-        gradesList.push({
-          id: `${student.studentId}_${activity.id}`,
-          studentId: student.studentId,
-          studentName: student.name || `Student ${student.studentId.substring(0, 8)}`,
-          studentEmail: student.email || '',
-          score: null,
-          maxScore: activity.maxScore || assessment.maxPoints,
-          comment: '',
-          status: 'pending',
-          gradedAt: null,
-          activityId: activity.id,
-          activityName: activity.name,
-          percentage: null
-        });
+  console.log('📈 Total de calificaciones extraídas:', gradesList.length);
+  return gradesList;
+};
+const calculateStats = (gradesData: any[]) => {
+  if (!gradesData || gradesData.length === 0) {
+    setStats({
+      total: 0,
+      graded: 0,
+      average: 0,
+      highest: 0,
+      lowest: 0,
+      passingRate: 0,
+      passingCount: 0,
+      failingCount: 0,
+      pending: 0,
+      distribution: {
+        excellent: 0,
+        good: 0,
+        average: 0,
+        poor: 0,
+        failing: 0
       }
     });
+    return;
+  }
 
-    return gradesList;
-  };
-
-  const calculateStats = (gradesData: any[]) => {
-    if (!gradesData || gradesData.length === 0) {
-      setStats({
-        total: 0,
-        graded: 0,
-        average: 0,
-        highest: 0,
-        lowest: 0,
-        passingRate: 0,
-        passingCount: 0,
-        failingCount: 0,
-        pending: 0,
-        distribution: {
-          excellent: 0,
-          good: 0,
-          average: 0,
-          poor: 0,
-          failing: 0
-        }
-      });
-      return;
-    }
-
-    const gradedStudents = gradesData.filter(g => g.score !== null && g.score !== undefined);
-    const scores = gradedStudents.map(g => g.score);
-    
-    if (scores.length === 0) {
-      setStats({
-        total: gradesData.length,
-        graded: 0,
-        average: 0,
-        highest: 0,
-        lowest: 0,
-        passingRate: 0,
-        passingCount: 0,
-        failingCount: 0,
-        pending: gradesData.length,
-        distribution: {
-          excellent: 0,
-          good: 0,
-          average: 0,
-          poor: 0,
-          failing: 0
-        }
-      });
-      return;
-    }
-
-    const highest = Math.max(...scores);
-    const lowest = Math.min(...scores);
-    const average = scores.reduce((a, b) => a + b, 0) / scores.length;
-    const passingScore = assessment?.passingScore || 0;
-    const maxScore = assessment?.maxPoints || 100;
-    
-    const distribution = {
-      excellent: 0,
-      good: 0,
-      average: 0,
-      poor: 0,
-      failing: 0
-    };
-
-    gradedStudents.forEach(g => {
-      const percentage = (g.score / maxScore) * 100;
-      if (percentage >= 90) distribution.excellent++;
-      else if (percentage >= 80) distribution.good++;
-      else if (percentage >= 70) distribution.average++;
-      else if (percentage >= 60) distribution.poor++;
-      else distribution.failing++;
-    });
-
-    const passingCount = gradedStudents.filter(g => g.score >= passingScore).length;
-    const failingCount = gradedStudents.length - passingCount;
-    const passingRate = (passingCount / gradedStudents.length) * 100;
-
+  const gradedStudents = gradesData.filter(g => g.score !== null && g.score !== undefined);
+  const scores = gradedStudents.map(g => g.score);
+  
+  if (scores.length === 0) {
     setStats({
       total: gradesData.length,
-      graded: gradedStudents.length,
-      average: average.toFixed(1),
-      highest: highest.toFixed(1),
-      lowest: lowest.toFixed(1),
-      passingRate: passingRate.toFixed(0),
-      passingCount,
-      failingCount,
-      pending: gradesData.length - gradedStudents.length,
-      distribution
+      graded: 0,
+      average: 0,
+      highest: 0,
+      lowest: 0,
+      passingRate: 0,
+      passingCount: 0,
+      failingCount: 0,
+      pending: gradesData.length,
+      distribution: {
+        excellent: 0,
+        good: 0,
+        average: 0,
+        poor: 0,
+        failing: 0
+      }
     });
+    return;
+  }
+
+  const highest = Math.max(...scores);
+  const lowest = Math.min(...scores);
+  const average = scores.reduce((a, b) => a + b, 0) / scores.length;
+  const passingScore = assessment?.passingScore || 0;
+  
+  // DETERMINAR EL MAX SCORE CORRECTAMENTE
+  let maxScore = 5; // Valor por defecto para escala 0-5
+  
+  if (assessment?.maxPoints && assessment.maxPoints > 0) {
+    maxScore = assessment.maxPoints;
+    console.log('✅ Usando maxPoints de assessment:', maxScore);
+  } else if (gradedStudents.length > 0 && gradedStudents[0].maxScore) {
+    maxScore = gradedStudents[0].maxScore;
+    console.log('✅ Usando maxScore del primer estudiante:', maxScore);
+  } else {
+    console.log('⚠️ Usando valor por defecto para maxScore:', maxScore);
+  }
+  
+  console.log('📊 Scores:', scores);
+  console.log('🎯 Max Score:', maxScore);
+  console.log('📈 Passing Score:', passingScore);
+  
+  const distribution = {
+    excellent: 0,
+    good: 0,
+    average: 0,
+    poor: 0,
+    failing: 0
   };
+
+  gradedStudents.forEach(g => {
+    // Usar el porcentaje si ya está calculado, o calcularlo
+    let percentage;
+    if (g.percentage !== null && g.percentage !== undefined) {
+      percentage = parseFloat(g.percentage);
+      console.log(`📊 Estudiante ${g.studentName}: Usando porcentaje almacenado: ${percentage}%`);
+    } else {
+      // Calcular porcentaje basado en el score
+      const studentMaxScore = g.maxScore || maxScore;
+      percentage = (g.score / studentMaxScore) * 100;
+      console.log(`📊 Estudiante ${g.studentName}: Score=${g.score}, Max=${studentMaxScore}, Porcentaje=${percentage.toFixed(1)}%`);
+    }
+    
+    // Clasificar basado en el porcentaje
+    if (percentage >= 90) {
+      distribution.excellent++;
+      console.log(`✅ Clasificado como Excelente (${percentage.toFixed(1)}%)`);
+    } else if (percentage >= 80) {
+      distribution.good++;
+      console.log(`✅ Clasificado como Bueno (${percentage.toFixed(1)}%)`);
+    } else if (percentage >= 70) {
+      distribution.average++;
+      console.log(`✅ Clasificado como Aceptable (${percentage.toFixed(1)}%)`);
+    } else if (percentage >= 60) {
+      distribution.poor++;
+      console.log(`✅ Clasificado como Regular (${percentage.toFixed(1)}%)`);
+    } else {
+      distribution.failing++;
+      console.log(`✅ Clasificado como Necesita Mejorar (${percentage.toFixed(1)}%)`);
+    }
+  });
+
+  const passingCount = gradedStudents.filter(g => g.score >= passingScore).length;
+  const failingCount = gradedStudents.length - passingCount;
+  const passingRate = gradedStudents.length > 0 ? (passingCount / gradedStudents.length) * 100 : 0;
+
+  console.log('📊 Distribución final:', distribution);
+  console.log('📈 Passing rate:', passingRate);
+
+  setStats({
+    total: gradesData.length,
+    graded: gradedStudents.length,
+    average: average.toFixed(1),
+    highest: highest.toFixed(1),
+    lowest: lowest.toFixed(1),
+    passingRate: passingRate.toFixed(0),
+    passingCount,
+    failingCount,
+    pending: gradesData.length - gradedStudents.length,
+    distribution
+  });
+};
 
   const getStatusInfo = (status: string) => {
     switch (status) {
@@ -1920,7 +1990,7 @@ export default function AssessmentDetailPage() {
                       <th className="py-4 px-6 text-left text-sm font-bold text-gray-900">
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4" />
-                          Graded At
+                          Graded
                         </div>
                       </th>
                       <th className="py-4 px-6 text-left text-sm font-bold text-gray-900">

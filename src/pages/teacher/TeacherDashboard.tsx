@@ -885,7 +885,7 @@ export default function TeacherDashboard() {
                   {courses.length}
                 </p>
                 <p className="text-xs text-gray-500 mt-1">
-                  {selectedCourse?.name || "Select a course"}
+                  {selectedCourse?.code || "Select a course"}
                 </p>
               </div>
               <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-amber-100 to-amber-100 flex items-center justify-center">

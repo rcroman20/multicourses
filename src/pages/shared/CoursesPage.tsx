@@ -8,6 +8,9 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { calculateCourseRealStats } from "@/utils/gradeCalculations";
 import type { Assessment, Grade } from "@/types/academic";
 import { enrollmentService, deleteCourseCompletely , courseService} from "@/lib/firestore";
+import { fileService } from '@/lib/services/fileService';
+import type { CourseFile } from '@/lib/services/fileService';
+
 
 
 import {
@@ -86,6 +89,8 @@ export default function CoursesPage() {
   const course = courseCode ? courses.find((c) => c.code === courseCode) : null;
   const id = course ? course.id : null;
   const [loading, setLoading] = useState(true);
+  const [courseFiles, setCourseFiles] = useState<CourseFile[]>([]);
+const [loadingFiles, setLoadingFiles] = useState(false);
 
   const sampleFiles = [
     {
@@ -197,6 +202,9 @@ export default function CoursesPage() {
       setFilteredStudents([]);
       return;
     }
+
+
+    
     
     let result = [...enrolledStudents];
     
@@ -265,6 +273,26 @@ export default function CoursesPage() {
     
     setFilteredStudents(result);
   }, [enrolledStudents, searchTerm, sortOrder, gradeFilter, gradeSheets, id]);
+
+  useEffect(() => {
+  const loadCourseFiles = async () => {
+    if (!id) return;
+    
+    setLoadingFiles(true);
+    try {
+      const files = await fileService.getCourseFiles(id);
+      setCourseFiles(files);
+    } catch (error) {
+      console.error("Error loading course files:", error);
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  if (id) {
+    loadCourseFiles();
+  }
+}, [id]);
 
   const loadEnrolledStudents = async () => {
     if (!id) return;
@@ -786,7 +814,7 @@ const handleDeleteCourseSimple = async () => {
           gradeSheets,
         )
       : null;
-
+ 
     return (
       <DashboardLayout title={`${course.name}`} subtitle={`${course.code} • ${course.semester}`}>
         <div className="space-y-2">
@@ -1120,140 +1148,131 @@ const handleDeleteCourseSimple = async () => {
               )}
             </div>
 
-            {/* Course Documents */}
-            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center">
-                    <File className="h-5 w-5 text-purple-500" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900">
-                      Course Documents
-                    </h2>
-                    <p className="text-sm text-gray-500">
-                      PDFs, guides, and study materials
+          {/* Course Documents */}
+<div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
+  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <div className="flex items-center gap-3">
+      <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center">
+        <File className="h-5 w-5 text-purple-500" />
+      </div>
+      <div>
+        <h2 className="text-xl font-bold text-gray-900">
+          Course Documents
+        </h2>
+        <p className="text-sm text-gray-500">
+          PDFs, guides, and study materials
+        </p>
+      </div>
+    </div>
+    {isTeacher && (
+      <Link
+        to={`/courses/${course.code}/files`}
+        className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
+      >
+        <Plus className="h-4 w-4" />
+        Add 
+      </Link>
+    )}
+  </div>
+
+  {loadingFiles ? (
+    <div className="flex items-center justify-center py-8">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
+    </div>
+  ) : courseFiles.length === 0 ? (
+    <div className="text-center py-8 border border-gray-200 rounded-xl">
+      <FolderOpen className="h-12 w-12 mx-auto text-gray-300 mb-3" />
+      <p className="text-gray-900 font-semibold mb-2">No documents available yet</p>
+      <p className="text-sm text-gray-600 max-w-md mx-auto">
+        {isTeacher
+          ? "Upload your first document to share with students"
+          : "Documents will appear here when available"}
+      </p>
+    </div>
+  ) : (
+    <>
+      <div className="space-y-2">
+        {courseFiles.slice(0, 3).map((file) => {
+          const formatFileSize = (bytes: number) => {
+            if (bytes === 0) return "0 Bytes";
+            const k = 1024;
+            const sizes = ["Bytes", "KB", "MB", "GB"];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+          };
+
+          const formatDate = (date: Date) => {
+            return date.toLocaleDateString("en-US", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            });
+          };
+
+          const getFileIcon = (type: string) => {
+            if (type.includes("pdf")) return "📄";
+            if (type.includes("word") || type.includes("document")) return "📝";
+            if (type.includes("excel") || type.includes("spreadsheet")) return "📊";
+            if (type.includes("image")) return "🖼️";
+            if (type.includes("video")) return "🎬";
+            if (type.includes("audio")) return "🎵";
+            if (type.includes("presentation") || type.includes("powerpoint")) return "📊";
+            return "📎";
+          };
+
+          return (
+            <div
+              key={file.id}
+              className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all duration-300 group cursor-pointer"
+              onClick={() => window.open(file.url, "_blank")}
+            >
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-100 to-gray-200 flex items-center justify-center">
+                  <span className="text-xl">
+                    {getFileIcon(file.type)}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors truncate">
+                      {file.name}
                     </p>
                   </div>
+                 
+                  {file.description && (
+                    <p className="text-sm text-gray-600 mt-2 line-clamp-2">
+                      {file.description}
+                    </p>
+                  )}
                 </div>
-                {isTeacher && (
-                  <Link
-                    to={`/courses/${course.code}/files`}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add 
-                  </Link>
-                )}
               </div>
-
-              <div className="space-y-2">
-                {sampleFiles
-                  .map((file) => ({
-                    ...file,
-                    courseId: id,
-                  }))
-                  .filter((file) => file.courseId === id)
-                  .slice(0, 3)
-                  .map((file) => {
-                    const formatFileSize = (bytes: number) => {
-                      if (bytes === 0) return "0 Bytes";
-                      const k = 1024;
-                      const sizes = ["Bytes", "KB", "MB", "GB"];
-                      const i = Math.floor(Math.log(bytes) / Math.log(k));
-                      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-                    };
-
-                    const formatDate = (date: Date) => {
-                      return date.toLocaleDateString("en-US", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      });
-                    };
-
-                    const getFileIcon = (type: string) => {
-                      if (type.includes("pdf")) return "📄";
-                      if (type.includes("word")) return "📝";
-                      if (type.includes("excel")) return "📊";
-                      if (type.includes("image")) return "🖼️";
-                      return "📎";
-                    };
-
-                    return (
-                      <div
-                        key={file.id}
-                        className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all duration-300 group cursor-pointer"
-                        onClick={() => window.open(file.url, "_blank")}
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-100 to-gray-200 flex items-center justify-center">
-                            <span className="text-xl">
-                              {getFileIcon(file.type)}
-                            </span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <p className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors ">
-                                {file.name}
-                              </p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                              <span>{formatFileSize(file.size)}</span>
-                              <span>•</span>
-                              <span>Uploaded {formatDate(file.uploadedAt)}</span>
-                              <span>•</span>
-                              <div className="flex items-center gap-1">
-                                <User className="h-3 w-3" />
-                                <span>{file.uploadedBy}</span>
-                              </div>
-                            </div>
-                            {file.description && (
-                              <p className="text-sm text-gray-600 mt-2 line-clamp-2">
-                                {file.description}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            window.open(file.url, "_blank");
-                          }}
-                          className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                          title="Open document"
-                        >
-                          <ExternalLink className="h-4 w-4" />
-                        </button>
-                      </div>
-                    );
-                  })}
-              </div>
-
-              {sampleFiles.filter((file) => id && file.courseId === id).length === 0 && (
-                <div className="text-center py-8 border border-gray-200 rounded-xl">
-                  <FolderOpen className="h-12 w-12 mx-auto text-gray-300 mb-3" />
-                  <p className="text-gray-900 font-semibold mb-2">No documents available yet</p>
-                  <p className="text-sm text-gray-600 max-w-md mx-auto">
-                    {isTeacher
-                      ? "Upload your first document to share with students"
-                      : "Documents will appear here when available"}
-                  </p>
-                </div>
-              )}
-
-              {sampleFiles.filter((file) => id && file.courseId === id).length > 0 && (
-                <Link
-                  to={`/courses/${course.code}/files`}
-                  className="mt-6 flex items-center justify-center gap-2 text-sm font-semibold text-purple-600 hover:text-purple-700 hover:gap-3 transition-all duration-300"
-                >
-                  View all{" "}
-                  {sampleFiles.filter((file) => id && file.courseId === id).length}{" "}
-                  documents
-                  <ChevronRight className="h-4 w-4" />
-                </Link>
-              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open(file.url, "_blank");
+                }}
+                className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Open document"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </button>
             </div>
+          );
+        })}
+      </div>
+
+      {courseFiles.length > 3 && (
+        <Link
+          to={`/courses/${course.code}/files`}
+          className="mt-6 flex items-center justify-center gap-2 text-sm font-semibold text-purple-600 hover:text-purple-700 hover:gap-3 transition-all duration-300"
+        >
+          View all {courseFiles.length} documents
+          <ChevronRight className="h-4 w-4" />
+        </Link>
+      )}
+    </>
+  )}
+</div>
           </div>
 
           {/* Upcoming Activities & Stats Section */}

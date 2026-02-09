@@ -10,8 +10,7 @@ import {
   orderBy,
   serverTimestamp 
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { firebaseDB, firebaseStorage } from '@/lib/firebase';
+import { firebaseDB } from '@/lib/firebase';
 
 export interface CourseFile {
   id: string;
@@ -24,12 +23,17 @@ export interface CourseFile {
   courseId: string;
   description?: string;
   storagePath: string;
+  periodId?: string | null;
+  weekId?: string | null;
+  order?: number;
 }
 
 class FileService {
   async getCourseFiles(courseId: string): Promise<CourseFile[]> {
     try {
-      const filesRef = collection(firebaseDB, 'courseFiles');
+      console.log('🔍 Buscando archivos para courseId:', courseId);
+      
+      const filesRef = collection(firebaseDB, 'course_files'); // AQUÍ EL CAMBIO IMPORTANTE
       const q = query(
         filesRef,
         where('courseId', '==', courseId),
@@ -37,13 +41,28 @@ class FileService {
       );
       
       const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        uploadedAt: doc.data().uploadedAt?.toDate() || new Date()
-      } as CourseFile));
+      console.log('📁 Total documentos encontrados:', querySnapshot.docs.length);
+      
+      const files = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log('📄 Archivo encontrado:', {
+          id: doc.id,
+          name: data.name,
+          courseId: data.courseId,
+          url: data.url
+        });
+        
+        return {
+          id: doc.id,
+          ...data,
+          uploadedAt: data.uploadedAt?.toDate() || new Date()
+        } as CourseFile;
+      });
+      
+      console.log('✅ Archivos procesados:', files.length);
+      return files;
     } catch (error) {
-      console.error('Error getting course files:', error);
+      console.error('❌ Error getting course files:', error);
       throw error;
     }
   }
@@ -52,79 +71,91 @@ class FileService {
     courseId: string,
     file: File,
     userId: string,
+    userName: string,
     fileName?: string,
     description?: string
   ): Promise<string> {
     try {
-      // Subir archivo a Firebase Storage
-      const storageRef = ref(firebaseStorage, `courses/${courseId}/files/${Date.now()}_${file.name}`);
-      const uploadResult = await uploadBytes(storageRef, file);
-      const downloadURL = await getDownloadURL(uploadResult.ref);
-
-      // Guardar metadata en Firestore
+      // Nota: Para archivos externos (links), no necesitas Firebase Storage
       const fileData = {
         name: fileName || file.name,
-        url: downloadURL,
-        size: file.size,
-        type: file.type,
-        uploadedBy: userId,
+        url: file.name.startsWith('http') ? file.name : '#', // Si es un link directo
+        size: file.size || 0,
+        type: file.type || 'application/octet-stream',
+        uploadedBy: userName,
         uploadedAt: serverTimestamp(),
         courseId,
-        description,
-        storagePath: uploadResult.ref.fullPath
+        description: description || '',
+        storagePath: '',
+        periodId: null,
+        weekId: null,
+        order: 0
       };
 
-      const filesRef = collection(firebaseDB, 'courseFiles');
+      console.log('➕ Subiendo archivo:', fileData);
+
+      const filesRef = collection(firebaseDB, 'course_files'); // AQUÍ TAMBIÉN
       const docRef = await addDoc(filesRef, fileData);
 
+      console.log('✅ Archivo creado con ID:', docRef.id);
       return docRef.id;
     } catch (error) {
-      console.error('Error uploading file:', error);
+      console.error('❌ Error uploading file:', error);
       throw error;
     }
   }
 
-  async deleteFile(courseId: string, fileId: string): Promise<void> {
+  async addExternalLink(
+    courseId: string,
+    linkData: {
+      name: string;
+      url: string;
+      type: string;
+      description?: string;
+      size?: number;
+      periodId?: string;
+      weekId?: string;
+    },
+    userId: string,
+    userName: string
+  ): Promise<string> {
     try {
-      // Obtener información del archivo primero
-      const fileRef = doc(firebaseDB, 'courseFiles', fileId);
-      const fileDoc = await getDocs(query(collection(firebaseDB, 'courseFiles'), where('__name__', '==', fileId)));
-      
-      if (!fileDoc.empty) {
-        const fileData = fileDoc.docs[0].data();
-        
-        // Eliminar de Firebase Storage
-        if (fileData.storagePath) {
-          const storageRef = ref(firebaseStorage, fileData.storagePath);
-          await deleteObject(storageRef);
-        }
+      const fileData = {
+        name: linkData.name,
+        url: linkData.url,
+        size: linkData.size || 0,
+        type: linkData.type,
+        uploadedBy: userName,
+        uploadedAt: serverTimestamp(),
+        courseId,
+        description: linkData.description || '',
+        storagePath: '', // No hay archivo en storage
+        periodId: linkData.periodId || null,
+        weekId: linkData.weekId || null,
+        order: 0
+      };
 
-        // Eliminar de Firestore
-        await deleteDoc(fileRef);
-      }
+      console.log('➕ Agregando link externo:', fileData);
+
+      const filesRef = collection(firebaseDB, 'course_files'); // AQUÍ TAMBIÉN
+      const docRef = await addDoc(filesRef, fileData);
+
+      console.log('✅ Link creado con ID:', docRef.id);
+      return docRef.id;
     } catch (error) {
-      console.error('Error deleting file:', error);
+      console.error('❌ Error adding external link:', error);
       throw error;
     }
   }
 
-  async getFileMetadata(fileId: string): Promise<CourseFile | null> {
+  async deleteFile(fileId: string): Promise<void> {
     try {
-      const filesRef = collection(firebaseDB, 'courseFiles');
-      const q = query(filesRef, where('__name__', '==', fileId));
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        const doc = querySnapshot.docs[0];
-        return {
-          id: doc.id,
-          ...doc.data(),
-          uploadedAt: doc.data().uploadedAt?.toDate() || new Date()
-        } as CourseFile;
-      }
-      return null;
+      console.log('🗑️ Eliminando archivo con ID:', fileId);
+      const fileRef = doc(firebaseDB, 'course_files', fileId); // AQUÍ TAMBIÉN
+      await deleteDoc(fileRef);
+      console.log('✅ Archivo eliminado');
     } catch (error) {
-      console.error('Error getting file metadata:', error);
+      console.error('❌ Error deleting file:', error);
       throw error;
     }
   }

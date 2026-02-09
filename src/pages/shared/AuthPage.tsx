@@ -160,7 +160,7 @@ const ForgotPasswordModal = ({
         onClick={(e) => e.stopPropagation()} // Prevenir clics dentro del modal
       >
         <div className="p-6">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-2">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center">
                 <Target className="h-5 w-5 text-purple-500" />
@@ -183,12 +183,12 @@ const ForgotPasswordModal = ({
             </button>
           </div>
 
-          <p className="text-gray-600 mb-6 text-sm">
+          <p className="text-gray-600 mb-2 text-sm">
             Enter your email address and we'll send you instructions to reset
             your password.
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-2">
             {error && (
               <div className="flex items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-red-50 to-red-100 border border-red-200 text-red-700 text-sm animate-in fade-in">
                 <AlertCircle className="h-5 w-5 shrink-0" />
@@ -402,18 +402,14 @@ export default function AuthPage() {
 
   return (
     <>
-      <div className="min-h-screen bg-gradient-to-br from-blue-50/50 to-cyan-50/50 flex">
+      <div className="min-h-screen bg-white flex">
         {/* Left side - Branding - SOLO AZUL */}
         <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
           <div className="absolute inset-0 bg-blue-600" />
-          <div className="absolute inset-0 opacity-10">
-            <div className="absolute top-20 left-20 w-72 h-72 rounded-full border-2 border-white/20" />
-            <div className="absolute bottom-20 right-20 w-96 h-96 rounded-full border-2 border-white/20" />
-            <div className="absolute top-1/2 left-1/3 w-48 h-48 rounded-full border-2 border-white/20" />
-          </div>
+        
 
           <div className="relative z-10 flex flex-col justify-center p-12 text-white">
-            <div className="flex items-center gap-4 mb-8">
+            <div className="flex items-center gap-4 mb-6">
               <div className="h-16 w-16 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center">
                 <GraduationCap className="h-8 w-8" />
               </div>
@@ -427,19 +423,19 @@ export default function AuthPage() {
               </div>
             </div>
 
-            <h2 className="text-4xl font-bold tracking-tight mb-6">
+            <h2 className="text-4xl font-bold tracking-tight mb-4">
               Digital Academic Platform
               <span className="block text-2xl font-semibold mt-2 text-white/90">
                 Modern • Vibrant • Professional
               </span>
             </h2>
 
-            <p className="text-lg text-white/90 mb-8 max-w-md">
+            <p className="text-lg text-white/90 mb-4 max-w-md">
               Manage your courses, track your progress, and access learning
               materials all in one place.
             </p>
 
-            <div className="space-y-4">
+            <div className="space-y-2">
               <div className="flex items-center gap-3 text-white/90">
                 <div className="h-10 w-10 rounded-lg bg-white/10 flex items-center justify-center">
                   <BookOpen className="h-5 w-5" />
@@ -459,16 +455,18 @@ export default function AuthPage() {
                 <span>Modern interface experience</span>
               </div>
             </div>
-           
+          
           </div>
+
+      
         </div>
 
         {/* Right side - Login form */}
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="w-full max-w-md">
             {/* Mobile branding */}
-            <div className="lg:hidden text-center mb-8">
-              <div className="inline-flex items-center justify-center h-16 w-16 rounded-xl bg-blue-600 text-white mb-4">
+            <div className="lg:hidden text-center mb-2">
+              <div className="inline-flex items-center justify-center h-16 w-16 rounded-xl bg-blue-600 text-white mb-2">
                 <GraduationCap className="h-8 w-8" />
               </div>
               <h1 className="text-2xl font-bold text-gray-900">
@@ -479,9 +477,9 @@ export default function AuthPage() {
               </p>
             </div>
 
-            <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-lg">
-              <div className="text-center mb-8">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-lg">
+              <div className="text-center mb-2">
+                <h2 className="text-2xl font-bold text-gray-900 mb-0">
                   {isLogin ? "Welcome Back!" : "Create Account"}
                 </h2>
                 <p className="text-gray-500">
@@ -491,7 +489,7 @@ export default function AuthPage() {
 
               <form
                 onSubmit={isLogin ? handleLoginSubmit : handleRegisterSubmit}
-                className="space-y-5"
+                className="space-y-2"
               >
                 {error && (
                   <div className="flex items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-red-50 to-red-100 border border-red-200 text-red-700 text-sm">
@@ -660,7 +658,7 @@ export default function AuthPage() {
               </form>
 
               {/* Switch between login and register */}
-              <div className="text-center mt-6 pt-6 border-t border-gray-200">
+              <div className="text-center mt-2 pt-2 border-t border-gray-200">
                 <button
                   onClick={() => {
                     setIsLogin(!isLogin);
@@ -682,12 +680,7 @@ export default function AuthPage() {
               </div>
             </div>
 
-            {/* Footer */}
-            <div className="mt-6 text-center">
-              <p className="text-xs text-gray-500">
-                By signing in, you agree to our Terms and Privacy Policy
-              </p>
-            </div>
+            
           </div>
         </div>
       </div>
