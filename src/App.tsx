@@ -178,6 +178,9 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+
+
+
               <Route
                 path="/students/:studentId/enroll"
                 element={

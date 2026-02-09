@@ -272,7 +272,7 @@ export default function EnrollStudentPage() {
         subtitle="Loading student information..."
       >
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-4">
+          <div className="text-center space-y-2">
             <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto" />
             <div className="space-y-2">
               <p className="text-lg font-semibold text-gray-900">Loading student data</p>
@@ -315,7 +315,7 @@ export default function EnrollStudentPage() {
       title="Enroll Student in Courses"
       subtitle={`Manage course enrollment for ${student.name}`}
     >
-      <div className="space-y-6">
+      <div className="space-y-2">
         {/* Back button and Student Info */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <button
@@ -536,7 +536,7 @@ export default function EnrollStudentPage() {
                                 <p className="text-xs text-gray-500 mt-1 line-clamp-2" title={course.description}>
                                   {course.description}
                                 </p>
-                              )}
+                              )} 
                             </div>
                           </div>
                         </td>

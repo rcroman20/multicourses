@@ -1051,7 +1051,7 @@ export default function AssessmentDetailPage() {
     return (
       <DashboardLayout title="Loading Assessment...">
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-4">
+          <div className="text-center space-y-2">
             <div className="h-12 w-12 mx-auto rounded-2xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
             </div>
@@ -1069,7 +1069,7 @@ export default function AssessmentDetailPage() {
     return (
       <DashboardLayout title="Assessment not found">
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-4 max-w-md">
+          <div className="text-center space-y-2 max-w-md">
             <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-red-100 to-pink-100 flex items-center justify-center border border-red-200">
               <AlertCircle className="h-10 w-10 text-red-600" />
             </div>
@@ -1108,30 +1108,7 @@ export default function AssessmentDetailPage() {
       subtitle={`${course.name} • ${course.code}`}
     >
       <div className="space-y-2">
-        {/* Navegación superior - DISEÑO MODERNO */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        
-          
-          {isTeacher && (
-            <div className="flex flex-wrap gap-3">
-              <Link
-                to={`/courses/${courseCode}/assessments/${assessmentId}/grade`}
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-white hover:shadow-lg transition-all duration-300 font-medium shadow-sm"
-              >
-                <CheckCircle className="h-5 w-5" />
-                Grade Assessment
-              </Link>
-              
-              <Link
-                to={`/courses/${courseCode}/assessments/${assessmentId}/editar`}
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 text-white hover:shadow-lg transition-all duration-300 font-medium shadow-sm"
-              >
-                <Edit className="h-5 w-5" />
-                Edit Assessment
-              </Link>
-            </div>
-          )}
-        </div>
+    
 
         {/* Tabs de navegación - DISEÑO MODERNO */}
         <div className="bg-white border border-gray-200 rounded-2xl p-2 shadow-sm">
@@ -1193,7 +1170,7 @@ export default function AssessmentDetailPage() {
                       ? 'bg-gradient-to-r from-emerald-100 to-green-100 text-emerald-800 border border-emerald-200' 
                       : 'bg-gradient-to-r from-amber-100 to-orange-100 text-amber-800 border border-amber-200'
                   }`}>
-                    {studentSubmission.status === 'submitted' ? 'Sent' : 'Draft'}
+                    {studentSubmission.status === 'submitted' ? 'Sent' : 'Sent'}
                   </span>
                 )}
               </button>
@@ -1205,9 +1182,67 @@ export default function AssessmentDetailPage() {
         {activeTab === 'overview' && (
           <div className="space-y-2">
             {/* Tarjeta principal */}
-            <div className="modern-card">
+            <div >
+                 {/* Hoja de calificaciones (profesores) */}
+            {isTeacher && assessment.gradeSheetId && gradeSheet && (
+              <div className="modern-card mb-2">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-2">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+                      <FileSpreadsheet className="h-5 w-5 text-blue-600" />
+                      Linked Grade Sheet
+                    </h3>
+                    <p className="text-gray-600">
+                      This assessment is linked to a grade sheet for tracking results.
+                    </p>
+                  </div>
+                  
+                 
+                </div>
+                
+                <div className="bg-gradient-to-br from-blue-50/50 to-cyan-50/50 border border-blue-100 rounded-xl p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="flex items-center gap-4">
+                      <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center shadow-sm">
+                        <FileSpreadsheet className="h-4 w-4 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm text-blue-600 font-bold">Grade Sheet</p>
+                        <p className="font-bold text-gray-900 line-clamp-2 text-sm">{gradeSheet.title}</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-4">
+                      <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-emerald-100 to-green-100 flex items-center justify-center shadow-sm">
+                        <Award className="h-4 w-4 text-emerald-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm text-emerald-600 font-bold">Activities</p>
+                        <p className="font-bold text-gray-900 text-sm">
+                          {gradeSheet.activities?.length || 0} activities
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-4">
+                      <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center shadow-sm">
+                        <Users className="h-4 w-4 text-purple-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm text-purple-600 font-bold">Students</p>
+                        <p className="font-bold text-gray-900 text-sm">
+                          {gradeSheet.students?.length || 0} students
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                
                 {/* Columna izquierda */}
+
                 <div className="lg:col-span-2 space-y-2">
                   {/* Descripción */}
                   {assessment.description && (
@@ -1222,14 +1257,21 @@ export default function AssessmentDetailPage() {
                           <br /><br />
                           Review materials related to "{assessment.name}" before taking the {typeName.toLowerCase()}.
                         </p>
+
                       </div>
+
                     </div>
+                    
                   )}
+
+
+
+                 
 
                   {/* Estado de entrega para estudiantes */}
                   {isStudent && assessment.assessmentType === 'delivery' && (
                     <div className={`modern-card ${submissionStatusInfo.status === 'closed' ? 'border-red-200' : submissionStatusInfo.status === 'not_started' ? 'border-amber-200' : 'border-blue-200'}`}>
-                      <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+                      <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
                         <ClipboardCheck className="h-5 w-5 text-blue-600" />
                         Submission Instructions
                       </h3>
@@ -1281,8 +1323,8 @@ export default function AssessmentDetailPage() {
                 <div className="space-y-2">
                   {/* Información General */}
                   <div className="modern-card">
-                    <h3 className="text-lg font-bold text-gray-900 mb-4">General Information</h3>
-                    <div className="space-y-4">
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">General Information</h3>
+                    <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-gray-600">Status</span>
                         <span className={`px-3 py-1.5 rounded-lg text-sm font-bold ${statusInfo.color}`}>
@@ -1324,15 +1366,28 @@ export default function AssessmentDetailPage() {
                         </div>
                       )}
                     </div>
+                    {/* Navegación superior - DISEÑO MODERNO */}
+<div className="flex justify-center pt-3">
+  {isTeacher && (
+      <Link
+        to={`/courses/${courseCode}/assessments/${assessmentId}/grade`}
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-white hover:shadow-lg transition-all duration-300 font-medium shadow-sm "
+      >
+        <CheckCircle className="h-3 w-3" />
+        Grade
+      </Link>
+      
+  )}
+</div>
                   </div>
 
                   {/* Fechas importantes */}
                   <div className="modern-card">
-                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
                       <CalendarDays className="h-5 w-5 text-blue-600" />
                       Important Dates
                     </h3>
-                    <div className="space-y-4">
+                    <div className="space-y-2">
                       {/* Fecha de inicio */}
                       {assessment.assessmentType === 'delivery' && startDate && (
                         <div>
@@ -1388,7 +1443,7 @@ export default function AssessmentDetailPage() {
             {/* Archivos adjuntos */}
             {attachments.length > 0 && (
               <div className="modern-card">
-                <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+                <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
                   <Paperclip className="h-5 w-5 text-purple-600" />
                   Attached Files
                 </h3>
@@ -1425,68 +1480,7 @@ export default function AssessmentDetailPage() {
               </div>
             )}
 
-            {/* Hoja de calificaciones (profesores) */}
-            {isTeacher && assessment.gradeSheetId && gradeSheet && (
-              <div className="modern-card">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-                      <FileSpreadsheet className="h-5 w-5 text-blue-600" />
-                      Linked Grade Sheet
-                    </h3>
-                    <p className="text-gray-600">
-                      This assessment is linked to a grade sheet for tracking results.
-                    </p>
-                  </div>
-                  
-                  <Link
-                    to={`/grades`}
-                    className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-blue-100 to-cyan-100 text-blue-700 hover:from-blue-200 hover:to-cyan-200 hover:text-blue-800 transition-all duration-300 font-medium border border-blue-200"
-                  >
-                    <ExternalLink className="h-5 w-5" />
-                    View Grades
-                  </Link>
-                </div>
-                
-                <div className="bg-gradient-to-br from-blue-50/50 to-cyan-50/50 border border-blue-100 rounded-xl p-6">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="flex items-center gap-4">
-                      <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center shadow-sm">
-                        <FileSpreadsheet className="h-6 w-6 text-blue-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-blue-600 font-bold">Grade Sheet</p>
-                        <p className="font-bold text-gray-900 line-clamp-2">{gradeSheet.title}</p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-4">
-                      <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-emerald-100 to-green-100 flex items-center justify-center shadow-sm">
-                        <Award className="h-6 w-6 text-emerald-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-emerald-600 font-bold">Activities</p>
-                        <p className="font-bold text-gray-900">
-                          {gradeSheet.activities?.length || 0} activities
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-4">
-                      <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center shadow-sm">
-                        <Users className="h-6 w-6 text-purple-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-purple-600 font-bold">Students</p>
-                        <p className="font-bold text-gray-900">
-                          {gradeSheet.students?.length || 0} students
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+         
           </div>
         )}
 
@@ -1494,7 +1488,7 @@ export default function AssessmentDetailPage() {
         {activeTab === 'submission' && isStudent && assessment.assessmentType === 'delivery' && (
           <div className="space-y-2">
             <div className="modern-card">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-2">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
                     <Upload className="h-6 w-6 text-blue-600" />
@@ -1590,9 +1584,8 @@ export default function AssessmentDetailPage() {
               )}
 
               {/* Editor de texto */}
-
 {assessment.deliveryType === 'text' && (
-  <div className="space-y-4">
+  <div className="space-y-2">
     <div className="flex items-center justify-between">
       <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
         <Type className="h-5 w-5 text-blue-600" />
@@ -1608,8 +1601,7 @@ export default function AssessmentDetailPage() {
         )}
       </div>
     </div>
-    
-    <div className="border border-gray-300 rounded-xl overflow-hidden hover:border-blue-300 transition-colors">
+  <div className="border border-gray-300 rounded-xl overflow-hidden hover:border-blue-300 transition-colors">
       {isEditingSubmission || !studentSubmission ? (
         <>
           <div className="relative">
@@ -1694,13 +1686,44 @@ export default function AssessmentDetailPage() {
         </>
       ) : (
         <>
-          <div className="p-5 bg-gradient-to-br from-gray-50 to-white">
+       <div className="p-5 bg-gradient-to-br from-gray-50 to-white">
             <div className="prose max-w-none">
               <div className="whitespace-pre-line text-gray-700 min-h-[120px]">
                 {studentSubmission.content}
               </div>
             </div>
           </div>
+
+{/* MOSTRAR FEEDBACK DEL PROFESOR - NUEVA SECCIÓN */}
+          {studentSubmission.feedback && (
+            <div className="border-t border-gray-300 bg-gradient-to-br from-purple-50/50 to-pink-50/50 p-5">
+              <div className="flex items-start gap-3">
+                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center flex-shrink-0">
+                  <MessageSquare className="h-5 w-5 text-purple-600" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-bold text-gray-900 flex items-center gap-2">
+                      Teacher Feedback
+                    
+                    </h4>
+                    {studentSubmission.gradedAt && (
+                      <span className="text-xs text-gray-500">
+                        {format(new Date(studentSubmission.gradedAt), "dd/MM/yyyy HH:mm")}
+                      </span>
+                    )}
+                  </div>
+                  <div className="bg-white border border-purple-200 rounded-lg p-4 shadow-sm">
+                    <p className="text-gray-700 whitespace-pre-line">
+                      {studentSubmission.feedback}
+                    </p>
+                  </div>
+               
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div className="border-t border-gray-300 bg-gradient-to-r from-gray-50 to-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
             <div className="text-sm text-gray-500">
               {submissionStatus === 'submitted' 
@@ -1723,9 +1746,12 @@ export default function AssessmentDetailPage() {
       )}
     </div>
     
+
+         
+    
     {/* Información de la actividad */}
     <div className="bg-gradient-to-br from-blue-50/50 to-cyan-50/50 border border-blue-100 rounded-xl p-5">
-      <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+      <h4 className="font-bold text-gray-900 mb-2 flex items-center gap-2">
         <Info className="h-4 w-4 text-blue-600" />
         Activity Information
       </h4>
@@ -1772,9 +1798,9 @@ export default function AssessmentDetailPage() {
               {/* Si no es una actividad de entrega de texto */}
               {assessment.deliveryType !== 'text' && (
                 <div className="text-center py-12">
-                  <FileUp className="h-16 w-16 mx-auto text-gray-300 mb-4" />
+                  <FileUp className="h-16 w-16 mx-auto text-gray-300 mb-2" />
                   <h3 className="text-lg font-bold text-gray-900 mb-2">Unsupported Delivery Type</h3>
-                  <p className="text-gray-500 max-w-md mx-auto mb-6">
+                  <p className="text-gray-500 max-w-md mx-auto mb-2">
                     This activity requires a different delivery type than text. Please contact the teacher for more information.
                   </p>
                 </div>
@@ -1787,7 +1813,7 @@ export default function AssessmentDetailPage() {
         {activeTab === 'grades' && isTeacher && (
           <div className="space-y-2">
             <div className="modern-card">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-2">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
                     <Award className="h-6 w-6 text-emerald-600" />
@@ -1809,16 +1835,16 @@ export default function AssessmentDetailPage() {
               
               {/* Estadísticas */}
               {stats && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-2">
                   <div className="bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 rounded-xl p-5">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-gray-700 font-bold">Total Students</p>
-                        <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
+                        <p className="text-xl font-bold text-gray-900">{stats.total}</p>
                       </div>
-                      <Users className="h-8 w-8 text-gray-600" />
+                      <Users className="h-6 w-6 text-gray-600" />
                     </div>
-                    <div className="mt-4 flex items-center gap-2 text-sm">
+                    <div className="mt-2 flex items-center gap-2 text-sm">
                       <span className="text-emerald-600 font-bold">{stats.graded} graded</span>
                       <span className="text-gray-400">•</span>
                       <span className="text-amber-600">{stats.pending} pending</span>
@@ -1829,11 +1855,11 @@ export default function AssessmentDetailPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-emerald-700 font-bold">Average Score</p>
-                        <p className="text-2xl font-bold text-emerald-900">{stats.average}</p>
+                        <p className="text-xl font-bold text-emerald-900">{stats.average}</p>
                       </div>
-                      <BarChart3 className="h-8 w-8 text-emerald-600" />
+                      <BarChart3 className="h-6 w-6  text-emerald-600" />
                     </div>
-                    <div className="mt-4 text-sm text-emerald-600">
+                    <div className="mt-2 text-sm text-emerald-600">
                       out of {assessment.maxPoints} points
                     </div>
                   </div>
@@ -1842,11 +1868,11 @@ export default function AssessmentDetailPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-purple-700 font-bold">Passing Rate</p>
-                        <p className="text-2xl font-bold text-purple-900">{stats.passingRate}%</p>
+                        <p className="text-xl font-bold text-purple-900">{stats.passingRate}%</p>
                       </div>
-                      <Percent className="h-8 w-8 text-purple-600" />
+                      <Percent className="h-6 w-6  text-purple-600" />
                     </div>
-                    <div className="mt-4 flex items-center gap-2 text-sm">
+                    <div className="mt-2 flex items-center gap-2 text-sm">
                       <span className="text-emerald-600 font-bold">{stats.passingCount} passed</span>
                       <span className="text-gray-400">•</span>
                       <span className="text-red-600">{stats.failingCount} failed</span>
@@ -1857,11 +1883,11 @@ export default function AssessmentDetailPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-amber-700 font-bold">Score Range</p>
-                        <p className="text-2xl font-bold text-amber-900">{stats.highest} / {stats.lowest}</p>
+                        <p className="text-xl font-bold text-amber-900">{stats.highest} / {stats.lowest}</p>
                       </div>
-                      <TrendingUp className="h-8 w-8 text-amber-600" />
+                      <TrendingUp className="h-6 w-6 text-amber-600" />
                     </div>
-                    <div className="mt-4 text-sm text-amber-600">
+                    <div className="mt-2 text-sm text-amber-600">
                       Highest / Lowest
                     </div>
                   </div>
@@ -1992,7 +2018,7 @@ export default function AssessmentDetailPage() {
                         </td>
 
                         <td className="py-4 px-6">
-                          <p className="text-sm text-gray-600 max-w-xs truncate">
+                          <p className="text-sm text-gray-600 max-w-xs line-clamp-3">
                             {grade.comment || (
                               <span className="text-gray-400 italic text-sm">No comments</span>
                             )}
@@ -2051,7 +2077,7 @@ export default function AssessmentDetailPage() {
         {activeTab === 'analytics' && isTeacher && stats && (
           <div className="space-y-2">
             <div className="modern-card">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-2">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                     <LineChart className="h-6 w-6 text-blue-600" />
@@ -2084,7 +2110,7 @@ export default function AssessmentDetailPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-blue-700 font-bold">Promedio</p>
-                      <p className="text-2xl font-bold text-blue-900">{stats.average}</p>
+                      <p className="text-xl font-bold text-blue-900">{stats.average}</p>
                     </div>
                     <div className="h-10 w-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
                       <BarChart3 className="h-5 w-5 text-blue-600" />
@@ -2099,7 +2125,7 @@ export default function AssessmentDetailPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-emerald-700 font-bold">Aprobación</p>
-                      <p className="text-2xl font-bold text-emerald-900">{stats.passingRate}%</p>
+                      <p className="text-xl font-bold text-emerald-900">{stats.passingRate}%</p>
                     </div>
                     <div className="h-10 w-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
                       <Percent className="h-5 w-5 text-emerald-600" />
@@ -2114,7 +2140,7 @@ export default function AssessmentDetailPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-amber-700 font-bold">Más Alta</p>
-                      <p className="text-2xl font-bold text-amber-900">{stats.highest}</p>
+                      <p className="text-xl font-bold text-amber-900">{stats.highest}</p>
                     </div>
                     <div className="h-10 w-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
                       <TrendingUp className="h-5 w-5 text-amber-600" />
@@ -2129,7 +2155,7 @@ export default function AssessmentDetailPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-red-700 font-bold">Más Baja</p>
-                      <p className="text-2xl font-bold text-red-900">{stats.lowest}</p>
+                      <p className="text-xl font-bold text-red-900">{stats.lowest}</p>
                     </div>
                     <div className="h-10 w-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
                       <TrendingUp className="h-5 w-5 text-red-600 rotate-180" />
@@ -2222,194 +2248,11 @@ export default function AssessmentDetailPage() {
                 </div>
               )}
 
-              {/* Comparación con puntaje de aprobación */}
-              {stats.graded > 0 && (
-                <div className="mt-8 pt-8 border-t border-gray-200">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                    <Target className="h-5 w-5 text-red-600" />
-                    Comparación con Puntaje de Aprobación ({assessment.passingScore} pts)
-                  </h3>
+           
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 rounded-xl p-5">
-                      <div className="flex items-center justify-between mb-3">
-                        <div>
-                          <p className="text-sm text-emerald-700 font-bold">Aprobados</p>
-                          <p className="text-2xl font-bold text-emerald-900">{stats.passingCount}</p>
-                        </div>
-                        <CheckCircle className="h-8 w-8 text-emerald-600" />
-                      </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-emerald-600">Porcentaje</span>
-                          <span className="font-bold text-emerald-700">{stats.passingRate}%</span>
-                        </div>
-                        <div className="h-2 bg-emerald-200 rounded-full overflow-hidden">
-                          <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${stats.passingRate}%` }} />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-xl p-5">
-                      <div className="flex items-center justify-between mb-3">
-                        <div>
-                          <p className="text-sm text-red-700 font-bold">No Aprobados</p>
-                          <p className="text-2xl font-bold text-red-900">{stats.failingCount}</p>
-                        </div>
-                        <XCircle className="h-8 w-8 text-red-600" />
-                      </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-red-600">Porcentaje</span>
-                          <span className="font-bold text-red-700">
-                            {stats.graded > 0 ? (100 - parseFloat(stats.passingRate)).toFixed(0) : 0}%
-                          </span>
-                        </div>
-                        <div className="h-2 bg-red-200 rounded-full overflow-hidden">
-                          <div className="h-full bg-red-500 rounded-full" style={{ width: `${stats.graded > 0 ? 100 - parseFloat(stats.passingRate) : 0}%` }} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Acciones rápidas */}
-              <div className="mt-8 pt-8 border-t border-gray-200">
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <Link
-                    to={`/courses/${courseCode}/assessments/${assessmentId}/grade`}
-                    className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-white hover:shadow-lg transition-all duration-300 font-bold"
-                  >
-                    <Edit className="h-5 w-5" />
-                    Ajustar Calificaciones
-                  </Link>
-
-                  <button
-                    onClick={handleExportGrades}
-                    className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors font-bold"
-                  >
-                    <Download className="h-5 w-5" />
-                    Exportar Análisis
-                  </button>
-                </div>
-              </div>
             </div>
 
-            {/* Insights y recomendaciones */}
-            {stats.graded > 0 && (
-              <div className="modern-card">
-                <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                  <Star className="h-5 w-5 text-amber-600" />
-                  Recomendaciones y Análisis
-                </h3>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {parseFloat(stats.average) >= 80 ? (
-                    <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 rounded-xl p-4">
-                      <div className="flex items-start gap-3">
-                        <Trophy className="h-5 w-5 text-emerald-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <h4 className="font-bold text-emerald-900 mb-1">Buen Desempeño</h4>
-                          <p className="text-sm text-emerald-800">
-                            El promedio de {stats.average} indica que la mayoría de estudiantes comprendió el contenido.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : parseFloat(stats.average) >= 60 ? (
-                    <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-4">
-                      <div className="flex items-start gap-3">
-                        <BarChart3 className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <h4 className="font-bold text-blue-900 mb-1">Desempeño Regular</h4>
-                          <p className="text-sm text-blue-800">
-                            Considere repasar los temas donde los estudiantes tuvieron mayor dificultad.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="bg-gradient-to-br from-amber-50 to-amber-100 border border-amber-200 rounded-xl p-4">
-                      <div className="flex items-start gap-3">
-                        <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <h4 className="font-bold text-amber-900 mb-1">Necesita Atención</h4>
-                          <p className="text-sm text-amber-800">
-                            El promedio bajo sugiere que el contenido no fue comprendido adecuadamente.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {parseFloat(stats.passingRate) >= 80 ? (
-                    <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 rounded-xl p-4">
-                      <div className="flex items-start gap-3">
-                        <CheckCircle className="h-5 w-5 text-emerald-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <h4 className="font-bold text-emerald-900 mb-1">Alta Aprobación</h4>
-                          <p className="text-sm text-emerald-800">
-                            {stats.passingRate}% de aprobación indica que el puntaje mínimo fue adecuado.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-xl p-4">
-                      <div className="flex items-start gap-3">
-                        <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <h4 className="font-bold text-red-900 mb-1">Baja Aprobación</h4>
-                          <p className="text-sm text-red-800">
-                            Considere revisar el puntaje de aprobación o ofrecer recuperación.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {stats.distribution.failing > stats.graded * 0.5 ? (
-                    <div className="bg-gradient-to-br from-red-50 to-red-100 border border-red-200 rounded-xl p-4">
-                      <div className="flex items-start gap-3">
-                        <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <h4 className="font-bold text-red-900 mb-1">Distribución Desigual</h4>
-                          <p className="text-sm text-red-800">
-                            Más del 50% de estudiantes necesita mejorar. Considere reforzar el contenido.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : stats.distribution.excellent + stats.distribution.good > stats.graded * 0.6 ? (
-                    <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 rounded-xl p-4">
-                      <div className="flex items-start gap-3">
-                        <TrendingUp className="h-5 w-5 text-emerald-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <h4 className="font-bold text-emerald-900 mb-1">Distribución Positiva</h4>
-                          <p className="text-sm text-emerald-800">
-                            La mayoría de estudiantes obtuvo calificaciones buenas o excelentes.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-4">
-                      <div className="flex items-start gap-3">
-                        <Activity className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <h4 className="font-bold text-blue-900 mb-1">Distribución Equilibrada</h4>
-                          <p className="text-sm text-blue-800">
-                            Las calificaciones están bien distribuidas entre los diferentes rangos.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
+      
             {/* Si no hay estudiantes calificados */}
             {stats.graded === 0 && (
               <div className="modern-card">

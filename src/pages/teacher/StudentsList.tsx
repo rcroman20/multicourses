@@ -306,7 +306,7 @@ export default function StudentsPage() {
         subtitle="Manage students and teachers in the system"
       >
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-4">
+          <div className="text-center space-y-2">
             <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto" />
             <div className="space-y-2">
               <p className="text-lg font-semibold text-gray-900">Loading students</p>
@@ -325,7 +325,7 @@ export default function StudentsPage() {
       title="Students Management"
       subtitle="Manage students and teachers in the system"
     >
-      <div className="space-y-6">
+      <div className="space-y-2">
         {/* Stats Header */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-100 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow duration-300">
@@ -551,7 +551,7 @@ export default function StudentsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-4">
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                           <div className="flex items-center gap-2 rounded-lg hover:bg-gray-50 transition-colors">
                             <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-50 to-cyan-50 flex items-center justify-center">
                               <Mail className="h-4 w-4 text-blue-500" />
@@ -661,7 +661,7 @@ export default function StudentsPage() {
             )}
 
             <form onSubmit={handleAddStudent} className="p-6">
-              <div className="space-y-5">
+              <div className="space-y-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     ID Number *

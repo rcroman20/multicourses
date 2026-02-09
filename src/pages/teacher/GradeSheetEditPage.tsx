@@ -360,7 +360,7 @@ setIsPublished(data.isPublished || false);
       navigate(`/courses/${courseCode}/grade-sheets`);
       
     } catch (error) {
-      console.error('Error updating grade sheet:', error);
+      console.error('Error updating grade sheet:', error); 
       toast.error('Failed to update grade sheet');
     } finally {
       setIsSaving(false);
@@ -452,7 +452,7 @@ setIsPublished(data.isPublished || false);
       title="Edit Grade Sheet"
       subtitle={`Editing: ${gradeSheet.title}`}
     >
-      <div className="space-y-6">
+      <div className="space-y-2">
         {/* Header */}
         <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -466,14 +466,13 @@ setIsPublished(data.isPublished || false);
                   Back to Grade Sheets
                 </Link>
               </div>
-              <h1 className="text-2xl font-bold text-gray-900">Edit Grade Sheet</h1>
               <p className="text-gray-600 mt-1">{courseName} ({courseCode})</p>
             </div>
             
             <div className="flex items-center gap-3">
               <Button
                 onClick={togglePublish}
-                variant={isPublished ? "outline" : "default"}
+                variant={isPublished ? "default" : "default"}
                 className={cn(
                   "flex items-center gap-2",
                   isPublished ? "bg-green-50 text-green-700 hover:bg-green-100 border-green-200" : ""
@@ -518,7 +517,7 @@ setIsPublished(data.isPublished || false);
         {/* Main Form */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Basic Information */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-2 space-y-2">
             {/* Grade Sheet Information */}
             <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
               <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -526,7 +525,7 @@ setIsPublished(data.isPublished || false);
                 Grade Sheet Information
               </h2>
               
-              <div className="space-y-4">
+              <div className="space-y-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Title *
@@ -603,7 +602,7 @@ setIsPublished(data.isPublished || false);
                 </Button>
               </div>
               
-              <div className="space-y-4">
+              <div className="space-y-2">
                 {activities.map((activity, index) => (
                   <div
                     key={activity.id}
@@ -728,12 +727,12 @@ setIsPublished(data.isPublished || false);
           </div>
 
           {/* Right Column - Sidebar */}
-          <div className="space-y-6">
+          <div className="space-y-2">
             {/* Summary Card */}
             <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
               <h3 className="font-semibold mb-4">Summary</h3>
               
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Course:</span>
                   <span className="font-medium">{courseName}</span>

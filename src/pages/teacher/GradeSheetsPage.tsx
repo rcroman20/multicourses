@@ -178,7 +178,7 @@ interface StudentAverage {
   };
   overallAverage: number;
   approved: boolean;
-  completedSheets: number;
+  completedSheets: number; 
   totalSheets: number;
 } 
 
@@ -1100,7 +1100,7 @@ export default function GradeSheetsPage() {
       title="Hojas de Calificaciones"
       subtitle="Gestiona y califica a tus estudiantes"
     >
-      <div className="space-y-6 fade-in-up">
+      <div className="space-y-2 fade-in-up">
         {isSyncing && (
           <div className="modern-card bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-100 p-3 rounded-xl">
             <div className="flex items-center gap-2">
@@ -1120,14 +1120,10 @@ export default function GradeSheetsPage() {
                 <p className="text-xs font-semibold mb-1 text-center md:text-left text-blue-600 tracking-wide">
                   Hojas {selectedCourseFilter !== "all" ? "del Curso" : "Totales"}
                 </p>
-                <p className="text-2xl md:text-3xl font-bold text-gray-900 text-center md:text-left">
+                <p className="text-xl md:text-2xl font-bold text-gray-900 text-center md:text-left">
                   {filteredGradeSheets.length}
                 </p>
-                {selectedCourseFilter !== "all" && (
-                  <p className="text-xs text-gray-600 mt-1">
-                    de {gradeSheets.length} totales
-                  </p>
-                )}
+              
               </div>
               <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center">
                 <FileSpreadsheet className="h-6 w-6 text-blue-500" />
@@ -1137,21 +1133,14 @@ export default function GradeSheetsPage() {
 
           <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow duration-300">
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold mb-1 text-center md:text-left text-green-600 tracking-wide">
-                  Cursos {selectedCourseFilter !== "all" ? "Seleccionado" : "Activos"}
-                </p>
-                <p className="text-2xl md:text-3xl font-bold text-gray-900 text-center md:text-left">
-                  {selectedCourseFilter !== "all" 
-                    ? courses.find(c => c.id === selectedCourseFilter)?.name?.substring(0, 12) + "..."
-                    : courses.length}
-                </p>
-                {selectedCourseFilter !== "all" && (
-                  <p className="text-xs text-gray-600 mt-1">
-                    {courses.find(c => c.id === selectedCourseFilter)?.code}
-                  </p>
-                )}
-              </div>
+ <div>
+  <p className="text-xs font-semibold mb-1 text-center md:text-left text-green-600 tracking-wide">
+    Cursos Activos
+  </p>
+  <p className="text-xl md:text-xl font-bold text-gray-900 text-center md:text-left">
+    {courses.length}
+  </p>
+</div>
               <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center">
                 <BookOpen className="h-6 w-6 text-green-500" />
               </div>
@@ -1164,7 +1153,7 @@ export default function GradeSheetsPage() {
                 <p className="text-xs font-semibold mb-1 text-center md:text-left text-purple-600 tracking-wide">
                   Estudiantes
                 </p>
-                <p className="text-2xl md:text-3xl font-bold text-gray-900 text-center md:text-left">
+                <p className="text-xl md:text-xl font-bold text-gray-900 text-center md:text-left">
                   {students.length}
                 </p>
               </div>
@@ -1180,7 +1169,7 @@ export default function GradeSheetsPage() {
                 <p className="text-xs font-semibold mb-1 text-center md:text-left text-amber-600 tracking-wide">
                   Período Actual
                 </p>
-                <p className="text-2xl md:text-3xl font-bold text-gray-900 text-center md:text-left">
+                <p className="text-xl md:text-xl font-bold text-gray-900 text-center md:text-left">
                   2025-2
                 </p>
               </div>
@@ -1196,7 +1185,7 @@ export default function GradeSheetsPage() {
                 <p className="text-xs font-semibold mb-1 text-center md:text-left text-indigo-600 tracking-wide">
                   Prom. General
                 </p>
-                <p className="text-2xl md:text-3xl font-bold text-gray-900 text-center md:text-left">
+                <p className="text-xl md:text-xl font-bold text-gray-900 text-center md:text-left">
                   {studentAverages.length > 0
                     ? (
                         studentAverages.reduce(
@@ -2442,7 +2431,7 @@ export default function GradeSheetsPage() {
                 </button>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Título de la Hoja *
@@ -2586,7 +2575,7 @@ export default function GradeSheetsPage() {
                   </div>
 
                   {newSheet.activities.length > 0 && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {newSheet.activities.map((activity) => (
                         <div
                           key={activity.id}
@@ -2685,7 +2674,7 @@ export default function GradeSheetsPage() {
                 </button>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Nombre de la Actividad *

@@ -406,7 +406,7 @@ export default function AssessmentsPage() {
             </div>
             <div className="space-y-2">
               <p className="text-xl font-bold text-gray-900">
-                {user.role === "docente" 
+                {user.role === "docente"  
                   ? "No courses assigned" 
                   : "No enrolled courses"}
               </p>
@@ -576,7 +576,7 @@ export default function AssessmentsPage() {
         <select
           className="pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all appearance-none text-sm font-medium"
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
+          onChange={(e) => setFilterType(e.target.value)} 
         >
           <option value="all">All Types</option>
           <option value="announcement">Announcements</option>
@@ -604,7 +604,7 @@ export default function AssessmentsPage() {
         {/* Assessments list - Organized by date */}
         {assessments.length === 0 ? (
           <div className="bg-gradient-to-br from-gray-50 to-white border border-gray-100 rounded-2xl p-8 text-center shadow-sm">
-            <div className="w-24 h-24 mx-auto mb-6 rounded-3xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
+            <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
               <FileText className="h-12 w-12 text-gray-400" />
             </div>
             <h3 className="font-bold text-xl mb-3 text-gray-900">No assessments available</h3>

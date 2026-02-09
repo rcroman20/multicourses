@@ -826,7 +826,7 @@ const handleDeleteCourseSimple = async () => {
                     </div>
 
                     {course.description && (
-                      <p className="text-gray-600 max-w-3xl">
+                      <p className="text-gray-600 max-w-2xl">
                         {course.description}
                       </p>
                     )}
@@ -888,7 +888,7 @@ const handleDeleteCourseSimple = async () => {
                       <BarChart3 className="h-4 w-4 text-blue-500" />
                       <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide">Average</p>
                     </div>
-                    <p className="text-3xl font-bold text-gray-900">
+                    <p className="text-2xl font-bold text-gray-900">
                       {courseStats.studentsWithGrades > 0
                         ? courseStats.averageGrade.toFixed(1)
                         : "--"}
@@ -911,7 +911,7 @@ const handleDeleteCourseSimple = async () => {
                       <CheckCircle2 className="h-4 w-4 text-green-500" />
                       <p className="text-xs font-semibold text-green-600 uppercase tracking-wide">Passing</p>
                     </div>
-                    <p className="text-3xl font-bold text-gray-900">{courseStats.passingCount}</p>
+                    <p className="text-2xl font-bold text-gray-900">{courseStats.passingCount}</p>
                     {courseStats.totalStudents > 0 && (
                       <p className="text-xs text-gray-500 mt-2">
                         {Math.round((courseStats.passingCount / courseStats.totalStudents) * 100)}%
@@ -932,7 +932,7 @@ const handleDeleteCourseSimple = async () => {
                       <AlertTriangle className="h-4 w-4 text-amber-500" />
                       <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">At Risk</p>
                     </div>
-                    <p className="text-3xl font-bold text-gray-900">{courseStats.atRiskCount}</p>
+                    <p className="text-2xl font-bold text-gray-900">{courseStats.atRiskCount}</p>
                     {courseStats.totalStudents > 0 && (
                       <p className="text-xs text-gray-500 mt-2">
                         {Math.round((courseStats.atRiskCount / courseStats.totalStudents) * 100)}%
@@ -953,7 +953,7 @@ const handleDeleteCourseSimple = async () => {
                       <AlertCircle className="h-4 w-4 text-red-500" />
                       <p className="text-xs font-semibold text-red-600 uppercase tracking-wide">Failing</p>
                     </div>
-                    <p className="text-3xl font-bold text-gray-900">{courseStats.failingCount}</p>
+                    <p className="text-2xl font-bold text-gray-900">{courseStats.failingCount}</p>
                     {courseStats.totalStudents > 0 && (
                       <p className="text-xs text-gray-500 mt-2">
                         {Math.round((courseStats.failingCount / courseStats.totalStudents) * 100)}%
@@ -2057,15 +2057,17 @@ const handleDeleteCourseSimple = async () => {
   return (
     <DashboardLayout title="My Courses" subtitle="All your courses in one place">
       <div className="space-y-2">
-        {isTeacher && (
+      <div  className=" text-right">
+          {isTeacher && (
           <Link
             to="/courses/create"
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
+            className="inline-flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium "
           >
             <Plus className="h-4 w-4" />
             New Course
           </Link>
         )}
+      </div>
 
         {userCourses.length === 0 ? (
           <div className="bg-gradient-to-br from-gray-50 to-white border border-gray-200 rounded-2xl p-8 sm:p-12 text-center shadow-sm">

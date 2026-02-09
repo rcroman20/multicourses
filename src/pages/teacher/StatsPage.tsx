@@ -141,7 +141,7 @@ export default function StatsPage() {
 
 
 
-
+ 
 
 const fetchStudentNames = async () => {
   try {
@@ -174,7 +174,7 @@ useEffect(() => {
         subtitle="Esta sección es exclusiva para docentes"
       >
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-4">
+          <div className="text-center space-y-2">
             <div className="h-20 w-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
               <AlertTriangle className="h-10 w-10 text-gray-400" />
             </div>
@@ -394,9 +394,9 @@ useEffect(() => {
 
   // Datos del curso seleccionado
   const selectedCourseDistributionData = selectedCourseStats ? [
-    { name: 'Aprobando', value: selectedCourseStats.passingCount, color: 'hsl(142 76% 45%)' },
-    { name: 'En Riesgo', value: selectedCourseStats.atRiskCount, color: 'hsl(38 92% 55%)' },
-    { name: 'Reprobando', value: selectedCourseStats.failingCount, color: 'hsl(0 84% 60%)' },
+    { name: '', value: selectedCourseStats.passingCount, color: 'hsl(142 76% 45%)' },
+    { name: '', value: selectedCourseStats.atRiskCount, color: 'hsl(38 92% 55%)' },
+    { name: '', value: selectedCourseStats.failingCount, color: 'hsl(0 84% 60%)' },
   ].filter(d => d.value > 0) : [];
 
   // Agregar después de selectedCourseDistributionData
@@ -498,7 +498,7 @@ const studentPerformanceData = selectedCourseStudents
         subtitle="Cargando análisis de datos académicos..."
       >
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-4">
+          <div className="text-center space-y-2">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
             <div className="space-y-2">
               <p className="text-lg font-semibold text-gray-900">Analizando datos académicos</p>
@@ -517,7 +517,7 @@ const studentPerformanceData = selectedCourseStudents
       title="Estadísticas Académicas"
       subtitle="Análisis detallado del rendimiento basado en datos reales"
     >
-      <div className="space-y-6 fade-in-up">
+      <div className="space-y-2 fade-in-up">
         {/* Header con selector de curso */}
         <div className="bg-gradient-to-r from-blue-600 via-cyan-500 to-blue-500 text-white rounded-2xl p-6 shadow-lg">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -599,7 +599,7 @@ const studentPerformanceData = selectedCourseStudents
                       Promedio
                     </p>
                     <p className="text-lg font-bold text-gray-900">
-                      {formatGrade(selectedCourseStats.averageGrade)}/5.0
+                      {formatGrade(selectedCourseStats.averageGrade)} / 5.0
                     </p>
                   </div>
                   <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center">
@@ -819,7 +819,7 @@ const studentPerformanceData = selectedCourseStudents
   formatter={(value, name, props) => {
     if (name === 'promedio') {
       return [
-        `${Number(value).toFixed(2)}/5.0`, 
+        `${Number(value).toFixed(2)} / 5.0`, 
         `${props.payload.fullName || props.payload.name}`
       ];
     }
@@ -892,7 +892,7 @@ const studentPerformanceData = selectedCourseStudents
 </td>
                           <td className="py-3 px-4">
                             <div className={`text-lg font-bold ${getGradeColor(student.average)}`}>
-                              {formatGrade(student.average)}/5.0
+                              {formatGrade(student.average)} / 5.0
                             </div>
                           </td>
                           <td className="py-3 px-4">
@@ -954,7 +954,7 @@ const studentPerformanceData = selectedCourseStudents
                     <p className="text-xs font-semibold mb-1 text-center md:text-left text-blue-600 tracking-wide">
                       Cursos Activos
                     </p>
-                    <p className="text-2xl md:text-3xl font-bold text-gray-900 text-center md:text-left">
+                    <p className="text-2xl md:text-2xl font-bold text-gray-900 text-center md:text-left">
                       {courseStats.length}
                     </p>
                     <p className="text-xs text-gray-600 mt-1 hidden md:block">
@@ -973,7 +973,7 @@ const studentPerformanceData = selectedCourseStudents
                     <p className="text-xs font-semibold mb-1 text-center md:text-left text-purple-600 tracking-wide">
                       Estudiantes Totales
                     </p>
-                    <p className="text-2xl md:text-3xl font-bold text-gray-900 text-center md:text-left">
+                    <p className="text-2xl md:text-2xl font-bold text-gray-900 text-center md:text-left">
                       {totalStudents}
                     </p>
                     <p className="text-xs text-gray-600 mt-1 hidden md:block">
@@ -992,8 +992,8 @@ const studentPerformanceData = selectedCourseStudents
                     <p className="text-xs font-semibold mb-1 text-center md:text-left text-green-600 tracking-wide">
                       Promedio General
                     </p>
-                    <p className="text-2xl md:text-3xl font-bold text-gray-900 text-center md:text-left">
-                      {overallAverage.toFixed(2)}/5.0
+                    <p className="text-2xl md:text-2xl font-bold text-gray-900 text-center md:text-left">
+                      {overallAverage.toFixed(2)} / 5.0
                     </p>
                     <p className="text-xs text-gray-600 mt-1 hidden md:block">
                       {formatGrade(overallAverage)} de promedio general
@@ -1011,7 +1011,7 @@ const studentPerformanceData = selectedCourseStudents
                     <p className="text-xs font-semibold mb-1 text-center md:text-left text-indigo-600 tracking-wide">
                       Tasa de Aprobación
                     </p>
-                    <p className="text-2xl md:text-3xl font-bold text-gray-900 text-center md:text-left">
+                    <p className="text-2xl md:text-2xl font-bold text-gray-900 text-center md:text-left">
                       {approvalRate.toFixed(0)}%
                     </p>
                     <p className="text-xs text-gray-600 mt-1 hidden md:block">
@@ -1075,7 +1075,7 @@ const studentPerformanceData = selectedCourseStudents
                             borderRadius: '0.75rem',
                             boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
                           }}
-                          formatter={(value) => [`${Number(value).toFixed(2)}/5.0`, 'Promedio']}
+                          formatter={(value) => [`${Number(value).toFixed(2)} / 5.0`, 'Promedio']}
                         />
                         <Bar 
                           dataKey="promedio" 
@@ -1255,7 +1255,7 @@ const studentPerformanceData = selectedCourseStudents
                                   ? "text-amber-600" 
                                   : "text-red-600"
                             )}>
-                              {formatGrade(stat.averageGrade)}/5.0
+                              {formatGrade(stat.averageGrade)} / 5.0
                             </span>
                           </div>
                         </td>

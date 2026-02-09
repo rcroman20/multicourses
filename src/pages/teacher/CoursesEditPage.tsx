@@ -158,7 +158,7 @@ export default function CoursesEditPage() {
       title={`Edit Course: ${course.name}`} 
       subtitle="Update course information"
     >
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <Link
@@ -201,7 +201,7 @@ export default function CoursesEditPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-2">
             {/* Course Name */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">

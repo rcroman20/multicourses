@@ -450,7 +450,7 @@ export default function StudentDetailPage() {
         subtitle="Loading student information..."
       >
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-4">
+          <div className="text-center space-y-2">
             <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto" />
             <div className="space-y-2">
               <p className="text-lg font-semibold text-gray-900">Loading student data</p>
@@ -493,7 +493,7 @@ export default function StudentDetailPage() {
       title="Student Details"
       subtitle={`Viewing information for ${student.name}`}
     >
-      <div className="space-y-6">
+      <div className="space-y-2">
         {/* Back button */}
         <div className="flex items-center justify-between">
           <button
@@ -550,7 +550,7 @@ export default function StudentDetailPage() {
                   </div>
                   <div>
                     {isEditing ? (
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         <input
                           type="text"
                           value={editForm.name}
@@ -618,7 +618,7 @@ export default function StudentDetailPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
                 {/* Columna izquierda */}
-                <div className="space-y-4">
+                <div className="space-y-2">
                   {/* ID Number */}
                   <div className="p-3 bg-gradient-to-r from-gray-50 to-gray-100/50 rounded-xl">
                     <div className="flex items-center gap-3">
@@ -667,7 +667,7 @@ export default function StudentDetailPage() {
                 </div>
 
                 {/* Columna derecha */}
-                <div className="space-y-4">
+                <div className="space-y-2">
                   {/* Phone / WhatsApp */}
                   <div className="p-3 bg-gradient-to-r from-gray-50 to-gray-100/50 rounded-xl">
                     <div className="flex items-center gap-3">
@@ -780,7 +780,7 @@ export default function StudentDetailPage() {
                   </Link>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {enrolledCourses.map((course) => (
                     <div
                       key={course.id}
@@ -855,7 +855,7 @@ export default function StudentDetailPage() {
                   <p className="text-sm text-gray-600">Student is enrolled in all your available courses</p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {availableCourses.map((course) => (
                     <div
                       key={course.id}

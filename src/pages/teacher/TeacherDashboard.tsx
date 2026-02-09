@@ -826,7 +826,7 @@ export default function TeacherDashboard() {
             </div>
 
             <div className="text-center md:text-right mt-2 md:mt-0">
-              <div className="text-3xl font-bold mb-1">
+              <div className="text-2xl font-bold mb-1">
                 {courseStats.averageGrade}
                 <span className="text-lg text-blue-200"> / 5.0</span>
               </div>

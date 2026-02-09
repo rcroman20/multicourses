@@ -146,7 +146,7 @@ const ForgotPasswordModal = ({
       handleClose();
     }
   };
-
+ 
   if (!isOpen) return null;
 
   return (
@@ -199,7 +199,7 @@ const ForgotPasswordModal = ({
             {successMessage && (
               <div className="flex items-center gap-2 p-4 rounded-xl bg-gradient-to-br from-green-50 to-emerald-100 border border-green-200 text-green-700 text-sm animate-in fade-in">
                 <AlertCircle className="h-5 w-5 shrink-0" />
-                <p>{successMessage}</p>
+                <p>{successMessage}</p> 
               </div>
             )}
 
@@ -403,9 +403,9 @@ export default function AuthPage() {
   return (
     <>
       <div className="min-h-screen bg-gradient-to-br from-blue-50/50 to-cyan-50/50 flex">
-        {/* Left side - Branding */}
+        {/* Left side - Branding - SOLO AZUL */}
         <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-cyan-500 to-purple-500" />
+          <div className="absolute inset-0 bg-blue-600" />
           <div className="absolute inset-0 opacity-10">
             <div className="absolute top-20 left-20 w-72 h-72 rounded-full border-2 border-white/20" />
             <div className="absolute bottom-20 right-20 w-96 h-96 rounded-full border-2 border-white/20" />
@@ -459,7 +459,6 @@ export default function AuthPage() {
                 <span>Modern interface experience</span>
               </div>
             </div>
-
            
           </div>
         </div>
@@ -469,7 +468,7 @@ export default function AuthPage() {
           <div className="w-full max-w-md">
             {/* Mobile branding */}
             <div className="lg:hidden text-center mb-8">
-              <div className="inline-flex items-center justify-center h-16 w-16 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-600 text-white mb-4">
+              <div className="inline-flex items-center justify-center h-16 w-16 rounded-xl bg-blue-600 text-white mb-4">
                 <GraduationCap className="h-8 w-8" />
               </div>
               <h1 className="text-2xl font-bold text-gray-900">

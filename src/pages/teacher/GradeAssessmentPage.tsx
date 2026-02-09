@@ -15,7 +15,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
   ArrowLeft, 
-  Save, 
+  Save, X,
   Users, 
   FileText, 
   Calendar,
@@ -122,7 +122,7 @@ const SubmissionModal: React.FC<SubmissionModalProps> = ({
 
         {/* Contenido de la entrega */}
         <div className="p-6">
-          <div className="mb-6 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
+          <div className="mb-2 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
             <div className="flex flex-wrap items-center gap-4 text-sm text-gray-700">
               <div className="flex items-center gap-2">
                 <UserCheck className="h-4 w-4 text-blue-600" />
@@ -191,7 +191,7 @@ const LoadingSkeleton = () => (
   <div className="space-y-2">
     {/* Header Skeleton */}
     <div className="modern-card">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-2">
         <div className="flex items-center gap-4">
           <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-gray-200 to-gray-300 animate-pulse"></div>
           <div className="space-y-2">
@@ -205,7 +205,7 @@ const LoadingSkeleton = () => (
       </div>
 
       {/* Assessment Info Skeleton */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-2">
         {[...Array(4)].map((_, i) => (
           <div key={i} className="bg-gradient-to-br from-gray-100 to-gray-200 border border-gray-300 rounded-xl p-4 animate-pulse">
             <div className="flex items-center gap-3">
@@ -220,7 +220,7 @@ const LoadingSkeleton = () => (
       </div>
 
       {/* Statistics Skeleton */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-2">
         {[...Array(4)].map((_, i) => (
           <div key={i} className="modern-card">
             <div className="text-center">
@@ -235,7 +235,7 @@ const LoadingSkeleton = () => (
 
     {/* Table Skeleton */}
     <div className="modern-card">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-2">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-gray-200 to-gray-300 animate-pulse"></div>
           <div className="space-y-2">
@@ -767,7 +767,7 @@ const studentsData: StudentGrade[] = enrolledStudents.map((student: any) => {
           status: 'graded'
         });
         
-        toast.success('✅ Calificaciones y comentarios guardados exitosamente');
+        toast.success('Calificaciones y comentarios guardados exitosamente');
         navigate(`/courses/${courseCode}/assessments/${assessmentId}`);
           
       } else {
@@ -838,7 +838,7 @@ const calculateStats = () => {
     return (
       <DashboardLayout title="Calificar Evaluación" subtitle="Evaluación no encontrada">
         <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-4">
+          <div className="text-center space-y-2">
             <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-red-100 to-pink-100 flex items-center justify-center border border-red-200">
               <AlertCircle className="h-10 w-10 text-red-600" />
             </div>
@@ -866,21 +866,12 @@ const calculateStats = () => {
     >
       <div className="space-y-2">
         {/* Header - DISEÑO MODERNO */}
-        <div className="modern-card">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
-            <div className="flex items-center gap-4">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">{assessment.name}</h1>
-                <p className="text-gray-600">{courseName}</p>
-              </div>
-            </div>
-            
-       
-          </div>
+        <div>
+        
 
 
           {/* Statistics - DISEÑO MODERNO */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-2">
   {/* Total Estudiantes */}
   <div className="modern-card">
     <div className="text-center">
@@ -983,7 +974,19 @@ const calculateStats = () => {
                 />
               </div>
             </div>
+                    <div className="flex flex-col sm:flex-row gap-3">
             
+              <button
+                onClick={handleSaveGrades}
+                disabled={isSaving}
+                className="px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-white hover:shadow-lg transition-all duration-300 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                 <span className="flex items-center gap-2">
+                    <Save className="h-4 w-4" />
+                   
+                  </span>
+              </button>
+            </div>
             <div className="flex flex-wrap gap-3">
               <div className="relative">
                 <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -1008,13 +1011,13 @@ const calculateStats = () => {
         {/* Grading Table - DISEÑO MODERNO */}
    {/* Grading Table - DISEÑO MODERNO */}
 <div className="modern-card">
-  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
+  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-2">
     <div className="flex items-center gap-3">
       <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center">
         <Users className="h-5 w-5 text-blue-600" />
       </div>
       <div>
-        <h2 className="text-xl font-bold text-gray-900">
+        <h2 className="text-xl font-bold text-gray-900"> 
           Entregas de Estudiantes
         </h2>
         <p className="text-sm text-gray-600">
@@ -1195,7 +1198,7 @@ const calculateStats = () => {
 
       {filteredStudents.length === 0 && (
         <div className="text-center py-12">
-          <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+          <Users className="h-16 w-16 text-gray-300 mx-auto mb-2" />
           <h3 className="text-lg font-bold text-gray-900 mb-2">No hay estudiantes que coincidan con los filtros</h3>
           <p className="text-gray-500">Intenta con otros términos de búsqueda o filtros.</p>
           <button
@@ -1227,32 +1230,7 @@ const calculateStats = () => {
               </p>
             </div>
             
-            <div className="flex flex-col sm:flex-row gap-3">
-              <button
-                onClick={() => navigate(`/courses/${courseCode}/assessments/${assessmentId}`)}
-                className="px-5 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 transition-all duration-300 font-medium"
-              >
-                Cancelar
-              </button>
-              
-              <button
-                onClick={handleSaveGrades}
-                disabled={isSaving}
-                className="px-5 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-white hover:shadow-lg transition-all duration-300 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSaving ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Saving scores...
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <Save className="h-4 w-4" />
-                    Save scores
-                  </span>
-                )}
-              </button>
-            </div>
+    
           </div>
         </div>
       </div>

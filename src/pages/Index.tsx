@@ -28,8 +28,8 @@ const Index = () => {
         <div className="inline-flex items-center justify-center h-16 w-16 rounded-xl bg-primary text-primary-foreground mb-4">
           <GraduationCap className="h-8 w-8" />
         </div>
-        <h1 className="mb-2 text-2xl font-bold">Licenciatura en Inglés</h1>
-        <p className="text-muted-foreground mb-4">Plataforma Académica</p>
+        <h1 className="mb-2 text-2xl font-bold">Multicourses</h1>
+        <p className="text-muted-foreground mb-4">Academic Platform</p>
         <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
       </div>
     </div>
