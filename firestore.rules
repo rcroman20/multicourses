@@ -1,0 +1,338 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function coursePath(courseId) {
+      return /databases/$(database)/documents/cursos/$(courseId);
+    }
+
+    function courseExists(courseId) {
+      return exists(coursePath(courseId));
+    }
+
+    function courseDoc(courseId) {
+      return get(coursePath(courseId));
+    }
+
+    function isCourseTeacher(courseId) {
+      return signedIn()
+        && courseExists(courseId)
+        && courseDoc(courseId).data.teacherId == request.auth.uid;
+    }
+
+    function isCourseStudent(courseId) {
+      return signedIn()
+        && courseExists(courseId)
+        && (
+          request.auth.uid in courseDoc(courseId).data.enrolledStudents
+          || (
+            studentDocExists(request.auth.uid)
+            && courseId in get(studentPath(request.auth.uid)).data.courses
+          )
+        );
+    }
+
+    function canAccessCourse(courseId) {
+      return isCourseTeacher(courseId) || isCourseStudent(courseId);
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/usuarios/$(uid);
+    }
+
+    function studentPath(uid) {
+      return /databases/$(database)/documents/estudiantes/$(uid);
+    }
+
+    function userDocExists(uid) {
+      return exists(userPath(uid));
+    }
+
+    function studentDocExists(uid) {
+      return exists(studentPath(uid));
+    }
+
+    function userIsTeacher(uid) {
+      return userDocExists(uid) && get(userPath(uid)).data.role == 'docente';
+    }
+
+    function targetUserIsStudent(uid) {
+      return userDocExists(uid) && get(userPath(uid)).data.role == 'estudiante';
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isCurrentUserTeacher() {
+      return signedIn() && userIsTeacher(request.auth.uid);
+    }
+
+    match /usuarios/{userId} {
+      allow read: if signedIn();
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId) || (isCurrentUserTeacher() && targetUserIsStudent(userId));
+    }
+
+    // Notifications per user
+    match /usuarios/{userId}/notifications/{notificationId} {
+      allow read: if isOwner(userId);
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          "title", "message", "type", "link", "read", "createdAt", "expiresAt"
+        ])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.message is string
+        && request.resource.data.message.size() > 0
+        && request.resource.data.type in ["info", "success", "warning"]
+        && request.resource.data.read is bool
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.expiresAt is timestamp
+        && (!("link" in request.resource.data) || request.resource.data.link is string);
+
+      allow update: if isOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["read"])
+        && request.resource.data.read is bool;
+
+      allow delete: if isOwner(userId) || isCurrentUserTeacher();
+    }
+
+    // Course backup snapshots (teacher-owned)
+    match /courseBackups/{backupId} {
+      allow read: if signedIn() && resource.data.teacherId == request.auth.uid;
+
+      allow create: if signedIn()
+        && request.resource.data.teacherId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          "teacherId", "teacherName", "courseId", "courseCode", "courseName", "exportedAt", "payload", "createdAt"
+        ])
+        && request.resource.data.teacherId is string
+        && request.resource.data.teacherName is string
+        && request.resource.data.courseId is string
+        && request.resource.data.courseCode is string
+        && request.resource.data.courseName is string
+        && request.resource.data.exportedAt is string
+        && request.resource.data.createdAt is timestamp;
+
+      allow delete: if signedIn() && resource.data.teacherId == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /cursos/{courseId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+
+      allow update, delete: if signedIn() && (
+        resource.data.teacherId == request.auth.uid ||
+        !resource.data.keys().hasAny(['teacherId']) ||
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enrolledStudents']) &&
+          request.resource.data.enrolledStudents.size() == resource.data.enrolledStudents.size() + 1 &&
+          request.resource.data.enrolledStudents.hasAll(resource.data.enrolledStudents) &&
+          request.resource.data.enrolledStudents.hasAll([request.auth.uid])
+        )
+      );
+    }
+
+    match /estudiantes/{studentId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if signedIn() && (request.auth.uid == studentId || isCurrentUserTeacher());
+    }
+
+    match /gradeSheets/{sheetId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /unidades/{unitId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /semanas/{weekId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /diapositivas/{slideId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /evaluaciones/{assessmentId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /assessments/{assessmentId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /assessmentForumComments/{commentId} {
+      allow read: if signedIn() && (
+        !("courseId" in resource.data) || canAccessCourse(resource.data.courseId)
+      );
+
+      allow create: if signedIn()
+        && ("courseId" in request.resource.data)
+        && canAccessCourse(request.resource.data.courseId)
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isCourseTeacher(resource.data.courseId) ||
+        (
+          canAccessCourse(resource.data.courseId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["likedBy", "dislikedBy"])
+          && request.resource.data.assessmentId == resource.data.assessmentId
+          && request.resource.data.courseId == resource.data.courseId
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.content == resource.data.content
+        )
+      );
+
+      allow delete: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isCourseTeacher(resource.data.courseId)
+      );
+    }
+
+    match /notas/{gradeId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /grades/{gradeId} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /submissions/{submissionId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if signedIn();
+    }
+
+    match /periods/{periodId} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn();
+    }
+
+    match /weeks/{weekId} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn();
+    }
+
+    match /course_files/{fileId} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn();
+    }
+
+    match /course_file/{fileId} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn();
+    }
+
+    // Question bank
+    match /exerciseQuestions/{questionId} {
+      allow read: if canAccessCourse(resource.data.courseId);
+
+      allow create: if signedIn()
+        && isCourseTeacher(request.resource.data.courseId)
+        && request.resource.data.keys().hasOnly([
+          "courseId", "theme", "question", "options", "correctOptionIndex", "isPublished", "createdBy", "createdAt"
+        ])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.theme is string
+        && request.resource.data.theme.size() > 0
+        && request.resource.data.question is string
+        && request.resource.data.question.size() > 0
+        && request.resource.data.options is list
+        && request.resource.data.options.size() == 4
+        && request.resource.data.options[0] is string
+        && request.resource.data.options[1] is string
+        && request.resource.data.options[2] is string
+        && request.resource.data.options[3] is string
+        && request.resource.data.correctOptionIndex is int
+        && request.resource.data.correctOptionIndex >= 0
+        && request.resource.data.correctOptionIndex < 4
+        && request.resource.data.isPublished is bool;
+
+      allow update: if signedIn()
+        && isCourseTeacher(resource.data.courseId)
+        && request.resource.data.keys().hasOnly([
+          "courseId", "theme", "question", "options", "correctOptionIndex", "isPublished", "createdBy", "createdAt"
+        ])
+        && request.resource.data.courseId == resource.data.courseId
+        && request.resource.data.createdBy == resource.data.createdBy;
+
+      allow delete: if isCourseTeacher(resource.data.courseId);
+    }
+
+    // Theme -> grade sheet link
+    match /exerciseThemeLinks/{linkId} {
+      allow read: if canAccessCourse(resource.data.courseId);
+
+      allow create: if signedIn()
+        && isCourseTeacher(request.resource.data.courseId)
+        && request.resource.data.keys().hasOnly([
+          "courseId", "theme", "gradeSheetId", "updatedBy", "updatedAt"
+        ])
+        && request.resource.data.theme is string
+        && request.resource.data.theme.size() > 0
+        && request.resource.data.gradeSheetId is string
+        && request.resource.data.gradeSheetId.size() > 0
+        && request.resource.data.updatedBy == request.auth.uid;
+
+      allow update: if signedIn()
+        && isCourseTeacher(resource.data.courseId)
+        && request.resource.data.keys().hasOnly([
+          "courseId", "theme", "gradeSheetId", "updatedBy", "updatedAt"
+        ])
+        && request.resource.data.courseId == resource.data.courseId
+        && request.resource.data.theme == resource.data.theme
+        && request.resource.data.updatedBy == request.auth.uid;
+
+      allow delete: if signedIn() && isCourseTeacher(resource.data.courseId);
+    }
+
+    // Quiz attempts
+    match /quizAttempts/{attemptId} {
+      allow read: if canAccessCourse(resource.data.courseId);
+
+      allow create: if signedIn()
+        && isCourseStudent(request.resource.data.courseId)
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          "courseId", "theme", "studentId", "total", "correct", "percentage", "answers", "createdAt"
+        ])
+        && request.resource.data.theme is string
+        && request.resource.data.theme.size() > 0
+        && request.resource.data.total is int
+        && request.resource.data.total >= 0
+        && request.resource.data.correct is int
+        && request.resource.data.correct >= 0
+        && request.resource.data.correct <= request.resource.data.total
+        && request.resource.data.percentage is int
+        && request.resource.data.percentage >= 0
+        && request.resource.data.percentage <= 100
+        && request.resource.data.answers is list
+        && request.resource.data.answers.size() == request.resource.data.total;
+
+      allow update: if false;
+      allow delete: if isCourseTeacher(resource.data.courseId);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

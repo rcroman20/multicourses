@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+
+# Rutas privadas de la aplicación (requieren autenticación)
+Disallow: /student
+Disallow: /teacher
+Disallow: /courses
+Disallow: /grades
+Disallow: /slides
+Disallow: /students
+Disallow: /statistics
+
+Sitemap: https://multicourses.web.app/sitemap.xml
