@@ -6,11 +6,24 @@ import {
   onAuthStateChanged,
   User as FirebaseUser
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where, limit, serverTimestamp } from 'firebase/firestore';
 import { firebaseAuth, firebaseDB } from '@/lib/firebase';
+import { isAdminEmail } from '@/lib/services/adminAccessService';
+import {
+  isAccountMarkedDeleted,
+  processDueAccountDeletionRequests,
+} from '@/lib/services/accountDeletionService';
+import {
+  resolveTeacherPlanId,
+  type TeacherPlanId,
+} from "@/lib/services/teacherPlanService";
+import {
+  closeTeacherOnboardingIfExpired,
+  ensureTeacherOnboardingEnrollment,
+} from "@/lib/services/teacherOnboardingService";
 
-// Solo dos roles: docente y estudiante
-export type UserRole = 'docente' | 'estudiante';
+export type UserRole = 'docente' | 'estudiante' | 'admin';
+export type TeacherApprovalStatus = "pending" | "approved" | "rejected";
 
 export interface UserPreferences {
   notifications: boolean;
@@ -24,6 +37,28 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  requestedRole?: UserRole;
+  teacherApprovalStatus?: TeacherApprovalStatus;
+  teacherRequestedAt?: Date;
+  teacherApprovedAt?: Date;
+  teacherRejectedAt?: Date;
+  teacherRejectedBy?: string;
+  teacherRejectionReason?: string;
+  teacherPaymentInstructions?: string;
+  teacherPaymentRequestedAt?: Date;
+  teacherPaymentRequestedBy?: string;
+  teacherPlanId?: TeacherPlanId;
+  teacherPlanName?: string;
+  teacherPlanPriceCop?: number;
+  teacherPlanDurationMonths?: number;
+  teacherPlanDurationLabel?: string;
+  teacherPlanCourseLimit?: number;
+  teacherPlanStudentLimit?: number;
+  teacherPlanAnalyticsLabel?: string;
+  teacherPlanSupportLabel?: string;
+  teacherPlanAssignedAt?: Date;
+  teacherPlanExpiresAt?: Date;
+  teacherPlanStatus?: "active" | "expired" | "pending_payment";
   avatarUrl?: string;
   avatarEmoji?: string;
   avatarSetupCompleted?: boolean;
@@ -53,6 +88,71 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const normalizeEmail = (value?: string | null): string =>
+  (value || "").trim().toLowerCase();
+
+const normalizeUserRole = (value: unknown): UserRole | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+
+  if (
+    normalized === "docente" ||
+    normalized === "teacher" ||
+    normalized === "profesor" ||
+    normalized === "professor" ||
+    normalized === "instructor"
+  ) {
+    return "docente";
+  }
+
+  if (
+    normalized === "estudiante" ||
+    normalized === "student" ||
+    normalized === "alumno" ||
+    normalized === "learner"
+  ) {
+    return "estudiante";
+  }
+
+  if (
+    normalized === "admin" ||
+    normalized === "administrador" ||
+    normalized === "administrator"
+  ) {
+    return "admin";
+  }
+
+  return null;
+};
+
+const toDate = (value: unknown): Date | undefined => {
+  if (!value) return undefined;
+  if (value instanceof Date) return value;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    try {
+      return (value as { toDate: () => Date }).toDate();
+    } catch {
+      return undefined;
+    }
+  }
+
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -68,8 +168,129 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const userData = userDoc.exists() ? userDoc.data() : null;
       const studentData = studentDoc.exists() ? studentDoc.data() : null;
+      const roleFromUserDoc =
+        normalizeUserRole(userData?.role) ||
+        normalizeUserRole((userData as { userRole?: unknown } | null)?.userRole);
+      const roleFromStudentDoc =
+        normalizeUserRole(studentData?.role) ||
+        normalizeUserRole((studentData as { userRole?: unknown } | null)?.userRole);
+      const requestedRoleFromUserDoc = normalizeUserRole(userData?.requestedRole);
+      const requestedRoleFromStudentDoc = normalizeUserRole(studentData?.requestedRole);
+      const requestedRole = requestedRoleFromUserDoc || requestedRoleFromStudentDoc || null;
+      const rawApprovalStatus =
+        (typeof userData?.teacherApprovalStatus === "string"
+          ? userData.teacherApprovalStatus
+          : typeof studentData?.teacherApprovalStatus === "string"
+            ? studentData.teacherApprovalStatus
+            : ""
+        )
+          .trim()
+          .toLowerCase();
+
+      let resolvedRole: UserRole | null = roleFromUserDoc || roleFromStudentDoc;
+      const isKnownAdmin = isAdminEmail(firebaseUser.email);
+
+      // Fallback: if the user owns at least one course, treat as teacher.
+      if (!resolvedRole) {
+        try {
+          const teacherCoursesSnap = await getDocs(
+            query(
+              collection(firebaseDB, "courses"),
+              where("teacherId", "==", firebaseUser.uid),
+              limit(1),
+            ),
+          );
+          resolvedRole = teacherCoursesSnap.empty ? "estudiante" : "docente";
+        } catch {
+          resolvedRole = "estudiante";
+        }
+      }
+
+      if (isKnownAdmin) {
+        resolvedRole = "admin";
+      }
+      let teacherApprovalStatus: TeacherApprovalStatus | undefined;
+      if (resolvedRole !== "admin") {
+        if (
+          rawApprovalStatus === "pending" ||
+          rawApprovalStatus === "approved" ||
+          rawApprovalStatus === "rejected"
+        ) {
+          teacherApprovalStatus = rawApprovalStatus as TeacherApprovalStatus;
+        } else if (requestedRole === "docente") {
+          teacherApprovalStatus = resolvedRole === "docente" ? "approved" : "pending";
+        }
+      }
+
+      // Safety: only auto-persist teacher role, never auto-downgrade to student.
+      const userDocRole = normalizeUserRole(userData?.role);
+      if (resolvedRole === "docente" && userDocRole !== "docente") {
+        try {
+          await setDoc(
+            doc(firebaseDB, "usuarios", firebaseUser.uid),
+            {
+              id: firebaseUser.uid,
+              email: firebaseUser.email || "",
+              name:
+                userData?.name ||
+                studentData?.name ||
+                firebaseUser.displayName ||
+                "Usuario",
+              role: "docente",
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        } catch {
+          // Ignore persistence issues; runtime role resolution remains correct.
+        }
+      }
+
+      if (resolvedRole === "admin" && userDocRole !== "admin") {
+        try {
+          const adminPayload = {
+            id: firebaseUser.uid,
+            email: firebaseUser.email || "",
+            name:
+              userData?.name ||
+              studentData?.name ||
+              firebaseUser.displayName ||
+              "Usuario",
+            role: "admin",
+            updatedAt: serverTimestamp(),
+          };
+
+          await Promise.all([
+            setDoc(doc(firebaseDB, "usuarios", firebaseUser.uid), adminPayload, { merge: true }),
+            setDoc(doc(firebaseDB, "estudiantes", firebaseUser.uid), adminPayload, { merge: true }),
+          ]);
+        } catch {
+          // Ignore persistence issues; runtime role resolution remains correct.
+        }
+      }
 
       if (userData || studentData) {
+        const finalRole = resolvedRole || 'estudiante';
+        const planIdRaw =
+          typeof userData?.teacherPlanId === "string"
+            ? userData.teacherPlanId
+            : typeof studentData?.teacherPlanId === "string"
+              ? studentData.teacherPlanId
+              : "";
+        const teacherPlanId = resolveTeacherPlanId(planIdRaw) || undefined;
+        const planStatusRaw =
+          typeof userData?.teacherPlanStatus === "string"
+            ? userData.teacherPlanStatus
+            : typeof studentData?.teacherPlanStatus === "string"
+              ? studentData.teacherPlanStatus
+              : "";
+        const teacherPlanStatus =
+          planStatusRaw === "active" ||
+          planStatusRaw === "expired" ||
+          planStatusRaw === "pending_payment"
+            ? (planStatusRaw as "active" | "expired" | "pending_payment")
+            : undefined;
+
         return {
           id: firebaseUser.uid,
           email: firebaseUser.email || '',
@@ -78,7 +299,90 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             studentData?.name ||
             firebaseUser.displayName ||
             'Usuario',
-          role: userData?.role === 'docente' ? 'docente' : 'estudiante',
+          role: finalRole,
+          requestedRole:
+            finalRole === "admin"
+              ? undefined
+              : requestedRole || (finalRole === "docente" ? "docente" : "estudiante"),
+          teacherApprovalStatus,
+          teacherRequestedAt: toDate(userData?.teacherRequestedAt) || toDate(studentData?.teacherRequestedAt),
+          teacherApprovedAt: toDate(userData?.teacherApprovedAt) || toDate(studentData?.teacherApprovedAt),
+          teacherRejectedAt: toDate(userData?.teacherRejectedAt) || toDate(studentData?.teacherRejectedAt),
+          teacherRejectedBy:
+            typeof userData?.teacherRejectedBy === "string"
+              ? userData.teacherRejectedBy
+              : typeof studentData?.teacherRejectedBy === "string"
+                ? studentData.teacherRejectedBy
+                : undefined,
+          teacherRejectionReason:
+            typeof userData?.teacherRejectionReason === "string"
+              ? userData.teacherRejectionReason
+              : typeof userData?.teacherRejectedReason === "string"
+                ? userData.teacherRejectedReason
+              : typeof studentData?.teacherRejectionReason === "string"
+                ? studentData.teacherRejectionReason
+                : typeof studentData?.teacherRejectedReason === "string"
+                ? studentData.teacherRejectedReason
+                : undefined,
+          teacherPaymentInstructions:
+            typeof userData?.teacherPaymentInstructions === "string"
+              ? userData.teacherPaymentInstructions
+              : typeof studentData?.teacherPaymentInstructions === "string"
+                ? studentData.teacherPaymentInstructions
+                : undefined,
+          teacherPaymentRequestedAt:
+            toDate(userData?.teacherPaymentRequestedAt) ||
+            toDate(studentData?.teacherPaymentRequestedAt),
+          teacherPaymentRequestedBy:
+            typeof userData?.teacherPaymentRequestedBy === "string"
+              ? userData.teacherPaymentRequestedBy
+              : typeof studentData?.teacherPaymentRequestedBy === "string"
+                ? studentData.teacherPaymentRequestedBy
+                : undefined,
+          teacherPlanId,
+          teacherPlanName:
+            typeof userData?.teacherPlanName === "string"
+              ? userData.teacherPlanName
+              : typeof studentData?.teacherPlanName === "string"
+                ? studentData.teacherPlanName
+                : undefined,
+          teacherPlanPriceCop:
+            toNumber(userData?.teacherPlanPriceCop) ??
+            toNumber(studentData?.teacherPlanPriceCop),
+          teacherPlanDurationMonths:
+            toNumber(userData?.teacherPlanDurationMonths) ??
+            toNumber(studentData?.teacherPlanDurationMonths),
+          teacherPlanDurationLabel:
+            typeof userData?.teacherPlanDurationLabel === "string"
+              ? userData.teacherPlanDurationLabel
+              : typeof studentData?.teacherPlanDurationLabel === "string"
+                ? studentData.teacherPlanDurationLabel
+                : undefined,
+          teacherPlanCourseLimit:
+            toNumber(userData?.teacherPlanCourseLimit) ??
+            toNumber(studentData?.teacherPlanCourseLimit),
+          teacherPlanStudentLimit:
+            toNumber(userData?.teacherPlanStudentLimit) ??
+            toNumber(studentData?.teacherPlanStudentLimit),
+          teacherPlanAnalyticsLabel:
+            typeof userData?.teacherPlanAnalyticsLabel === "string"
+              ? userData.teacherPlanAnalyticsLabel
+              : typeof studentData?.teacherPlanAnalyticsLabel === "string"
+                ? studentData.teacherPlanAnalyticsLabel
+                : undefined,
+          teacherPlanSupportLabel:
+            typeof userData?.teacherPlanSupportLabel === "string"
+              ? userData.teacherPlanSupportLabel
+              : typeof studentData?.teacherPlanSupportLabel === "string"
+                ? studentData.teacherPlanSupportLabel
+                : undefined,
+          teacherPlanAssignedAt:
+            toDate(userData?.teacherPlanAssignedAt) ||
+            toDate(studentData?.teacherPlanAssignedAt),
+          teacherPlanExpiresAt:
+            toDate(userData?.teacherPlanExpiresAt) ||
+            toDate(studentData?.teacherPlanExpiresAt),
+          teacherPlanStatus,
           avatarUrl: userData?.avatarUrl || studentData?.avatarUrl || '',
           avatarEmoji: userData?.avatarEmoji || studentData?.avatarEmoji || '',
           avatarSetupCompleted:
@@ -128,7 +432,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: firebaseUser.uid,
         email: firebaseUser.email || '',
         name: firebaseUser.displayName || 'Usuario',
-        role: 'estudiante',
+        role: isAdminEmail(firebaseUser.email) ? "admin" : "estudiante",
+        requestedRole: isAdminEmail(firebaseUser.email) ? undefined : "estudiante",
         preferences: {
           notifications: true,
           compactSidebar: false,
@@ -142,7 +447,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: firebaseUser.uid,
         email: firebaseUser.email || '',
         name: firebaseUser.displayName || 'Usuario',
-        role: 'estudiante',
+        role: isAdminEmail(firebaseUser.email) ? "admin" : "estudiante",
+        requestedRole: isAdminEmail(firebaseUser.email) ? undefined : "estudiante",
         preferences: {
           notifications: true,
           compactSidebar: false,
@@ -161,8 +467,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (firebaseUser) {
         try {
+          const deleted = await isAccountMarkedDeleted(firebaseUser.uid);
+          if (deleted) {
+            await signOut(firebaseAuth);
+            setUser(null);
+            setIsLoading(false);
+            return;
+          }
+
+          if (isAdminEmail(firebaseUser.email)) {
+            try {
+              await processDueAccountDeletionRequests(normalizeEmail(firebaseUser.email));
+            } catch {
+              // Ignore background cleanup failures.
+            }
+          }
+
           const userData = await loadUserData(firebaseUser);
           setUser(userData);
+
+          if (userData.role === "docente") {
+            void closeTeacherOnboardingIfExpired(userData.id).catch(() => undefined);
+
+            const teacherIsApproved = userData.teacherApprovalStatus === "approved";
+            const paymentIsReady =
+              userData.teacherPlanStatus !== "pending_payment" &&
+              userData.teacherPlanStatus !== "expired";
+
+            if (teacherIsApproved && paymentIsReady) {
+              void ensureTeacherOnboardingEnrollment(userData.id).catch(() => undefined);
+            }
+          }
         } catch (error) {
           setUser(null);
         }
@@ -178,11 +513,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
-    if (user?.preferences?.darkMode) {
+    const isDarkModeEnabled = Boolean(user?.preferences?.darkMode);
+
+    if (isDarkModeEnabled) {
       root.classList.add("dark");
     } else {
       root.classList.remove("dark");
     }
+
+    root.style.colorScheme = isDarkModeEnabled ? "dark" : "light";
   }, [user?.preferences?.darkMode]);
 
   // Iniciar sesión
@@ -230,7 +569,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       getDoc(userRef),
       getDoc(studentRef),
     ]);
-
     const profilePayload: Record<string, unknown> = {
       role: user.role,
       email: user.email,
@@ -321,6 +659,7 @@ export function useRequireAuth(requiredRole?: UserRole) {
     isAuthenticated,
     isLoading,
     hasAccess,
+    isAdmin: user?.role === 'admin',
     isTeacher: user?.role === 'docente',
     isStudent: user?.role === 'estudiante',
   };

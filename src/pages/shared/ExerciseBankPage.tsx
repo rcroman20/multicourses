@@ -25,16 +25,11 @@ import {
   Plus,
   Trash2,
   BookOpen,
-  GraduationCap,
   ChevronRight,
   FileText,
   Sparkles,
   Zap,
-  Rocket,
-  Brain,
   HelpCircle,
-  Award,
-  Target,
   Clock,
   AlertCircle,
   CheckCircle,
@@ -45,32 +40,19 @@ import {
   BookMarked,
   Layers,
   TrendingUp,
-  Users,
-  UserPlus,
-  School,
   ChevronDown,
   ExternalLink,
-  Menu,
   X,
   PenTool,
-  ClipboardList,
   BarChart3,
-  Filter,
   Search,
   ArrowLeft,
   ArrowRight,
-  Settings,
   Grid,
   List,
-  Star,
   Clock3,
-  CheckSquare,
   AlertTriangle,
 } from "lucide-react";
-
-// ============================================================================
-// TYPES
-// ============================================================================
 
 interface ExerciseQuestion {
   id: string;
@@ -89,6 +71,28 @@ interface BulkQuestionDraft {
   question: string;
   options: string[];
   correctOptionIndex: number;
+}
+
+interface SharedQuizQuestionDraft {
+  question: string;
+  options: string[];
+  correctOptionIndex: number;
+}
+
+interface SharedQuizTemplate {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  ownerEmail: string;
+  sourceCourseId: string;
+  sourceCourseCode: string;
+  sourceCourseName: string;
+  theme: string;
+  normalizedTheme: string;
+  questionCount: number;
+  questions: SharedQuizQuestionDraft[];
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 interface QuizResult {
@@ -145,16 +149,13 @@ interface GradeSheetStudentRow {
 }
 
 type FinishReason = "manual" | "timeout" | "abandoned";
+type EditingField = "theme" | "question" | "options" | "correctOptionIndex";
 type EditableQuestionFields = Pick<
   ExerciseQuestion,
   "theme" | "question" | "options" | "correctOptionIndex" | "isPublished"
 >;
 type ViewMode = "grid" | "list";
 type QuestionFilter = "all" | "published" | "draft";
-
-// ============================================================================
-// UTILS
-// ============================================================================
 
 function toDate(value: unknown): Date {
   if (value && typeof value === "object" && "toDate" in value) {
@@ -163,35 +164,6 @@ function toDate(value: unknown): Date {
   }
   if (value instanceof Date) return value;
   return new Date();
-}
-
-function buildAttemptResult(
-  quizQuestions: ExerciseQuestion[],
-  answers: Record<string, number>,
-): {
-  total: number;
-  correct: number;
-  percentage: number;
-  answerDetails: QuizAttemptAnswer[];
-} {
-  const total = quizQuestions.length;
-  let correct = 0;
-
-  const answerDetails: QuizAttemptAnswer[] = quizQuestions.map((question) => {
-    const selectedOptionIndex = answers[question.id] ?? -1;
-    const isCorrect = selectedOptionIndex === question.correctOptionIndex;
-    if (isCorrect) correct += 1;
-
-    return {
-      questionId: question.id,
-      selectedOptionIndex,
-      correctOptionIndex: question.correctOptionIndex,
-      isCorrect,
-    };
-  });
-
-  const percentage = total === 0 ? 0 : Math.round((correct / total) * 100);
-  return { total, correct, percentage, answerDetails };
 }
 
 const formatDate = (date: Date) => {
@@ -220,9 +192,21 @@ const normalizeThemeKey = (value: string) =>
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "") || "theme";
 
-// ============================================================================
-// MODALS
-// ============================================================================
+const normalizeQuestionText = (value: string) =>
+  value.trim().toLowerCase().replace(/\s+/g, " ");
+
+const buildQuestionSignature = (
+  theme: string,
+  question: string,
+  options: string[],
+  correctOptionIndex: number,
+) =>
+  [
+    normalizeThemeKey(theme),
+    normalizeQuestionText(question),
+    options.map((option) => normalizeQuestionText(option)).join("|"),
+    correctOptionIndex,
+  ].join("::");
 
 interface ModalProps {
   isOpen: boolean;
@@ -235,18 +219,18 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl animate-in fade-in zoom-in duration-200">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h3 className="text-xl font-bold text-gray-900">{title}</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex items-center justify-between border-b border-slate-200 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 px-5 py-4">
+          <h3 className="text-base font-semibold text-slate-900">{title}</h3>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/80 text-slate-600 transition hover:bg-white hover:text-slate-800"
           >
-            <X className="h-4 w-4 text-gray-500" />
+            <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="p-6 max-h-[70vh] overflow-y-auto">{children}</div>
+        <div className="max-h-[70vh] overflow-y-auto p-5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">{children}</div>
       </div>
     </div>
   );
@@ -277,49 +261,49 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
 
   const colors = {
     danger: {
-      bg: "bg-red-50",
-      text: "text-red-600",
-      border: "border-red-200",
-      button: "bg-red-600 hover:bg-red-700",
-      icon: <AlertCircle className="h-4 w-4 text-red-600" />,
+      bg: "bg-rose-50",
+      text: "text-rose-700",
+      border: "border-rose-200",
+      button: "bg-rose-600 hover:bg-rose-700",
+      icon: <AlertCircle className="h-4 w-4 text-rose-600" />,
     },
     warning: {
-      bg: "bg-yellow-50",
-      text: "text-yellow-600",
-      border: "border-yellow-200",
-      button: "bg-yellow-600 hover:bg-yellow-700",
-      icon: <AlertTriangle className="h-4 w-4 text-yellow-600" />,
+      bg: "bg-amber-50",
+      text: "text-amber-700",
+      border: "border-amber-200",
+      button: "bg-amber-600 hover:bg-amber-700",
+      icon: <AlertTriangle className="h-4 w-4 text-amber-600" />,
     },
     info: {
-      bg: "bg-blue-50",
-      text: "text-blue-600",
-      border: "border-blue-200",
-      button: "bg-blue-600 hover:bg-blue-700",
-      icon: <HelpCircle className="h-4 w-4 text-blue-600" />,
+      bg: "bg-sky-50",
+      text: "text-sky-700",
+      border: "border-sky-200",
+      button: "bg-sky-600 hover:bg-sky-700",
+      icon: <HelpCircle className="h-4 w-4 text-sky-600" />,
     },
   };
 
   const style = colors[type];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl animate-in fade-in zoom-in duration-200">
-        <div className="p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+        <div className="p-5">
           <div className="flex items-center gap-4 mb-4">
             <div
-              className={`h-8 w-8 rounded-full ${style.bg} flex items-center justify-center`}
+              className={`h-8 w-8 rounded-full border ${style.border} ${style.bg} flex items-center justify-center`}
             >
               {style.icon}
             </div>
             <div>
-              <h3 className="text-lg font-bold text-gray-900">{title}</h3>
-              <p className="text-sm text-gray-600">{message}</p>
+              <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+              <p className="text-xs text-slate-500">{message}</p>
             </div>
           </div>
           <div className="flex items-center justify-end gap-3">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
             >
               {cancelText}
             </button>
@@ -328,7 +312,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
                 onConfirm();
                 onClose();
               }}
-              className={`px-4 py-2 text-sm font-semibold text-white rounded-lg transition-colors ${style.button}`}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition ${style.button}`}
             >
               {confirmText}
             </button>
@@ -339,43 +323,42 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
   );
 };
 
-// ============================================================================
-// COMPONENTS
-// ============================================================================
-
 interface StatCardProps {
   icon: React.ReactNode;
   label: string;
   value: string | number;
   trend?: number;
+  tone?: "sky" | "indigo" | "emerald" | "amber" | "violet" | "rose";
 }
 
-const StatCard: React.FC<StatCardProps> = ({
-  icon,
-  label,
-  value,
-  trend,
-}) => {
+const STAT_TONE_CLASSES: Record<NonNullable<StatCardProps["tone"]>, string> = {
+  sky: "bg-sky-100 text-sky-700",
+  indigo: "bg-indigo-100 text-indigo-700",
+  emerald: "bg-emerald-100 text-emerald-700",
+  amber: "bg-amber-100 text-amber-700",
+  violet: "bg-violet-100 text-violet-700",
+  rose: "bg-rose-100 text-rose-700",
+};
+
+const StatCard: React.FC<StatCardProps> = ({ icon, label, value, trend, tone = "sky" }) => {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-3 sm:p-5 hover:shadow-md transition-all duration-300">
-      <div className="flex items-start justify-center sm:justify-between text-center sm:text-left">
-        <div>
-          <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1">{label}</p>
-          <p className="text-lg sm:text-2xl font-bold text-gray-900">{value}</p>
-          {trend !== undefined && (
-            <p className="text-xs text-gray-500 mt-1">
-              <span className={trend >= 0 ? "text-green-600" : "text-red-600"}>
-                {trend > 0 ? "+" : ""}
-                {trend}%
-              </span>{" "}
-              vs last month
-            </p>
-          )}
-        </div>
-        <div className="hidden sm:flex h-10 w-10 rounded-lg bg-blue-50 items-center justify-center text-blue-600">
+    <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${STAT_TONE_CLASSES[tone]}`}>
           {icon}
         </div>
+        <p className="text-lg font-extrabold leading-5 text-slate-900">{value}</p>
       </div>
+      <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">{label}</p>
+      {trend !== undefined && (
+        <p className="mt-0.5 text-[10px] text-slate-500">
+          <span className={trend >= 0 ? "text-emerald-600" : "text-rose-600"}>
+            {trend > 0 ? "+" : ""}
+            {trend}%
+          </span>{" "}
+          vs last month
+        </p>
+      )}
     </div>
   );
 };
@@ -409,60 +392,59 @@ const ThemeCard: React.FC<ThemeCardProps> = ({
     <div
       className={`group cursor-pointer rounded-xl border transition-all ${
         isSelected
-          ? "border-blue-300 bg-blue-50 shadow-md"
-          : "border-gray-200 hover:border-blue-200 hover:bg-gray-50"
+          ? "border-sky-300 bg-sky-50 shadow-sm"
+          : "border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50/40"
       }`}
       onClick={onSelect}
     >
-      <div className="p-5">
-        <div className="flex items-start justify-between mb-3">
+      <div className="p-4">
+        <div className="mb-2.5 flex items-start justify-between">
           <div className="flex items-center gap-2">
             <BookMarked
-              className={`h-4 w-4 ${isSelected ? "text-blue-600" : "text-gray-400"}`}
+              className={`h-4 w-4 ${isSelected ? "text-sky-700" : "text-slate-400"}`}
             />
-            <h4 className="font-semibold text-gray-900">{theme}</h4>
+            <h4 className="text-sm font-semibold text-slate-900">{theme}</h4>
           </div>
           <span
-            className={`text-xs font-medium px-2 py-1 rounded-full ${
+            className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
               isLinked
-                ? "bg-blue-100 text-blue-700"
-                : "bg-blue-100 text-blue-700"
+                ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+                : "border-slate-200 bg-slate-50 text-slate-700"
             }`}
           >
             {isLinked ? "Linked" : "Practice"}
           </span>
         </div>
 
-        <div className="flex items-center gap-3 mb-3 text-sm">
-          <span className="flex items-center gap-1 text-gray-600">
-            <HelpCircle className="h-4 w-4" />
+        <div className="mb-2.5 flex items-center gap-3 text-xs">
+          <span className="inline-flex items-center gap-1 text-slate-600">
+            <HelpCircle className="h-3.5 w-3.5" />
             {questionCount} questions
           </span>
-          <span className="flex items-center gap-1 text-gray-600">
-            <Clock3 className="h-4 w-4" />
+          <span className="inline-flex items-center gap-1 text-slate-600">
+            <Clock3 className="h-3.5 w-3.5" />
             {Math.ceil((questionCount * 90) / 60)} min
           </span>
         </div>
 
         {attempt && (
-          <div className="mb-3 p-2 bg-white rounded-lg border border-gray-100">
+          <div className="mb-3 rounded-lg border border-slate-200 bg-white p-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-600">Last score</span>
-              <span className="text-sm font-semibold text-blue-600">
+              <span className="text-xs text-slate-600">Last score</span>
+              <span className="text-sm font-semibold text-sky-700">
                 {attempt.percentage}%
               </span>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
-              <div
-                className="bg-blue-600 h-1.5 rounded-full transition-all"
-                style={{ width: `${attempt.percentage}%` }}
-              />
-            </div>
+            <progress
+              max={100}
+              value={Math.max(0, Math.min(100, attempt.percentage))}
+              className="mt-1 h-1.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-slate-200 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-sky-500 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-sky-500"
+            />
           </div>
         )}
 
         <div className="flex items-center justify-between">
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-slate-500">
             {!isLinked && (
               <span>
                 Attempts: {attemptCount}/{maxAttempts}
@@ -475,14 +457,14 @@ const ThemeCard: React.FC<ThemeCardProps> = ({
                 e.stopPropagation();
                 onStart();
               }}
-              className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-700"
             >
               {attempt && !isLinked ? "Retake Quiz" : "Start Quiz"}
             </button>
           ) : (
-            <div className="flex items-center gap-1 text-green-600">
-              <CheckCircle className="h-4 w-4" />
-              <span className="text-sm font-medium">Completed</span>
+            <div className="flex items-center gap-1 text-emerald-700">
+              <CheckCircle className="h-3.5 w-3.5" />
+              <span className="text-xs font-semibold">Completed</span>
             </div>
           )}
         </div>
@@ -507,7 +489,7 @@ interface QuestionCardProps {
     options: string[];
     correctOptionIndex: number;
   };
-  onEditingChange: (field: string, value: any) => void;
+  onEditingChange: (field: EditingField, value: unknown) => void;
 }
 
 const QuestionCard: React.FC<QuestionCardProps> = ({
@@ -524,40 +506,46 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
   onEditingChange,
 }) => {
   return (
-    <div className="bg-white border border-gray-200 rounded-xl hover:shadow-md transition-all duration-300 overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-xl hover:shadow-md transition-all duration-300 overflow-hidden">
       {isEditing ? (
         <div className="p-4">
           <div className="space-y-2">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Theme</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Theme
+              </label>
               <input
                 value={editingValues.theme}
                 onChange={(e) => onEditingChange("theme", e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                 placeholder="Theme"
               />
             </div>
-            
+
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Question</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Question
+              </label>
               <textarea
                 value={editingValues.question}
                 onChange={(e) => onEditingChange("question", e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                 rows={2}
                 placeholder="Question"
               />
             </div>
-            
+
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-2">Options</label>
+              <label className="block text-xs font-medium text-slate-600 mb-2">
+                Options
+              </label>
               {editingValues.options.map((option, idx) => (
                 <div key={idx} className="flex items-center gap-2 mb-1.5">
                   <input
                     type="radio"
                     checked={editingValues.correctOptionIndex === idx}
                     onChange={() => onEditingChange("correctOptionIndex", idx)}
-                    className="h-3.5 w-3.5 text-blue-600 focus:ring-blue-500"
+                    className="h-3.5 w-3.5 text-sky-600 focus:ring-sky-500"
                   />
                   <input
                     value={option}
@@ -566,23 +554,23 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
                       newOptions[idx] = e.target.value;
                       onEditingChange("options", newOptions);
                     }}
-                    className="flex-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                     placeholder={`Option ${idx + 1}`}
                   />
                 </div>
               ))}
             </div>
-            
+
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={onCancelEdit}
-                className="px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                className="px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={onSaveEdit}
-                className="px-2.5 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                className="px-2.5 py-1 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors"
               >
                 Save changes
               </button>
@@ -594,14 +582,14 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
           <div className="p-4">
             <div className="flex items-start justify-between mb-2">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-semibold px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
+                <span className="text-xs font-semibold px-2 py-1 bg-sky-100 text-sky-700 rounded-full">
                   {question.theme}
                 </span>
                 <span
                   className={`text-xs font-semibold px-2 py-1 rounded-full flex items-center gap-1 ${
                     question.isPublished
-                      ? "bg-green-100 text-green-700"
-                      : "bg-gray-100 text-gray-700"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-slate-100 text-slate-700"
                   }`}
                 >
                   {question.isPublished ? (
@@ -611,18 +599,18 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
                   )}
                   {question.isPublished ? "Published" : "Draft"}
                 </span>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-slate-500">
                   {formatDate(question.createdAt)}
                 </span>
                 {hasUnsavedChanges && (
-                  <span className="text-xs font-semibold px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">
+                  <span className="text-xs font-semibold px-2 py-1 rounded-full bg-amber-100 text-amber-700">
                     Unsaved
                   </span>
                 )}
               </div>
             </div>
 
-            <p className="text-xs text-gray-900 mb-2.5 font-medium leading-5">
+            <p className="text-xs text-slate-900 mb-2.5 font-medium leading-5">
               {question.question}
             </p>
 
@@ -630,15 +618,15 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
               {question.options.map((option, idx) => (
                 <div key={idx} className="flex items-center gap-1.5 text-xs">
                   {idx === question.correctOptionIndex ? (
-                    <CheckCircle className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
+                    <CheckCircle className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
                   ) : (
-                    <XCircle className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
+                    <XCircle className="h-3.5 w-3.5 text-slate-300 flex-shrink-0" />
                   )}
                   <span
                     className={
                       idx === question.correctOptionIndex
-                        ? "text-green-700 font-medium leading-5"
-                        : "text-gray-600 leading-5"
+                        ? "text-emerald-700 font-medium leading-5"
+                        : "text-slate-600 leading-5"
                     }
                   >
                     {option}
@@ -648,10 +636,10 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
             </div>
           </div>
 
-          <div className="border-t border-gray-100 bg-gray-50 px-3 py-1.5 flex items-center justify-end gap-1">
+          <div className="border-t border-slate-100 bg-slate-50 px-3 py-1.5 flex items-center justify-end gap-1">
             <button
               onClick={onEdit}
-              className="p-1 text-gray-600 hover:bg-white hover:text-blue-600 rounded-lg transition-colors"
+              className="p-1 text-slate-600 hover:bg-white hover:text-sky-600 rounded-lg transition-colors"
               title="Edit"
             >
               <Edit3 className="h-3.5 w-3.5" />
@@ -660,8 +648,8 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
               onClick={onTogglePublish}
               className={`p-1 rounded-lg transition-colors ${
                 question.isPublished
-                  ? "text-gray-600 hover:bg-white hover:text-yellow-600"
-                  : "text-gray-600 hover:bg-white hover:text-green-600"
+                  ? "text-slate-600 hover:bg-white hover:text-amber-600"
+                  : "text-slate-600 hover:bg-white hover:text-emerald-600"
               }`}
               title={question.isPublished ? "Unpublish" : "Publish"}
             >
@@ -674,7 +662,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
             <button
               onClick={onDelete}
               disabled={isDeleting}
-              className="p-1 text-red-600 hover:bg-white rounded-lg transition-colors disabled:opacity-50"
+              className="p-1 text-rose-600 hover:bg-white rounded-lg transition-colors disabled:opacity-50"
               title="Delete"
             >
               {isDeleting ? (
@@ -725,36 +713,35 @@ const QuizQuestionView: React.FC<QuizQuestionViewProps> = ({
     <div className="space-y-2">
       <div className="space-y-2">
         <div className="flex items-center justify-between text-sm">
-          <span className="font-medium text-gray-700">
+          <span className="font-medium text-slate-700">
             Question {currentIndex + 1} of {totalQuestions}
           </span>
           <div className="flex items-center gap-2">
             <Clock
-              className={`h-4 w-4 ${timeLeft <= 60 ? "text-red-500" : "text-gray-400"}`}
+              className={`h-4 w-4 ${timeLeft <= 60 ? "text-rose-500" : "text-slate-400"}`}
             />
             <span
-              className={`font-mono font-medium ${timeLeft <= 60 ? "text-red-500" : "text-gray-600"}`}
+              className={`font-mono font-medium ${timeLeft <= 60 ? "text-rose-500" : "text-slate-600"}`}
             >
               {formatTime(timeLeft)}
             </span>
           </div>
         </div>
-        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-blue-600 transition-all duration-300"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
+        <progress
+          max={100}
+          value={Math.max(0, Math.min(100, progress))}
+          className="h-2 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-slate-200 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-sky-500 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-sky-500"
+        />
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
         <div className="mb-4">
-          <span className="inline-block px-3 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
+          <span className="inline-block px-3 py-1 bg-sky-100 text-sky-700 text-xs font-semibold rounded-full">
             {question.theme}
           </span>
         </div>
 
-        <p className="text-lg font-semibold text-gray-900 mb-6">
+        <p className="text-lg font-semibold text-slate-900 mb-6">
           {question.question}
         </p>
 
@@ -767,21 +754,21 @@ const QuizQuestionView: React.FC<QuizQuestionViewProps> = ({
                 onClick={() => onAnswer(question.id, index)}
                 className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
                   isSelected
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-gray-200 hover:border-blue-300 hover:bg-blue-50/50"
+                    ? "border-sky-500 bg-sky-50"
+                    : "border-slate-200 hover:border-sky-300 hover:bg-sky-50/50"
                 }`}
               >
                 <div className="flex items-center gap-3">
                   <span
                     className={`h-6 w-6 rounded-full border-2 flex items-center justify-center text-sm font-medium ${
                       isSelected
-                        ? "border-blue-500 bg-blue-500 text-white"
-                        : "border-gray-300 text-gray-500"
+                        ? "border-sky-500 bg-sky-500 text-white"
+                        : "border-slate-300 text-slate-500"
                     }`}
                   >
                     {String.fromCharCode(65 + index)}
                   </span>
-                  <span className="text-gray-800">{option}</span>
+                  <span className="text-slate-800">{option}</span>
                 </div>
               </button>
             );
@@ -793,7 +780,7 @@ const QuizQuestionView: React.FC<QuizQuestionViewProps> = ({
         <button
           onClick={onPrevious}
           disabled={currentIndex === 0}
-          className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <ArrowLeft className="h-4 w-4" />
           Previous
@@ -802,7 +789,7 @@ const QuizQuestionView: React.FC<QuizQuestionViewProps> = ({
         {currentIndex === totalQuestions - 1 ? (
           <button
             onClick={onFinish}
-            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-2 px-6 py-2 bg-sky-600 text-white font-semibold rounded-lg hover:bg-sky-700 transition-colors"
           >
             <CheckCircle className="h-4 w-4" />
             Finish Quiz
@@ -810,7 +797,7 @@ const QuizQuestionView: React.FC<QuizQuestionViewProps> = ({
         ) : (
           <button
             onClick={onNext}
-            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex items-center gap-2 px-6 py-2 bg-sky-600 text-white font-semibold rounded-lg hover:bg-sky-700 transition-colors"
           >
             Next
             <ArrowRight className="h-4 w-4" />
@@ -833,10 +820,10 @@ const QuizResultView: React.FC<QuizResultViewProps> = ({
   onClose,
 }) => {
   const getGradeColor = (percentage: number) => {
-    if (percentage >= 90) return "text-green-600";
-    if (percentage >= 70) return "text-blue-600";
-    if (percentage >= 50) return "text-yellow-600";
-    return "text-red-600";
+    if (percentage >= 90) return "text-emerald-600";
+    if (percentage >= 70) return "text-sky-600";
+    if (percentage >= 50) return "text-amber-600";
+    return "text-rose-600";
   };
 
   const getGradeMessage = (percentage: number) => {
@@ -847,39 +834,39 @@ const QuizResultView: React.FC<QuizResultViewProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
       <div className="text-center mb-6">
-        <div className="inline-flex h-20 w-20 rounded-full bg-yellow-50 items-center justify-center mb-4">
-          <Trophy className="h-8 w-8 text-yellow-600" />
+        <div className="inline-flex h-20 w-20 rounded-full bg-amber-50 items-center justify-center mb-4">
+          <Trophy className="h-8 w-8 text-amber-600" />
         </div>
-        <h3 className="text-2xl font-bold text-gray-900 mb-1">
+        <h3 className="text-lg font-extrabold leading-5 text-slate-900 mb-1">
           {getGradeMessage(result.percentage)}
         </h3>
-        <p className="text-gray-600">Quiz completed successfully</p>
+        <p className="text-slate-600">Quiz completed successfully</p>
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="text-center p-4 bg-gray-50 rounded-xl">
-          <p className="text-sm text-gray-600 mb-1">Score</p>
+        <div className="text-center p-4 bg-slate-50 rounded-xl">
+          <p className="text-xs text-slate-500 mb-1">Score</p>
           <p
-            className={`text-2xl font-bold ${getGradeColor(result.percentage)}`}
+            className={`text-lg font-extrabold leading-5 ${getGradeColor(result.percentage)}`}
           >
             {result.percentage}%
           </p>
         </div>
-        <div className="text-center p-4 bg-gray-50 rounded-xl">
-          <p className="text-sm text-gray-600 mb-1">Correct</p>
-          <p className="text-2xl font-bold text-green-600">{result.correct}</p>
+        <div className="text-center p-4 bg-slate-50 rounded-xl">
+          <p className="text-xs text-slate-500 mb-1">Correct</p>
+          <p className="text-lg font-extrabold leading-5 text-emerald-600">{result.correct}</p>
         </div>
-        <div className="text-center p-4 bg-gray-50 rounded-xl">
-          <p className="text-sm text-gray-600 mb-1">Total</p>
-          <p className="text-2xl font-bold text-gray-900">{result.total}</p>
+        <div className="text-center p-4 bg-slate-50 rounded-xl">
+          <p className="text-xs text-slate-500 mb-1">Total</p>
+          <p className="text-lg font-extrabold leading-5 text-slate-900">{result.total}</p>
         </div>
       </div>
 
       {gradingMessage && (
-        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-          <p className="flex items-center gap-2 text-sm text-blue-700">
+        <div className="mb-6 p-4 bg-sky-50 border border-sky-200 rounded-xl">
+          <p className="flex items-center gap-2 text-sm text-sky-700">
             <CheckCircle className="h-4 w-4 flex-shrink-0" />
             {gradingMessage}
           </p>
@@ -888,7 +875,7 @@ const QuizResultView: React.FC<QuizResultViewProps> = ({
 
       <button
         onClick={onClose}
-        className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors"
+        className="w-full py-3 bg-sky-600 text-white font-semibold rounded-xl hover:bg-sky-700 transition-colors"
       >
         Continue to Themes
       </button>
@@ -896,14 +883,11 @@ const QuizResultView: React.FC<QuizResultViewProps> = ({
   );
 };
 
-// ============================================================================
-// MAIN COMPONENT
-// ============================================================================
-
 export default function ExerciseBankPage() {
   const QUIZ_SECONDS_PER_QUESTION = 90;
   const MAX_HISTORY_ATTEMPTS = 3;
   const MAX_UNLINKED_ATTEMPTS = 3;
+  const SHARED_TEMPLATE_COLLECTION = "quizBankTemplates";
 
   const { courseCode } = useParams<{ courseCode?: string }>();
   const navigate = useNavigate();
@@ -989,6 +973,17 @@ export default function ExerciseBankPage() {
   const [expandedThemes, setExpandedThemes] = useState<Record<string, boolean>>(
     {},
   );
+  const [sharedTemplates, setSharedTemplates] = useState<SharedQuizTemplate[]>(
+    [],
+  );
+  const [loadingSharedTemplates, setLoadingSharedTemplates] = useState(false);
+  const [sharedSearchQuery, setSharedSearchQuery] = useState("");
+  const [selectedThemeToPublish, setSelectedThemeToPublish] = useState("");
+  const [publishingTheme, setPublishingTheme] = useState<string | null>(null);
+  const [importingTemplateId, setImportingTemplateId] = useState<string | null>(
+    null,
+  );
+  const [showSharedQuizBank, setShowSharedQuizBank] = useState(false);
 
   const finishInFlightRef = useRef(false);
   const quizStartSectionRef = useRef<HTMLDivElement | null>(null);
@@ -1110,6 +1105,45 @@ export default function ExerciseBankPage() {
     return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
   }, [filteredQuestions]);
 
+  const filteredSharedTemplates = useMemo(() => {
+    const normalizedQuery = sharedSearchQuery.trim().toLowerCase();
+    const sorted = [...sharedTemplates].sort(
+      (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime(),
+    );
+
+    if (!normalizedQuery) {
+      return sorted;
+    }
+
+    return sorted.filter((template) => {
+      return (
+        template.theme.toLowerCase().includes(normalizedQuery) ||
+        template.ownerName.toLowerCase().includes(normalizedQuery) ||
+        template.sourceCourseCode.toLowerCase().includes(normalizedQuery) ||
+        template.sourceCourseName.toLowerCase().includes(normalizedQuery)
+      );
+    });
+  }, [sharedSearchQuery, sharedTemplates]);
+
+  const sharedTemplatesFromOtherTeachersCount = useMemo(
+    () =>
+      sharedTemplates.filter((template) => template.ownerId !== user?.id)
+        .length,
+    [sharedTemplates, user?.id],
+  );
+
+  useEffect(() => {
+    if (!isTeacher) return;
+    if (availableThemes.length === 0) {
+      setSelectedThemeToPublish("");
+      return;
+    }
+    setSelectedThemeToPublish((current) => {
+      if (current && availableThemes.includes(current)) return current;
+      return availableThemes[0];
+    });
+  }, [availableThemes, isTeacher]);
+
   useEffect(() => {
     setExpandedThemes((prev) => {
       const next: Record<string, boolean> = {};
@@ -1185,12 +1219,6 @@ export default function ExerciseBankPage() {
 
   const pendingThemeTimeLimitSeconds =
     pendingThemeQuestionCount * QUIZ_SECONDS_PER_QUESTION;
-
-  const formatTimeLeft = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-  };
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -1409,6 +1437,298 @@ export default function ExerciseBankPage() {
     [isTeacher, user?.id],
   );
 
+  const loadSharedQuizTemplates = useCallback(async () => {
+    if (!isTeacher) {
+      setSharedTemplates([]);
+      return;
+    }
+
+    setLoadingSharedTemplates(true);
+    try {
+      const sharedSnapshot = await getDocs(
+        collection(firebaseDB, SHARED_TEMPLATE_COLLECTION),
+      ).catch(() => null);
+
+      const allQuestionsSnapshots = await Promise.all(
+        availableCourses.map((course) =>
+          getDocs(
+            query(
+              collection(firebaseDB, "exerciseQuestions"),
+              where("courseId", "==", course.id),
+            ),
+          ).catch(() => null),
+        ),
+      );
+
+      const courseMetaById: Record<
+        string,
+        { code: string; name: string; teacherId: string; teacherName: string }
+      > = {};
+
+      availableCourses.forEach((course) => {
+        courseMetaById[course.id] = {
+          code: String(course.code || ""),
+          name: String(course.name || ""),
+          teacherId: String(course.teacherId || ""),
+          teacherName: String(course.teacherName || "Teacher"),
+        };
+      });
+
+      const resolveCorrectOptionIndex = (
+        rawValue: unknown,
+        options: string[],
+      ): number => {
+        if (typeof rawValue === "number" && rawValue >= 0 && rawValue <= 3) {
+          return rawValue;
+        }
+
+        if (typeof rawValue === "string") {
+          const normalized = rawValue.trim().toLowerCase();
+          if (["a", "b", "c", "d"].includes(normalized)) {
+            return ["a", "b", "c", "d"].indexOf(normalized);
+          }
+          if (["1", "2", "3", "4"].includes(normalized)) {
+            return Number(normalized) - 1;
+          }
+          const byText = options.findIndex(
+            (option) =>
+              normalizeQuestionText(option) ===
+              normalizeQuestionText(normalized),
+          );
+          if (byText >= 0) {
+            return byText;
+          }
+        }
+
+        return -1;
+      };
+
+      const inferQuestionDraft = (
+        value: unknown,
+      ): SharedQuizQuestionDraft | null => {
+        const parsed = value as Record<string, unknown>;
+        const question = String(
+          parsed.question ||
+            parsed.prompt ||
+            parsed.enunciado ||
+            parsed.title ||
+            "",
+        ).trim();
+
+        const directOptions = Array.isArray(parsed.options)
+          ? parsed.options
+          : Array.isArray(parsed.choices)
+            ? parsed.choices
+            : Array.isArray(parsed.alternatives)
+              ? parsed.alternatives
+              : null;
+
+        let options = directOptions
+          ? directOptions.map((option: unknown) => String(option).trim())
+          : [];
+
+        if (
+          options.length === 0 &&
+          parsed.options &&
+          typeof parsed.options === "object"
+        ) {
+          const map = parsed.options as Record<string, unknown>;
+          options = ["A", "B", "C", "D"].map((key, index) =>
+            String(
+              map[key] ||
+                map[key.toLowerCase()] ||
+                map[String(index + 1)] ||
+                "",
+            ).trim(),
+          );
+        }
+
+        const correctOptionIndex = resolveCorrectOptionIndex(
+          parsed.correctOptionIndex ??
+            parsed.correctAnswerIndex ??
+            parsed.correctAnswer ??
+            parsed.correct ??
+            parsed.answer,
+          options,
+        );
+
+        if (!question || options.length !== 4) return null;
+        if (correctOptionIndex < 0 || correctOptionIndex > 3) return null;
+
+        return {
+          question,
+          options,
+          correctOptionIndex,
+        };
+      };
+
+      const loadedSharedTemplates: SharedQuizTemplate[] =
+        sharedSnapshot?.docs
+          .map((item) => {
+            const data = item.data();
+            const parsedQuestions = Array.isArray(data.questions)
+              ? data.questions
+                  .map((question: unknown) => inferQuestionDraft(question))
+                  .filter((question): question is SharedQuizQuestionDraft =>
+                    Boolean(question),
+                  )
+              : [];
+            const theme = String(data.theme || "").trim();
+
+            return {
+              id: item.id,
+              ownerId: String(data.ownerId || ""),
+              ownerName: String(data.ownerName || "Teacher"),
+              ownerEmail: String(data.ownerEmail || ""),
+              sourceCourseId: String(data.sourceCourseId || ""),
+              sourceCourseCode: String(data.sourceCourseCode || ""),
+              sourceCourseName: String(data.sourceCourseName || ""),
+              theme,
+              normalizedTheme:
+                String(data.normalizedTheme || "").trim() ||
+                normalizeThemeKey(theme),
+              questionCount: Number(
+                data.questionCount || parsedQuestions.length,
+              ),
+              questions: parsedQuestions,
+              createdAt: toDate(data.createdAt),
+              updatedAt: toDate(data.updatedAt),
+            } satisfies SharedQuizTemplate;
+          })
+          .filter(
+            (template) =>
+              template.theme &&
+              (template.questions.length > 0 || template.questionCount > 0),
+          ) || [];
+
+      type InferredTemplateBucket = SharedQuizTemplate & {
+        signatures: Set<string>;
+      };
+
+      const inferredByKey: Record<string, InferredTemplateBucket> = {};
+
+      allQuestionsSnapshots.forEach((snapshot) => {
+        snapshot?.forEach((item) => {
+          const data = item.data();
+          const courseId = String(data.courseId || "").trim();
+          const theme = String(data.theme || "").trim();
+          if (!courseId || !theme) return;
+
+          const draft = inferQuestionDraft(data);
+          if (!draft) return;
+
+          const normalizedTheme = normalizeThemeKey(theme);
+          const mapKey = `${courseId}::${normalizedTheme}`;
+          const courseMeta = courseMetaById[courseId];
+          const ownerId = String(data.createdBy || courseMeta?.teacherId || "");
+          const ownerName =
+            String(courseMeta?.teacherName || "").trim() ||
+            (ownerId === user?.id
+              ? user.name || user.email || "Teacher"
+              : "Teacher");
+          const ownerEmail = ownerId === user?.id ? user.email || "" : "";
+          const createdAt = toDate(data.createdAt);
+
+          if (!inferredByKey[mapKey]) {
+            inferredByKey[mapKey] = {
+              id: `global_${mapKey}`,
+              ownerId,
+              ownerName,
+              ownerEmail,
+              sourceCourseId: courseId,
+              sourceCourseCode: String(courseMeta?.code || ""),
+              sourceCourseName: String(courseMeta?.name || ""),
+              theme,
+              normalizedTheme,
+              questionCount: 0,
+              questions: [],
+              createdAt,
+              updatedAt: createdAt,
+              signatures: new Set<string>(),
+            };
+          }
+
+          const signature = buildQuestionSignature(
+            theme,
+            draft.question,
+            draft.options,
+            draft.correctOptionIndex,
+          );
+          if (inferredByKey[mapKey].signatures.has(signature)) return;
+
+          inferredByKey[mapKey].signatures.add(signature);
+          inferredByKey[mapKey].questions.push(draft);
+          inferredByKey[mapKey].questionCount =
+            inferredByKey[mapKey].questions.length;
+          if (createdAt.getTime() > inferredByKey[mapKey].updatedAt.getTime()) {
+            inferredByKey[mapKey].updatedAt = createdAt;
+          }
+        });
+      });
+
+      const mergedByKey = new Map<string, SharedQuizTemplate>();
+
+      Object.values(inferredByKey).forEach((template) => {
+        const { signatures: _signatures, ...cleanTemplate } = template;
+        const key = `${template.sourceCourseId}::${template.normalizedTheme}`;
+        mergedByKey.set(key, cleanTemplate);
+      });
+
+      loadedSharedTemplates.forEach((template) => {
+        const templateKey = `${template.sourceCourseId}::${template.normalizedTheme}`;
+        const inferred = mergedByKey.get(templateKey);
+
+        if (!inferred) {
+          mergedByKey.set(templateKey, template);
+          return;
+        }
+
+        mergedByKey.set(templateKey, {
+          ...inferred,
+          ...template,
+          questionCount: Math.max(
+            template.questionCount || template.questions.length,
+            inferred.questionCount || inferred.questions.length,
+          ),
+          questions:
+            template.questions.length > 0
+              ? template.questions
+              : inferred.questions,
+          sourceCourseCode:
+            template.sourceCourseCode || inferred.sourceCourseCode,
+          sourceCourseName:
+            template.sourceCourseName || inferred.sourceCourseName,
+          ownerName: template.ownerName || inferred.ownerName,
+          ownerId: template.ownerId || inferred.ownerId,
+          updatedAt:
+            template.updatedAt.getTime() >= inferred.updatedAt.getTime()
+              ? template.updatedAt
+              : inferred.updatedAt,
+        });
+      });
+
+      setSharedTemplates(
+        Array.from(mergedByKey.values()).filter(
+          (template) =>
+            template.theme &&
+            (template.questions.length > 0 || template.questionCount > 0),
+        ),
+      );
+    } catch (error) {
+      console.error("Could not load shared quiz templates:", error);
+      setSharedTemplates([]);
+    } finally {
+      setLoadingSharedTemplates(false);
+    }
+  }, [
+    SHARED_TEMPLATE_COLLECTION,
+    availableCourses,
+    isTeacher,
+    user?.email,
+    user?.id,
+    user?.name,
+  ]);
+
   useEffect(() => {
     if (availableCourses.length === 0) {
       if (selectedCourseId) setSelectedCourseId("");
@@ -1473,6 +1793,15 @@ export default function ExerciseBankPage() {
     selectedCourseId,
     user?.id,
   ]);
+
+  useEffect(() => {
+    if (!isTeacher) {
+      setSharedTemplates([]);
+      return;
+    }
+
+    void loadSharedQuizTemplates();
+  }, [isTeacher, loadSharedQuizTemplates, selectedCourseId]);
 
   useEffect(() => {
     if (!selectedTheme || isTeacher) return;
@@ -1847,7 +2176,12 @@ export default function ExerciseBankPage() {
     if (!activeQuizStorageKey) return;
 
     try {
-      if (!isTeacher && quizStarted && selectedTheme && quizQuestions.length > 0) {
+      if (
+        !isTeacher &&
+        quizStarted &&
+        selectedTheme &&
+        quizQuestions.length > 0
+      ) {
         localStorage.setItem(quizGuardStorageKey, "1");
         localStorage.setItem(
           activeQuizStorageKey,
@@ -1867,9 +2201,7 @@ export default function ExerciseBankPage() {
           localStorage.removeItem(quizGuardStorageKey);
         }
       }
-    } catch {
-      // Best effort local persistence.
-    }
+    } catch {}
   }, [
     activeQuizStorageKey,
     answers,
@@ -2327,6 +2659,142 @@ export default function ExerciseBankPage() {
     }
   };
 
+  const publishThemeToSharedBank = async (theme: string) => {
+    if (!isTeacher || !user?.id || !selectedCourseId) return;
+
+    const normalizedTheme = theme.trim();
+    if (!normalizedTheme) return;
+
+    const themeQuestions = questions.filter(
+      (question) => question.theme.trim() === normalizedTheme,
+    );
+    if (themeQuestions.length === 0) return;
+
+    setPublishingTheme(normalizedTheme);
+    try {
+      const templateId = `template_${user.id}_${selectedCourseId}_${normalizeThemeKey(normalizedTheme)}`;
+      const templateRef = doc(
+        firebaseDB,
+        SHARED_TEMPLATE_COLLECTION,
+        templateId,
+      );
+      const existingTemplate = await getDoc(templateRef);
+      const createdAt = existingTemplate.exists()
+        ? existingTemplate.data().createdAt
+        : Timestamp.now();
+
+      await setDoc(
+        templateRef,
+        {
+          ownerId: user.id,
+          ownerName: user.name || user.email || "Teacher",
+          ownerEmail: user.email || "",
+          sourceCourseId: selectedCourseId,
+          sourceCourseCode: selectedCourse?.code || "",
+          sourceCourseName: selectedCourse?.name || "",
+          theme: normalizedTheme,
+          normalizedTheme: normalizeThemeKey(normalizedTheme),
+          questionCount: themeQuestions.length,
+          questions: themeQuestions.map((question) => ({
+            question: question.question.trim(),
+            options: question.options.map((option) => option.trim()),
+            correctOptionIndex: question.correctOptionIndex,
+          })),
+          createdAt,
+          updatedAt: Timestamp.now(),
+        },
+        { merge: true },
+      );
+
+      await loadSharedQuizTemplates();
+      alert(
+        `Theme "${normalizedTheme}" is now available in the shared quiz bank.`,
+      );
+    } catch (error) {
+      console.error("Could not publish shared quiz template:", error);
+      alert("Could not publish this theme to the shared bank.");
+    } finally {
+      setPublishingTheme(null);
+    }
+  };
+
+  const importSharedTemplateToCourse = async (template: SharedQuizTemplate) => {
+    if (!isTeacher || !user?.id || !selectedCourseId || importingTemplateId)
+      return;
+    if (!template.questions.length) return;
+
+    setImportingTemplateId(template.id);
+    try {
+      const existingSignatures = new Set(
+        questions.map((question) =>
+          buildQuestionSignature(
+            question.theme,
+            question.question,
+            question.options,
+            question.correctOptionIndex,
+          ),
+        ),
+      );
+
+      const templateSignatures = new Set<string>();
+      const questionsToImport = template.questions.filter((question) => {
+        const signature = buildQuestionSignature(
+          template.theme,
+          question.question,
+          question.options,
+          question.correctOptionIndex,
+        );
+        if (
+          existingSignatures.has(signature) ||
+          templateSignatures.has(signature)
+        ) {
+          return false;
+        }
+        templateSignatures.add(signature);
+        return true;
+      });
+
+      if (questionsToImport.length === 0) {
+        alert("All questions in this template already exist in your course.");
+        return;
+      }
+
+      const chunkSize = 350;
+      for (
+        let index = 0;
+        index < questionsToImport.length;
+        index += chunkSize
+      ) {
+        const chunk = questionsToImport.slice(index, index + chunkSize);
+        const batch = writeBatch(firebaseDB);
+        chunk.forEach((item) => {
+          const docRef = doc(collection(firebaseDB, "exerciseQuestions"));
+          batch.set(docRef, {
+            courseId: selectedCourseId,
+            theme: template.theme,
+            question: item.question.trim(),
+            options: item.options.map((option) => option.trim()),
+            correctOptionIndex: item.correctOptionIndex,
+            isPublished: false,
+            createdBy: user.id,
+            createdAt: new Date(),
+          });
+        });
+        await batch.commit();
+      }
+
+      await loadQuestions(selectedCourseId);
+      alert(
+        `Imported ${questionsToImport.length} question${questionsToImport.length === 1 ? "" : "s"} from "${template.theme}" as draft.`,
+      );
+    } catch (error) {
+      console.error("Could not import shared quiz template:", error);
+      alert("Could not import this shared template.");
+    } finally {
+      setImportingTemplateId(null);
+    }
+  };
+
   const handleDeleteQuestion = async (questionId: string) => {
     setDeletingId(questionId);
     try {
@@ -2461,19 +2929,30 @@ export default function ExerciseBankPage() {
     }
   };
 
-  const handleEditingChange = (field: string, value: any) => {
+  const handleEditingChange = (field: EditingField, value: unknown) => {
     switch (field) {
       case "theme":
-        setEditingTheme(value);
+        if (typeof value === "string") {
+          setEditingTheme(value);
+        }
         break;
       case "question":
-        setEditingQuestionText(value);
+        if (typeof value === "string") {
+          setEditingQuestionText(value);
+        }
         break;
       case "options":
-        setEditingOptions(value);
+        if (
+          Array.isArray(value) &&
+          value.every((item) => typeof item === "string")
+        ) {
+          setEditingOptions(value);
+        }
         break;
       case "correctOptionIndex":
-        setEditingCorrectOptionIndex(value);
+        if (typeof value === "number") {
+          setEditingCorrectOptionIndex(value);
+        }
         break;
     }
   };
@@ -2484,301 +2963,568 @@ export default function ExerciseBankPage() {
     setSelectedTheme("");
   };
 
-  return (
-    <DashboardLayout
-      title="Exercise Bank"
-      subtitle={
-        selectedCourse
-          ? `${selectedCourse.name} • ${selectedCourse.code}`
-          : "Select a course"
-      }
-      contentClassName="pt-0 lg:pt-1"
+  const renderSharedQuizBankPanel = () => (
+    <div
+      className={`overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all ${
+        showSharedQuizBank ? "ring-1 ring-sky-100" : ""
+      }`}
     >
-      <div className="space-y-2">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl p-6 shadow-lg">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="flex items-start gap-4">
-              <div className="h-12 w-12 rounded-xl bg-white/20 flex items-center justify-center">
-                <BookOpen className="h-6 w-6 text-white" />
+      {!showSharedQuizBank ? (
+        <div className="p-4">
+          <div className="rounded-2xl border border-sky-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4">
+            <div className="flex items-start gap-3">
+              <div className="h-9 w-9 rounded-xl bg-sky-100 flex items-center justify-center">
+                <Sparkles className="h-5 w-5 text-sky-600" />
               </div>
-              <div>
-                <div className="flex items-center gap-3">
-                  <h1 className="text-2xl font-bold text-white">
-                    Exercise Bank
-                  </h1>
-                  {selectedCourse && (
-                    <Link
-                      to={`/courses/${selectedCourse.code}/exercise-bank/stats`}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-white hover:bg-white/30 transition-colors"
-                      title={
-                        isTeacher ? "View quiz statistics" : "View my attempts"
-                      }
-                    >
-                      <BarChart3 className="h-4 w-4" />
-                    </Link>
-                  )}
-                </div>
-                <p className="text-blue-100 text-sm max-w-2xl">
-                  {isTeacher
-                    ? "Create and manage multiple-choice questions by theme. Organize content, track student progress, and link quizzes to grade sheets."
-                    : "Practice with interactive quizzes by theme. Track your progress and improve your knowledge step by step."}
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-slate-900">
+                  Want to reuse an existing quiz?
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  You can choose existing quizzes and import them into your
+                  course.
                 </p>
               </div>
             </div>
-            <div className="relative min-w-[260px]">
-              <div className="relative">
-                <School className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/80" />
-                <select
-                  className="w-full pl-10 pr-10 py-3 bg-white/20 backdrop-blur-sm border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-white/50 appearance-none cursor-pointer"
-                  value={selectedCourseId}
-                  onChange={(e) => handleCourseChange(e.target.value)}
-                >
-                  {availableCourses.map((course) => (
-                    <option
-                      key={course.id}
-                      value={course.id}
-                      className="text-gray-900"
-                    >
-                      {course.code} - {course.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/70 pointer-events-none" />
-              </div>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <p className="text-xs text-slate-500">
+                {sharedTemplates.length} quizzes available
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowSharedQuizBank(true)}
+                className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+                View quizzes
+              </button>
             </div>
           </div>
         </div>
-
-        {!selectedCourseId ? (
-          <div className="flex flex-col items-center justify-center min-h-[400px] bg-white border border-gray-200 rounded-2xl p-8">
-            <div className="h-20 w-20 rounded-full bg-blue-100 flex items-center justify-center mb-4">
-              <BookOpen className="h-8 w-8 text-blue-600" />
+      ) : (
+        <>
+          <div className="px-4 py-3 border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
+                  <Sparkles className="h-5 w-5 text-sky-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    Shared Quiz Bank
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Reuse, import, and publish quizzes across courses
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSharedQuizBank(false)}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back
+              </button>
             </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">
-              No course selected
-            </h3>
-            <p className="text-gray-600 text-center max-w-md">
-              Select a course from the dropdown above to access its exercise
-              bank.
-            </p>
           </div>
-        ) : (
-          <>
-            {/* Stats Cards */}
-            <div className="grid grid-cols-4 gap-2 sm:gap-4">
-              <StatCard
-                icon={<HelpCircle className="h-5 w-5" />}
-                label="Total Questions"
-                value={stats.totalQuestions}
-              />
-              <StatCard
-                icon={<Layers className="h-5 w-5" />}
-                label="Themes"
-                value={stats.totalThemes}
-              />
-              <StatCard
-                icon={
-                  isTeacher ? (
-                    <BarChart3 className="h-5 w-5" />
-                  ) : (
-                    <CheckCircle2 className="h-5 w-5" />
-                  )
-                }
-                label={isTeacher ? "Avg per Theme" : "Completed"}
-                value={
-                  isTeacher ? stats.questionsPerTheme : stats.completedQuizzes
-                }
-              />
-              <StatCard
-                icon={
-                  isTeacher ? (
-                    <Users className="h-5 w-5" />
-                  ) : (
-                    <Zap className="h-5 w-5" />
-                  )
-                }
-                label={isTeacher ? "Students" : "Available"}
-                value={
-                  isTeacher
-                    ? selectedCourse?.enrolledStudents?.length || 0
-                    : stats.pendingThemes
-                }
+
+          <div className="p-4 space-y-4 bg-gradient-to-b from-slate-50/50 to-white">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 lg:col-span-2">
+                <p className="text-xs font-semibold tracking-wide text-sky-700 mb-2">
+                Publish one of your themes
+                </p>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedThemeToPublish}
+                    onChange={(event) =>
+                      setSelectedThemeToPublish(event.target.value)
+                    }
+                    className="flex-1 min-w-0 rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500"
+                  >
+                    {availableThemes.length === 0 && (
+                      <option value="">No themes available</option>
+                    )}
+                    {availableThemes.map((theme) => (
+                      <option key={theme} value={theme}>
+                        {theme}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void publishThemeToSharedBank(selectedThemeToPublish);
+                    }}
+                    disabled={
+                      !selectedThemeToPublish ||
+                      publishingTheme === selectedThemeToPublish
+                    }
+                    className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {publishingTheme === selectedThemeToPublish ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    )}
+                    Publish
+                  </button>
+                </div>
+                {!selectedCourseId && (
+                  <p className="mt-2 text-[11px] text-sky-700">
+                    Select a course to publish or import quizzes.
+                  </p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-slate-100/80 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                    Shared templates
+                  </p>
+                  <p className="text-lg font-semibold text-slate-900">
+                    {sharedTemplates.length}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-slate-100/80 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                    From others
+                  </p>
+                  <p className="text-lg font-semibold text-slate-900">
+                    {sharedTemplatesFromOtherTeachersCount}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={sharedSearchQuery}
+                onChange={(event) => setSharedSearchQuery(event.target.value)}
+                placeholder="Search shared quizzes..."
+                className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
               />
             </div>
 
-            {/* Teacher Section */}
-            {isTeacher && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Left Column - Question Management */}
-                <div className="lg:col-span-2 space-y-2">
-                  {/* Create Question Card */}
-                  <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200 bg-white">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                            <PenTool className="h-5 w-5 text-blue-600" />
-                          </div>
-                          <div>
-                            <h2 className="text-lg font-bold text-gray-900">
-                              Create Questions
-                            </h2>
-                            <p className="text-sm text-gray-600">
-                              Add new questions to the bank
+            <div className="max-h-[62vh] overflow-y-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              {loadingSharedTemplates ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-sky-600" />
+                </div>
+              ) : filteredSharedTemplates.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-500">
+                  No shared templates found yet.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {filteredSharedTemplates.map((template) => {
+                    const isOwnTemplate = template.ownerId === user?.id;
+                    const canImportTemplate =
+                      Boolean(selectedCourseId) &&
+                      template.questions.length > 0;
+
+                    return (
+                      <article
+                        key={template.id}
+                        className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm transition hover:border-sky-200"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-slate-900 break-words">
+                              {template.theme}
+                            </p>
+                            <p className="text-xs text-slate-600 mt-1">
+                              {template.questionCount} questions
                             </p>
                           </div>
-                        </div>
-                        <button
-                          onClick={() => setShowCreatorForm(!showCreatorForm)}
-                          className={`p-2 rounded-lg transition-colors ${
-                            showCreatorForm
-                              ? "bg-gray-200 text-gray-700"
-                              : "hover:bg-gray-200 text-gray-600"
-                          }`}
-                        >
-                          {showCreatorForm ? (
-                            <X className="h-5 w-5" />
-                          ) : (
-                            <Plus className="h-5 w-5" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {showCreatorForm && (
-                      <div className="p-6 space-y-2">
-                        <div className="grid grid-cols-2 gap-3">
-                          <button
-                            onClick={() => setQuestionCreationMode("single")}
-                            className={`px-4 py-2.5 rounded-xl border font-medium transition-all ${
-                              questionCreationMode === "single"
-                                ? "border-blue-500 bg-blue-50 text-blue-700"
-                                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                          <span
+                            className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
+                              isOwnTemplate
+                                ? "bg-sky-100 text-sky-700"
+                                : "bg-emerald-100 text-emerald-700"
                             }`}
                           >
-                            Single Question
-                          </button>
-                          <button
-                            onClick={() => setQuestionCreationMode("bulk")}
-                            className={`px-4 py-2.5 rounded-xl border font-medium transition-all ${
-                              questionCreationMode === "bulk"
-                                ? "border-blue-500 bg-blue-50 text-blue-700"
-                                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                            }`}
-                          >
-                            Bulk Import
-                          </button>
+                            {isOwnTemplate ? "Your quiz" : "Community"}
+                          </span>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
-                          <button
-                            onClick={() => setThemeMode("existing")}
-                            className={`px-4 py-2.5 rounded-xl border font-medium transition-all ${
-                              themeMode === "existing"
-                                ? "border-blue-500 bg-blue-50 text-blue-700"
-                                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                            }`}
-                          >
-                            Existing Theme
-                          </button>
-                          <button
-                            onClick={() => setThemeMode("new")}
-                            className={`px-4 py-2.5 rounded-xl border font-medium transition-all ${
-                              themeMode === "new"
-                                ? "border-blue-500 bg-blue-50 text-blue-700"
-                                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                            }`}
-                          >
-                            New Theme
-                          </button>
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700">
+                            {template.sourceCourseCode || "No code"}
+                          </span>
+                          <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700">
+                            {template.ownerName || "Teacher"}
+                          </span>
+                          <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700">
+                            Updated {formatDate(template.updatedAt)}
+                          </span>
                         </div>
 
-                        {themeMode === "existing" ? (
-                          <select
-                            value={selectedExistingTheme}
-                            onChange={(e) =>
-                              setSelectedExistingTheme(e.target.value)
+                        <div className="mt-4 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void importSharedTemplateToCourse(template);
+                            }}
+                            disabled={
+                              !canImportTemplate ||
+                              (!!importingTemplateId &&
+                                importingTemplateId !== template.id)
                             }
-                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            <option value="">Select a theme</option>
-                            {availableThemes.map((theme) => (
-                              <option key={theme} value={theme}>
-                                {theme}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            value={themeInput}
-                            onChange={(e) => setThemeInput(e.target.value)}
-                            placeholder="Enter new theme name"
-                            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          />
-                        )}
+                            {importingTemplateId === template.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            )}
+                            Import to current course
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
 
-                        {questionCreationMode === "single" ? (
-                          <>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Question
-                              </label>
-                              <textarea
-                                value={questionInput}
-                                onChange={(e) => setQuestionInput(e.target.value)}
-                                placeholder="Enter your question here..."
-                                rows={3}
-                                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-                              />
+  return (
+    <DashboardLayout contentClassName="pt-0 lg:pt-1">
+      <div className="relative overflow-x-hidden">
+        <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+        <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-4">
+          <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <div className="pointer-events-none absolute -left-[70px] -top-[90px] h-[180px] w-[180px] rounded-full bg-sky-300/25" />
+            <div className="pointer-events-none absolute -right-[90px] -bottom-[90px] h-[200px] w-[200px] rounded-full bg-violet-300/20" />
+            <div className="relative z-10 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div>
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Exercise Workspace
+                </div>
+                <h2 className="mt-3 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
+                  Quiz Bank Studio
+                </h2>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Build question sets, publish themes, and track quiz progress by course.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
+                <label
+                  className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500"
+                  htmlFor="exercise-bank-course-select"
+                >
+                  Course Scope
+                </label>
+                <div className="relative">
+                  <BookOpen className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <select
+                    id="exercise-bank-course-select"
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    value={selectedCourseId}
+                    onChange={(e) => handleCourseChange(e.target.value)}
+                  >
+                    {availableCourses.length === 0 && (
+                      <option value="">No courses available</option>
+                    )}
+                    {availableCourses.map((course) => (
+                      <option key={course.id} value={course.id}>
+                        {course.code} - {course.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {isTeacher && (
+                  selectedCourse?.code ? (
+                    <Link
+                      to={`/courses/${selectedCourse.code}/exercise-bank/stats`}
+                      className="mt-2 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
+                    >
+                      <BarChart3 className="h-3.5 w-3.5" />
+                      View Quiz Stats
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className="mt-2 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-400"
+                    >
+                      <BarChart3 className="h-3.5 w-3.5" />
+                      View Quiz Stats
+                    </button>
+                  )
+                )}
+              </div>
+            </div>
+          </section>
+
+          <div className="mt-4 space-y-4">
+            {isTeacher && showSharedQuizBank ? (
+              <div className="mx-auto w-full max-w-7xl">
+                {renderSharedQuizBankPanel()}
+              </div>
+            ) : !selectedCourseId ? (
+              isTeacher ? (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2 flex flex-col items-center justify-center min-h-[400px] bg-white border border-slate-200 rounded-2xl p-8">
+                    <div className="h-20 w-20 rounded-full bg-sky-100 flex items-center justify-center mb-4">
+                      <BookOpen className="h-8 w-8 text-sky-600" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-900 mb-2">
+                      No course selected
+                    </h3>
+                    <p className="text-slate-600 text-center max-w-md">
+                      Select a course to create or import questions. The shared
+                      bank remains visible for all teachers.
+                    </p>
+                  </div>
+                  <div className="space-y-2">{renderSharedQuizBankPanel()}</div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center min-h-[400px] bg-white border border-slate-200 rounded-2xl p-8">
+                  <div className="h-20 w-20 rounded-full bg-sky-100 flex items-center justify-center mb-4">
+                    <BookOpen className="h-8 w-8 text-sky-600" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-900 mb-2">
+                    No course selected
+                  </h3>
+                  <p className="text-slate-600 text-center max-w-md">
+                    Select a course from the dropdown above to access its
+                    exercise bank.
+                  </p>
+                </div>
+              )
+            ) : (
+              <>
+                <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 sm:gap-4">
+                  <StatCard
+                    icon={<HelpCircle className="h-5 w-5" />}
+                    label="Total Questions"
+                    value={stats.totalQuestions}
+                    tone="sky"
+                  />
+                  <StatCard
+                    icon={<Layers className="h-5 w-5" />}
+                    label="Themes"
+                    value={stats.totalThemes}
+                    tone="indigo"
+                  />
+                  <StatCard
+                    icon={
+                      isTeacher ? (
+                        <BarChart3 className="h-5 w-5" />
+                      ) : (
+                        <CheckCircle2 className="h-5 w-5" />
+                      )
+                    }
+                    label={isTeacher ? "Avg per Theme" : "Completed"}
+                    value={
+                      isTeacher
+                        ? stats.questionsPerTheme
+                        : stats.completedQuizzes
+                    }
+                    tone="emerald"
+                  />
+                  <StatCard
+                    icon={
+                      isTeacher ? (
+                        <Sparkles className="h-5 w-5" />
+                      ) : (
+                        <Zap className="h-5 w-5" />
+                      )
+                    }
+                    label={isTeacher ? "Shared Quizzes" : "Available"}
+                    value={
+                      isTeacher
+                        ? sharedTemplatesFromOtherTeachersCount
+                        : stats.pendingThemes
+                    }
+                    tone="violet"
+                  />
+                </div>
+
+                {isTeacher && (
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
+                    <div className="lg:col-span-2 space-y-2">
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                        <div className="px-4 py-3 border-b border-slate-200 bg-white">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="h-8 w-8 rounded-lg bg-sky-100 flex items-center justify-center">
+                                <PenTool className="h-4 w-4 text-sky-600" />
+                              </div>
+                              <div>
+                                <h2 className="text-base font-bold text-slate-900">
+                                  Create Questions
+                                </h2>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() =>
+                                setShowCreatorForm(!showCreatorForm)
+                              }
+                              className={`p-2 rounded-lg transition-colors ${
+                                showCreatorForm
+                                  ? "bg-slate-200 text-slate-700"
+                                  : "hover:bg-slate-200 text-slate-600"
+                              }`}
+                            >
+                              {showCreatorForm ? (
+                                <X className="h-5 w-5" />
+                              ) : (
+                                <Plus className="h-5 w-5" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        {showCreatorForm && (
+                          <div className="space-y-3 p-3">
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() =>
+                                  setQuestionCreationMode("single")
+                                }
+                                className={`h-9 rounded-lg border px-3 text-sm font-semibold transition ${
+                                  questionCreationMode === "single"
+                                    ? "border-sky-500 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                                }`}
+                              >
+                                Single Question
+                              </button>
+                              <button
+                                onClick={() => setQuestionCreationMode("bulk")}
+                                className={`h-9 rounded-lg border px-3 text-sm font-semibold transition ${
+                                  questionCreationMode === "bulk"
+                                    ? "border-sky-500 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                                }`}
+                              >
+                                Bulk Import
+                              </button>
                             </div>
 
-                            <div className="space-y-2">
-                              <label className="block text-sm font-medium text-gray-700">
-                                Answer Options
-                              </label>
-                              {optionsInput.map((option, index) => (
-                                <div
-                                  key={index}
-                                  className="flex items-center gap-3"
-                                >
-                                  <input
-                                    type="radio"
-                                    checked={correctOptionIndex === index}
-                                    onChange={() =>
-                                      setCorrectOptionIndex(index)
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => setThemeMode("existing")}
+                                className={`h-9 rounded-lg border px-3 text-sm font-semibold transition ${
+                                  themeMode === "existing"
+                                    ? "border-sky-500 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                                }`}
+                              >
+                                Existing Theme
+                              </button>
+                              <button
+                                onClick={() => setThemeMode("new")}
+                                className={`h-9 rounded-lg border px-3 text-sm font-semibold transition ${
+                                  themeMode === "new"
+                                    ? "border-sky-500 bg-sky-50 text-sky-700"
+                                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                                }`}
+                              >
+                                New Theme
+                              </button>
+                            </div>
+
+                            {themeMode === "existing" ? (
+                              <select
+                                value={selectedExistingTheme}
+                                onChange={(e) =>
+                                  setSelectedExistingTheme(e.target.value)
+                                }
+                                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                              >
+                                <option value="">Select a theme</option>
+                                {availableThemes.map((theme) => (
+                                  <option key={theme} value={theme}>
+                                    {theme}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                value={themeInput}
+                                onChange={(e) => setThemeInput(e.target.value)}
+                                placeholder="Enter new theme name"
+                                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                              />
+                            )}
+
+                            {questionCreationMode === "single" ? (
+                              <>
+                                <div>
+                                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                    Question
+                                  </label>
+                                  <textarea
+                                    value={questionInput}
+                                    onChange={(e) =>
+                                      setQuestionInput(e.target.value)
                                     }
-                                    className="h-4 w-4 text-blue-600 focus:ring-blue-500"
-                                  />
-                                  <input
-                                    value={option}
-                                    onChange={(e) => {
-                                      setOptionsInput((prev) =>
-                                        prev.map((v, i) =>
-                                          i === index ? e.target.value : v,
-                                        ),
-                                      );
-                                    }}
-                                    placeholder={`Option ${index + 1}`}
-                                    className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="Enter your question here..."
+                                    rows={2}
+                                    className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                                   />
                                 </div>
-                              ))}
-                            </div>
-                          </>
-                        ) : (
-                          <div className="space-y-2">
-                            <label className="block text-sm font-medium text-gray-700">
-                              Bulk Import Format
-                            </label>
-                            <textarea
-                              value={bulkQuestionsInput}
-                              onChange={(e) =>
-                                setBulkQuestionsInput(e.target.value)
-                              }
-                              rows={8}
-                              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                              placeholder={`Q: What is the correct form of "to be" for I?
+
+                                <div className="space-y-1.5">
+                                  <label className="block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                    Answer Options
+                                  </label>
+                                  {optionsInput.map((option, index) => (
+                                    <div
+                                      key={index}
+                                      className="flex items-center gap-2"
+                                    >
+                                      <input
+                                        type="radio"
+                                        checked={correctOptionIndex === index}
+                                        onChange={() =>
+                                          setCorrectOptionIndex(index)
+                                        }
+                                        className="h-3.5 w-3.5 text-sky-600 focus:ring-sky-500"
+                                      />
+                                      <input
+                                        value={option}
+                                        onChange={(e) => {
+                                        setOptionsInput((prev) =>
+                                          prev.map((v, i) =>
+                                            i === index ? e.target.value : v,
+                                          ),
+                                        );
+                                      }}
+                                        placeholder={`Option ${index + 1}`}
+                                        className="h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            ) : (
+                              <div className="space-y-1.5">
+                                <label className="block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                  Bulk Import Format
+                                </label>
+                                <textarea
+                                  value={bulkQuestionsInput}
+                                  onChange={(e) =>
+                                    setBulkQuestionsInput(e.target.value)
+                                  }
+                                  rows={6}
+                                  className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                                  placeholder={`Q: What is the correct form of "to be" for I?
 A) am
 B) is
 C) are
@@ -2791,825 +3537,930 @@ A) goed
 B) went
 C) gone
 D) goes
-Correct: B`}
-                            />
-                            <p className="text-xs text-gray-500">
-                              Use --- to separate questions. Format: Q: for
-                              question, A)/B)/C)/D) for options, Correct: for
-                              answer.
-                            </p>
-                          </div>
-                        )}
-
-                        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
-                          <div>
-                            <p className="font-medium text-gray-700">
-                              Initial Visibility
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              Choose if students can see these questions
-                            </p>
-                          </div>
-                          <select
-                            value={publishOnCreate ? "published" : "draft"}
-                            onChange={(e) =>
-                              setPublishOnCreate(e.target.value === "published")
-                            }
-                            className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white"
-                          >
-                            <option value="draft">Draft</option>
-                            <option value="published">Published</option>
-                          </select>
-                        </div>
-
-                        <button
-                          onClick={handleCreateQuestion}
-                          disabled={
-                            saving ||
-                            (themeMode === "existing" &&
-                              !selectedExistingTheme) ||
-                            (themeMode === "new" && !themeInput.trim())
-                          }
-                          className="w-full py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {saving ? (
-                            <span className="flex items-center justify-center gap-2">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Creating...
-                            </span>
-                          ) : (
-                            <span className="flex items-center justify-center gap-2">
-                              <Plus className="h-4 w-4" />
-                              {questionCreationMode === "single"
-                                ? "Add Question"
-                                : `Import ${bulkQuestionsInput.split("---").length} Questions`}
-                            </span>
-                          )}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Question Bank */}
-                  <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
-                    <div className="px-6 py-4 border-b border-gray-200">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                            <BookOpen className="h-5 w-5 text-blue-600" />
-                          </div>
-                          <div>
-                            <h2 className="text-lg font-bold text-gray-900">
-                              Question Bank
-                            </h2>
-                            <p className="text-sm text-gray-600">
-                              {filteredQuestions.length} questions
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500">
-                            {Object.keys(pendingQuestionUpdates).length} unsaved
-                          </span>
-                          <button
-                            onClick={saveAllQuestionChanges}
-                            disabled={
-                              savingAllQuestionChanges ||
-                              Object.keys(pendingQuestionUpdates).length === 0
-                            }
-                            className="px-3 py-1.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {savingAllQuestionChanges
-                              ? "Saving..."
-                              : "Save All"}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row gap-3 mt-4">
-                        <div className="flex-1 relative">
-                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                          <input
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search questions..."
-                            className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          />
-                        </div>
-                        <div className="flex gap-2">
-                          <select
-                            value={questionFilter}
-                            onChange={(e) =>
-                              setQuestionFilter(
-                                e.target.value as QuestionFilter,
-                              )
-                            }
-                            className="px-3 py-2 rounded-lg border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="all">All</option>
-                            <option value="published">Published</option>
-                            <option value="draft">Draft</option>
-                          </select>
-                          <button
-                            onClick={() =>
-                              setViewMode(viewMode === "grid" ? "list" : "grid")
-                            }
-                            className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                          >
-                            {viewMode === "grid" ? (
-                              <List className="h-4 w-4" />
-                            ) : (
-                              <Grid className="h-4 w-4" />
+                                  Correct: B`}
+                                />
+                                <p className="text-[11px] text-slate-500">
+                                  Use --- to separate questions. Format: Q: for
+                                  question, A)/B)/C)/D) for options, Correct:
+                                  for answer.
+                                </p>
+                              </div>
                             )}
-                          </button>
-                        </div>
-                      </div>
 
-                      <div className="mt-2 p-2 bg-gray-50 rounded-xl text-[14px]">
-                        <p className="text-xs font-semibold tracking-wide text-gray-600 mb-3">
-                          Bulk Actions
-                        </p>
-                        <div className="flex flex-wrap gap-3">
-                          <select
-                            value={bulkVisibilityAction}
-                            onChange={(e) =>
-                              setBulkVisibilityAction(
-                                e.target.value as "publish" | "draft",
-                              )
-                            }
-                            className="flex-1 min-w-[160px] px-2 py-2 rounded-lg border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="publish">Publish drafts</option>
-                            <option value="draft">Unpublish</option>
-                          </select>
-                          <select
-                            value={bulkPublishTheme}
-                            onChange={(e) =>
-                              setBulkPublishTheme(e.target.value)
-                            }
-                            className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="all">All themes</option>
-                            {availableThemes.map((theme) => (
-                              <option key={theme} value={theme}>
-                                {theme}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            onClick={applyBulkVisibilityByTheme}
-                            disabled={
-                              bulkPublishing || bulkVisibilityTargetCount === 0
-                            }
-                            className={`px-4 py-2 rounded-lg text-white font-semibold transition-colors ${
-                              bulkVisibilityAction === "publish"
-                                ? "bg-blue-600 hover:bg-blue-700"
-                                : "bg-gray-600 hover:bg-gray-700"
-                            } disabled:opacity-50 disabled:cursor-not-allowed`}
-                          >
-                            {bulkPublishing ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              `${bulkVisibilityAction === "publish" ? "Publish" : "Unpublish"} (${bulkVisibilityTargetCount})`
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="p-6 max-h-[600px] overflow-y-auto">
-                      {loading ? (
-                        <div className="flex items-center justify-center py-12">
-                          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-                        </div>
-                      ) : filteredQuestions.length === 0 ? (
-                        <div className="text-center py-12">
-                          <div className="h-16 w-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
-                            <HelpCircle className="h-8 w-8 text-gray-400" />
-                          </div>
-                          <p className="text-gray-600">No questions found</p>
-                          <p className="text-sm text-gray-500">
-                            Try adjusting your filters or create a new question
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {groupedFilteredQuestions.map(
-                            ([theme, themeQuestions]) => {
-                              const isExpanded = expandedThemes[theme] ?? true;
-
-                              return (
-                                <div
-                                  key={theme}
-                                  className="rounded-xl border border-gray-200"
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setExpandedThemes((prev) => ({
-                                        ...prev,
-                                        [theme]: !isExpanded,
-                                      }))
-                                    }
-                                    className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors rounded-xl"
-                                  >
-                                    <div className="text-left">
-                                      <p className="font-semibold text-gray-900">
-                                        {theme}
-                                      </p>
-                                      <p className="text-xs text-gray-500">
-                                        {themeQuestions.length} questions
-                                      </p>
-                                    </div>
-                                    <ChevronDown
-                                      className={`h-4 w-4 text-gray-500 transition-transform ${
-                                        isExpanded ? "rotate-180" : ""
-                                      }`}
-                                    />
-                                  </button>
-
-                                  {isExpanded && (
-                                    <div className="p-4">
-                                      <div
-                                        className={
-                                          viewMode === "grid"
-                                            ? "grid grid-cols-1 gap-4"
-                                            : "space-y-2"
-                                        }
-                                      >
-                                        {themeQuestions.map((question) => (
-                                          <QuestionCard
-                                            key={question.id}
-                                            question={question}
-                                            isEditing={
-                                              editingQuestionId === question.id
-                                            }
-                                            hasUnsavedChanges={
-                                              !!pendingQuestionUpdates[
-                                                question.id
-                                              ]
-                                            }
-                                            onEdit={() =>
-                                              startEditingQuestion(question)
-                                            }
-                                            onCancelEdit={cancelEditingQuestion}
-                                            onSaveEdit={queueEditedQuestion}
-                                            onTogglePublish={() =>
-                                              handleToggleQuestionPublish(
-                                                question,
-                                              )
-                                            }
-                                            onDelete={() =>
-                                              setShowDeleteConfirm(question.id)
-                                            }
-                                            isDeleting={deletingId === question.id}
-                                            editingValues={{
-                                              theme: editingTheme,
-                                              question: editingQuestionText,
-                                              options: editingOptions,
-                                              correctOptionIndex:
-                                                editingCorrectOptionIndex,
-                                            }}
-                                            onEditingChange={handleEditingChange}
-                                          />
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            },
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right Column - Teacher Tools */}
-                <div className="space-y-2">
-                  {/* Student Preview */}
-                  <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
-                    <div className="px-6 py-4 border-b border-gray-200 bg-white">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-lg bg-gray-100 flex items-center justify-center">
-                          <Eye className="h-5 w-5 text-gray-600" />
-                        </div>
-                        <div>
-                          <h2 className="text-lg font-bold text-gray-900">
-                            Student Preview
-                          </h2>
-                          <p className="text-sm text-gray-600">
-                            How students see available themes
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="p-6">
-                      <div className="space-y-2">
-                        {studentAvailableThemes.slice(0, 5).map((theme) => (
-                          <div
-                            key={theme}
-                            className="flex items-center justify-between p-3 bg-gray-50 rounded-xl"
-                          >
-                            <div className="flex items-center gap-3">
-                              <BookMarked className="h-4 w-4 text-gray-400" />
-                              <span className="text-sm font-medium text-gray-700">
-                                {theme}
-                              </span>
+                            <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                Initial Visibility
+                              </p>
+                              <select
+                                value={publishOnCreate ? "published" : "draft"}
+                                onChange={(e) =>
+                                  setPublishOnCreate(
+                                    e.target.value === "published",
+                                  )
+                                }
+                                className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700"
+                              >
+                                <option value="draft">Draft</option>
+                                <option value="published">Published</option>
+                              </select>
                             </div>
-                            <span className="text-xs text-gray-500">
-                              {
-                                publishedQuestions.filter(
-                                  (q) => q.theme === theme,
-                                ).length
-                              }{" "}
-                              questions
-                            </span>
-                          </div>
-                        ))}
-                        {studentAvailableThemes.length === 0 && (
-                          <p className="text-sm text-gray-500 text-center py-4">
-                            Publish questions to see the student view
-                          </p>
-                        )}
-                        <div className="mt-4 pt-4 border-t border-gray-200">
-                          <p className="text-xs text-gray-500">
-                            <span className="font-medium text-blue-600">Linked themes:</span> 1 attempt •{" "}
-                            <span className="font-medium text-blue-600">Practice themes:</span>{" "}
-                            {MAX_UNLINKED_ATTEMPTS} attempts
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
 
-                     {/* Link to Grade Sheets */}
-                  <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
-                    <div className="px-6 py-4 border-b border-gray-200">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                          <FileText className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div>
-                          <h2 className="text-lg font-bold text-gray-900">
-                            Link to Grade Sheets
-                          </h2>
-                          <p className="text-sm text-gray-600">
-                            Connect themes to grade books
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="p-6 max-h-[300px] overflow-y-auto">
-                      <div className="space-y-2">
-                        {availableThemes.map((theme) => (
-                          <div
-                            key={theme}
-                            className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"
-                          >
-                            <p className="flex-1 text-sm font-medium text-gray-700 whitespace-normal break-words leading-5">
-                              {theme}
-                            </p>
-                            <select
-                              value={themeLinksByTheme[theme] || ""}
-                              onChange={(e) =>
-                                handleThemeLinkChange(theme, e.target.value)
-                              }
-                              disabled={savingThemeLink === theme}
-                              className="w-[180px] px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm focus:ring-2 focus:ring-blue-500"
-                            >
-                              <option value="">No sheet</option>
-                              {courseGradeSheets.map((sheet) => (
-                                <option key={sheet.id} value={sheet.id}>
-                                  {sheet.title}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        ))}
-                        {availableThemes.length === 0 && (
-                          <p className="text-sm text-gray-500 text-center py-4">
-                            Create themes first to link them to grade sheets
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Course Statistics */}
-                  <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
-                    <div className="px-6 py-4 border-b border-gray-200">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                          <BarChart3 className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div>
-                          <h2 className="text-lg font-bold text-gray-900">
-                            Course Statistics
-                          </h2>
-                          <p className="text-sm text-gray-600">
-                            Overview of {selectedCourse?.name}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="p-6">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="p-4 bg-gray-50 rounded-xl">
-                          <p className="text-xs text-gray-500 mb-1">Students</p>
-                          <p className="text-2xl font-bold text-gray-900">
-                            {selectedCourse?.enrolledStudents?.length || 0}
-                          </p>
-                        </div>
-                        <div className="p-4 bg-gray-50 rounded-xl">
-                          <p className="text-xs text-gray-500 mb-1">
-                            Published
-                          </p>
-                          <p className="text-2xl font-bold text-green-600">
-                            {stats.publishedCount}
-                          </p>
-                        </div>
-                        <div className="p-4 bg-gray-50 rounded-xl">
-                          <p className="text-xs text-gray-500 mb-1">Drafts</p>
-                          <p className="text-2xl font-bold text-gray-600">
-                            {stats.draftCount}
-                          </p>
-                        </div>
-                        <div className="p-4 bg-gray-50 rounded-xl">
-                          <p className="text-xs text-gray-500 mb-1">Themes</p>
-                          <p className="text-2xl font-bold text-blue-600">
-                            {stats.totalThemes}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-               
-                </div>
-              </div>
-            )}
-
-            {/* Student Section */}
-            {!isTeacher && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 space-y-2">
-                  <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
-                    <div className="px-6 py-4 border-b border-gray-200">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                            <Layers className="h-5 w-5 text-blue-600" />
-                          </div>
-                          <div>
-                            <h2 className="text-lg font-bold text-gray-900">
-                              Available Themes
-                            </h2>
-                            <p className="text-sm text-gray-600">
-                              {studentAvailableThemes.length} themes •{" "}
-                              {stats.completedQuizzes} completed
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="p-6">
-                      {studentAvailableThemes.length === 0 ? (
-                        <div className="text-center py-12">
-                          <div className="h-16 w-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
-                            <BookOpen className="h-8 w-8 text-gray-400" />
-                          </div>
-                          <p className="text-gray-600">
-                            No themes available yet
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            Check back later for new exercises
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {studentAvailableThemes.map((theme) => {
-                            const attempt = attemptsByTheme[theme];
-                            const attemptCount = getThemeAttemptCount(theme);
-                            const linkedTheme = isLinkedTheme(theme);
-                            const canTake = canTakeTheme(theme);
-                            const questionCount = publishedQuestions.filter(
-                              (q) => q.theme === theme,
-                            ).length;
-
-                            return (
-                              <ThemeCard
-                                key={theme}
-                                theme={theme}
-                                questionCount={questionCount}
-                                isLinked={linkedTheme}
-                                maxAttempts={MAX_UNLINKED_ATTEMPTS}
-                                attempt={attempt}
-                                attemptCount={attemptCount}
-                                isSelected={selectedTheme === theme}
-                                canTake={canTake}
-                                onSelect={() => {
-                                  void handleSelectTheme(theme);
-                                }}
-                                onStart={() => {
-                                  void handleStartTheme(theme);
-                                }}
-                              />
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {selectedTheme && (
-                    <div
-                      ref={quizStartSectionRef}
-                      className="bg-white border border-gray-200 rounded-2xl shadow-sm"
-                    >
-                      <div className="px-6 py-4 border-b border-gray-200">
-                        <h3 className="text-lg font-bold text-gray-900">
-                          Selected Theme: {selectedTheme}
-                        </h3>
-                        <p className="text-sm text-gray-600 mt-1">
-                          Quiz workspace and current progress
-                        </p>
-                      </div>
-                      <div className="p-6">
-                        {quizStarted && currentQuizQuestion ? (
-                          <QuizQuestionView
-                            question={currentQuizQuestion}
-                            currentIndex={currentQuestionIndex}
-                            totalQuestions={quizQuestions.length}
-                            selectedAnswer={answers[currentQuizQuestion.id]}
-                            timeLeft={timeLeftSeconds}
-                            onAnswer={(questionId, optionIndex) =>
-                              setAnswers((prev) => ({
-                                ...prev,
-                                [questionId]: optionIndex,
-                              }))
-                            }
-                            onNext={() =>
-                              setCurrentQuestionIndex((prev) => prev + 1)
-                            }
-                            onPrevious={() =>
-                              setCurrentQuestionIndex((prev) =>
-                                Math.max(0, prev - 1),
-                              )
-                            }
-                            onFinish={() => finishQuiz("manual")}
-                          />
-                        ) : result ? (
-                          <QuizResultView
-                            result={result}
-                            gradingMessage={gradingMessage}
-                            onClose={handleCloseResult}
-                          />
-                        ) : selectedThemeAttempt && selectedThemeIsLinked ? (
-                          <div className="text-center py-8">
-                            <div className="h-16 w-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-                              <CheckCircle className="h-8 w-8 text-green-600" />
-                            </div>
-                            <h4 className="text-lg font-semibold text-gray-900 mb-2">
-                              Quiz Already Completed
-                            </h4>
-                            <p className="text-gray-600 mb-4">
-                              Your score: {selectedThemeAttempt.correct} /{" "}
-                              {selectedThemeAttempt.total} (
-                              {selectedThemeAttempt.percentage}%)
-                            </p>
                             <button
-                              onClick={() => setSelectedTheme("")}
-                              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                              onClick={handleCreateQuestion}
+                              disabled={
+                                saving ||
+                                (themeMode === "existing" &&
+                                  !selectedExistingTheme) ||
+                                (themeMode === "new" && !themeInput.trim())
+                              }
+                              className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              Choose Another Theme
+                              {saving ? (
+                                <span className="flex items-center justify-center gap-2">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Creating...
+                                </span>
+                              ) : (
+                                <span className="flex items-center justify-center gap-2">
+                                  <Plus className="h-4 w-4" />
+                                  {questionCreationMode === "single"
+                                    ? "Add Question"
+                                    : `Import ${bulkQuestionsInput.split("---").length} Questions`}
+                                </span>
+                              )}
                             </button>
                           </div>
-                        ) : (
-                          <div className="text-center py-12">
-                            <p className="text-gray-600">
-                              Click "Start Quiz" to begin
-                            </p>
-                          </div>
                         )}
                       </div>
-                    </div>
-                  )}
-                </div>
 
-                <div className="space-y-2">
-                  {Object.keys(attemptsByTheme).length > 0 && (
-                    <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
-                      <div className="px-6 py-4 border-b border-gray-200">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-lg bg-green-100 flex items-center justify-center">
-                            <TrendingUp className="h-5 w-5 text-green-600" />
-                          </div>
-                          <div>
-                            <h3 className="text-lg font-bold text-gray-900">
-                              Progress Overview
-                            </h3>
-                            <p className="text-sm text-gray-600">
-                              Completion status by theme
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="p-6">
-                        <div className="space-y-2">
-                          <div>
-                            <div className="flex justify-between text-sm mb-2">
-                              <span className="text-gray-600">
-                                Themes Completed
-                              </span>
-                              <span className="font-semibold text-gray-900">
-                                {stats.completedQuizzes}/{stats.totalThemes}
-                              </span>
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                        <div className="px-4 py-3 border-b border-slate-200">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                              <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
+                                <BookOpen className="h-5 w-5 text-sky-600" />
+                              </div>
+                              <div>
+                                <h2 className="text-base font-bold text-slate-900">
+                                  Question Bank
+                                </h2>
+                                <p className="text-xs text-slate-500">
+                                  {filteredQuestions.length} questions
+                                </p>
+                              </div>
                             </div>
-                            <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-green-500 rounded-full transition-all"
-                                style={{
-                                  width:
-                                    stats.totalThemes > 0
-                                      ? `${(stats.completedQuizzes / stats.totalThemes) * 100}%`
-                                      : "0%",
-                                }}
+
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-slate-500">
+                                {Object.keys(pendingQuestionUpdates).length}{" "}
+                                unsaved
+                              </span>
+                              <button
+                                onClick={saveAllQuestionChanges}
+                                disabled={
+                                  savingAllQuestionChanges ||
+                                  Object.keys(pendingQuestionUpdates).length ===
+                                    0
+                                }
+                                className="inline-flex h-8 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {savingAllQuestionChanges
+                                  ? "Saving..."
+                                  : "Save All"}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                            <div className="flex-1 relative">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                              <input
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Search questions..."
+                                className="w-full pl-9 pr-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                               />
                             </div>
+                            <div className="flex gap-2">
+                              <select
+                                value={questionFilter}
+                                onChange={(e) =>
+                                  setQuestionFilter(
+                                    e.target.value as QuestionFilter,
+                                  )
+                                }
+                                className="px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-sky-500"
+                              >
+                                <option value="all">All</option>
+                                <option value="published">Published</option>
+                                <option value="draft">Draft</option>
+                              </select>
+                              <button
+                                onClick={() =>
+                                  setViewMode(
+                                    viewMode === "grid" ? "list" : "grid",
+                                  )
+                                }
+                                className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+                              >
+                                {viewMode === "grid" ? (
+                                  <List className="h-4 w-4" />
+                                ) : (
+                                  <Grid className="h-4 w-4" />
+                                )}
+                              </button>
+                            </div>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-3 pt-2">
-                            <div className="p-4 bg-gray-50 rounded-xl text-center">
-                              <p className="text-2xl font-bold text-gray-900">
-                                {stats.completedQuizzes}
-                              </p>
-                              <p className="text-xs text-gray-600">Completed</p>
+                          <div className="mt-2 p-2 bg-slate-50 rounded-xl text-[14px]">
+                            <p className="text-xs font-semibold tracking-wide text-slate-600 mb-3">
+                              Bulk Actions
+                            </p>
+                            <div className="flex flex-wrap gap-3">
+                              <select
+                                value={bulkVisibilityAction}
+                                onChange={(e) =>
+                                  setBulkVisibilityAction(
+                                    e.target.value as "publish" | "draft",
+                                  )
+                                }
+                                className="flex-1 min-w-[160px] px-2 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-sky-500"
+                              >
+                                <option value="publish">Publish drafts</option>
+                                <option value="draft">Unpublish</option>
+                              </select>
+                              <select
+                                value={bulkPublishTheme}
+                                onChange={(e) =>
+                                  setBulkPublishTheme(e.target.value)
+                                }
+                                className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-sky-500"
+                              >
+                                <option value="all">All themes</option>
+                                {availableThemes.map((theme) => (
+                                  <option key={theme} value={theme}>
+                                    {theme}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                onClick={applyBulkVisibilityByTheme}
+                                disabled={
+                                  bulkPublishing ||
+                                  bulkVisibilityTargetCount === 0
+                                }
+                                className={`inline-flex h-9 items-center justify-center rounded-lg px-4 text-xs font-semibold transition ${
+                                  bulkVisibilityAction === "publish"
+                                    ? "border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                                    : "border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                              >
+                                {bulkPublishing ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  `${bulkVisibilityAction === "publish" ? "Publish" : "Unpublish"} (${bulkVisibilityTargetCount})`
+                                )}
+                              </button>
                             </div>
-                            <div className="p-4 bg-gray-50 rounded-xl text-center">
-                              <p className="text-2xl font-bold text-gray-900">
-                                {stats.pendingThemes}
+                          </div>
+                        </div>
+
+                        <div className="p-4 max-h-[65vh] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                          {loading ? (
+                            <div className="flex items-center justify-center py-12">
+                              <Loader2 className="h-8 w-8 animate-spin text-sky-600" />
+                            </div>
+                          ) : filteredQuestions.length === 0 ? (
+                            <div className="text-center py-12">
+                              <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                                <HelpCircle className="h-8 w-8 text-slate-400" />
+                              </div>
+                              <p className="text-slate-600">
+                                No questions found
                               </p>
-                              <p className="text-xs text-gray-600">Pending</p>
+                              <p className="text-sm text-slate-500">
+                                Try adjusting your filters or create a new
+                                question
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              {groupedFilteredQuestions.map(
+                                ([theme, themeQuestions]) => {
+                                  const isExpanded =
+                                    expandedThemes[theme] ?? true;
+
+                                  return (
+                                    <div
+                                      key={theme}
+                                      className="rounded-xl border border-slate-200"
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setExpandedThemes((prev) => ({
+                                            ...prev,
+                                            [theme]: !isExpanded,
+                                          }))
+                                        }
+                                        className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors rounded-xl"
+                                      >
+                                        <div className="text-left">
+                                          <p className="font-semibold text-slate-900">
+                                            {theme}
+                                          </p>
+                                          <p className="text-xs text-slate-500">
+                                            {themeQuestions.length} questions
+                                          </p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={(event) => {
+                                              event.preventDefault();
+                                              event.stopPropagation();
+                                              void publishThemeToSharedBank(
+                                                theme,
+                                              );
+                                            }}
+                                            disabled={publishingTheme === theme}
+                                            className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-white px-2 py-1 text-[11px] font-semibold text-sky-700 hover:bg-sky-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                          >
+                                            {publishingTheme === theme ? (
+                                              <Loader2 className="h-3 w-3 animate-spin" />
+                                            ) : (
+                                              <ExternalLink className="h-3 w-3" />
+                                            )}
+                                            Share
+                                          </button>
+                                          <ChevronDown
+                                            className={`h-4 w-4 text-slate-500 transition-transform ${
+                                              isExpanded ? "rotate-180" : ""
+                                            }`}
+                                          />
+                                        </div>
+                                      </button>
+
+                                      {isExpanded && (
+                                        <div className="p-4">
+                                          {viewMode === "grid" ? (
+                                            <div className="space-y-2">
+                                              <div className="overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                                                <div className="flex snap-x snap-mandatory gap-3 pr-1">
+                                                  {themeQuestions.map((question) => (
+                                                    <div
+                                                      key={question.id}
+                                                      className="w-[320px] shrink-0 snap-start sm:w-[360px] lg:w-[420px]"
+                                                    >
+                                                      <QuestionCard
+                                                        question={question}
+                                                        isEditing={
+                                                          editingQuestionId ===
+                                                          question.id
+                                                        }
+                                                        hasUnsavedChanges={
+                                                          !!pendingQuestionUpdates[
+                                                            question.id
+                                                          ]
+                                                        }
+                                                        onEdit={() =>
+                                                          startEditingQuestion(question)
+                                                        }
+                                                        onCancelEdit={
+                                                          cancelEditingQuestion
+                                                        }
+                                                        onSaveEdit={queueEditedQuestion}
+                                                        onTogglePublish={() =>
+                                                          handleToggleQuestionPublish(
+                                                            question,
+                                                          )
+                                                        }
+                                                        onDelete={() =>
+                                                          setShowDeleteConfirm(
+                                                            question.id,
+                                                          )
+                                                        }
+                                                        isDeleting={
+                                                          deletingId === question.id
+                                                        }
+                                                        editingValues={{
+                                                          theme: editingTheme,
+                                                          question: editingQuestionText,
+                                                          options: editingOptions,
+                                                          correctOptionIndex:
+                                                            editingCorrectOptionIndex,
+                                                        }}
+                                                        onEditingChange={
+                                                          handleEditingChange
+                                                        }
+                                                      />
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                              <p className="text-[11px] text-slate-500">
+                                                Scroll horizontally to view all cards.
+                                              </p>
+                                            </div>
+                                          ) : (
+                                            <div className="space-y-2">
+                                              {themeQuestions.map((question) => (
+                                                <QuestionCard
+                                                  key={question.id}
+                                                  question={question}
+                                                  isEditing={
+                                                    editingQuestionId ===
+                                                    question.id
+                                                  }
+                                                  hasUnsavedChanges={
+                                                    !!pendingQuestionUpdates[
+                                                      question.id
+                                                    ]
+                                                  }
+                                                  onEdit={() =>
+                                                    startEditingQuestion(question)
+                                                  }
+                                                  onCancelEdit={
+                                                    cancelEditingQuestion
+                                                  }
+                                                  onSaveEdit={queueEditedQuestion}
+                                                  onTogglePublish={() =>
+                                                    handleToggleQuestionPublish(
+                                                      question,
+                                                    )
+                                                  }
+                                                  onDelete={() =>
+                                                    setShowDeleteConfirm(
+                                                      question.id,
+                                                    )
+                                                  }
+                                                  isDeleting={
+                                                    deletingId === question.id
+                                                  }
+                                                  editingValues={{
+                                                    theme: editingTheme,
+                                                    question: editingQuestionText,
+                                                    options: editingOptions,
+                                                    correctOptionIndex:
+                                                      editingCorrectOptionIndex,
+                                                  }}
+                                                  onEditingChange={
+                                                    handleEditingChange
+                                                  }
+                                                />
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                },
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 lg:sticky lg:top-4 self-start">
+                      {renderSharedQuizBankPanel()}
+
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                        <div className="px-4 py-3 border-b border-slate-200 bg-white">
+                          <div className="flex items-center gap-3">
+                            <div className="h-9 w-9 rounded-lg bg-slate-100 flex items-center justify-center">
+                              <Eye className="h-5 w-5 text-slate-600" />
+                            </div>
+                            <div>
+                              <h2 className="text-base font-bold text-slate-900">
+                                Student Preview
+                              </h2>
+                              <p className="text-xs text-slate-500">
+                                How students see available themes
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="p-4">
+                          <div className="space-y-2">
+                            {studentAvailableThemes.slice(0, 5).map((theme) => (
+                              <div
+                                key={theme}
+                                className="flex items-center justify-between p-3 bg-slate-50 rounded-xl"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <BookMarked className="h-4 w-4 text-slate-400" />
+                                  <span className="text-sm font-medium text-slate-700">
+                                    {theme}
+                                  </span>
+                                </div>
+                                <span className="text-xs text-slate-500">
+                                  {
+                                    publishedQuestions.filter(
+                                      (q) => q.theme === theme,
+                                    ).length
+                                  }{" "}
+                                  questions
+                                </span>
+                              </div>
+                            ))}
+                            {studentAvailableThemes.length === 0 && (
+                              <p className="text-sm text-slate-500 text-center py-4">
+                                Publish questions to see the student view
+                              </p>
+                            )}
+                            <div className="mt-4 pt-4 border-t border-slate-200">
+                              <p className="text-xs text-slate-500">
+                                <span className="font-medium text-sky-600">
+                                  Linked themes:
+                                </span>{" "}
+                                1 attempt •{" "}
+                                <span className="font-medium text-sky-600">
+                                  Practice themes:
+                                </span>{" "}
+                                {MAX_UNLINKED_ATTEMPTS} attempts
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                        <div className="px-4 py-3 border-b border-slate-200">
+                          <div className="flex items-center gap-3">
+                            <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
+                              <FileText className="h-5 w-5 text-sky-600" />
+                            </div>
+                            <div>
+                              <h2 className="text-base font-bold text-slate-900">
+                                Link to Grade Sheets
+                              </h2>
+                              <p className="text-xs text-slate-500">
+                                Connect themes to grade books
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="p-4 max-h-[300px] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                          <div className="space-y-2">
+                            {availableThemes.map((theme) => (
+                              <div
+                                key={theme}
+                                className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl"
+                              >
+                                <p className="flex-1 text-sm font-medium text-slate-700 whitespace-normal break-words leading-5">
+                                  {theme}
+                                </p>
+                                <select
+                                  value={themeLinksByTheme[theme] || ""}
+                                  onChange={(e) =>
+                                    handleThemeLinkChange(theme, e.target.value)
+                                  }
+                                  disabled={savingThemeLink === theme}
+                                  className="w-[180px] px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-sky-500"
+                                >
+                                  <option value="">No sheet</option>
+                                  {courseGradeSheets.map((sheet) => (
+                                    <option key={sheet.id} value={sheet.id}>
+                                      {sheet.title}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            ))}
+                            {availableThemes.length === 0 && (
+                              <p className="text-sm text-slate-500 text-center py-4">
+                                Create themes first to link them to grade sheets
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                        <div className="px-4 py-3 border-b border-slate-200">
+                          <div className="flex items-center gap-3">
+                            <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
+                              <BarChart3 className="h-5 w-5 text-sky-600" />
+                            </div>
+                            <div>
+                              <h2 className="text-base font-bold text-slate-900">
+                                Course Statistics
+                              </h2>
+                              <p className="text-xs text-slate-500">
+                                Overview of {selectedCourse?.name}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="p-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="p-4 bg-slate-50 rounded-xl">
+                              <p className="text-xs text-slate-500 mb-1">
+                                Students
+                              </p>
+                              <p className="text-lg font-extrabold leading-5 text-slate-900">
+                                {selectedCourse?.enrolledStudents?.length || 0}
+                              </p>
+                            </div>
+                            <div className="p-4 bg-slate-50 rounded-xl">
+                              <p className="text-xs text-slate-500 mb-1">
+                                Published
+                              </p>
+                              <p className="text-lg font-extrabold leading-5 text-emerald-600">
+                                {stats.publishedCount}
+                              </p>
+                            </div>
+                            <div className="p-4 bg-slate-50 rounded-xl">
+                              <p className="text-xs text-slate-500 mb-1">
+                                Drafts
+                              </p>
+                              <p className="text-lg font-extrabold leading-5 text-slate-600">
+                                {stats.draftCount}
+                              </p>
+                            </div>
+                            <div className="p-4 bg-slate-50 rounded-xl">
+                              <p className="text-xs text-slate-500 mb-1">
+                                Themes
+                              </p>
+                              <p className="text-lg font-extrabold leading-5 text-sky-600">
+                                {stats.totalThemes}
+                              </p>
                             </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {attemptHistory.length > 0 && (
-                    <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
-                      <div className="px-6 py-4 border-b border-gray-200">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-lg bg-blue-100 flex items-center justify-center">
-                            <Clock className="h-5 w-5 text-blue-600" />
+                {!isTeacher && (
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                    <div className="lg:col-span-2 space-y-2">
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                        <div className="px-4 py-3 border-b border-slate-200">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
+                                <Layers className="h-5 w-5 text-sky-600" />
+                              </div>
+                              <div>
+                                <h2 className="text-base font-bold text-slate-900">
+                                  Available Themes
+                                </h2>
+                                <p className="text-xs text-slate-500">
+                                  {studentAvailableThemes.length} themes •{" "}
+                                  {stats.completedQuizzes} completed
+                                </p>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <h3 className="text-lg font-bold text-gray-900">
-                              Recent Attempts
+                        </div>
+
+                        <div className="p-4">
+                          {studentAvailableThemes.length === 0 ? (
+                            <div className="text-center py-12">
+                              <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                                <BookOpen className="h-8 w-8 text-slate-400" />
+                              </div>
+                              <p className="text-slate-600">
+                                No themes available yet
+                              </p>
+                              <p className="text-sm text-slate-500">
+                                Check back later for new exercises
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {studentAvailableThemes.map((theme) => {
+                                const attempt = attemptsByTheme[theme];
+                                const attemptCount =
+                                  getThemeAttemptCount(theme);
+                                const linkedTheme = isLinkedTheme(theme);
+                                const canTake = canTakeTheme(theme);
+                                const questionCount = publishedQuestions.filter(
+                                  (q) => q.theme === theme,
+                                ).length;
+
+                                return (
+                                  <ThemeCard
+                                    key={theme}
+                                    theme={theme}
+                                    questionCount={questionCount}
+                                    isLinked={linkedTheme}
+                                    maxAttempts={MAX_UNLINKED_ATTEMPTS}
+                                    attempt={attempt}
+                                    attemptCount={attemptCount}
+                                    isSelected={selectedTheme === theme}
+                                    canTake={canTake}
+                                    onSelect={() => {
+                                      void handleSelectTheme(theme);
+                                    }}
+                                    onStart={() => {
+                                      void handleStartTheme(theme);
+                                    }}
+                                  />
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {selectedTheme && (
+                        <div
+                          ref={quizStartSectionRef}
+                          className="bg-white border border-slate-200 rounded-2xl shadow-sm"
+                        >
+                          <div className="px-4 py-3 border-b border-slate-200">
+                            <h3 className="text-base font-bold text-slate-900">
+                              Selected Theme: {selectedTheme}
                             </h3>
-                            <p className="text-sm text-gray-600">
-                              Latest quiz results and scores
+                            <p className="text-xs text-slate-500 mt-1">
+                              Quiz workspace and current progress
                             </p>
                           </div>
-                        </div>
-                      </div>
-                      <div className="p-6">
-                        <div className="space-y-2">
-                          {attemptHistory.map((attempt, index) => (
-                            <div
-                              key={`${attempt.id}-${index}`}
-                              className="p-3 bg-gray-50 rounded-xl"
-                            >
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-sm font-medium text-gray-700">
-                                  {attempt.theme}
-                                </span>
-                                <span
-                                  className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                                    attempt.percentage >= 70
-                                      ? "bg-green-100 text-green-700"
-                                      : attempt.percentage >= 50
-                                        ? "bg-yellow-100 text-yellow-700"
-                                        : "bg-red-100 text-red-700"
-                                  }`}
+                          <div className="p-4">
+                            {quizStarted && currentQuizQuestion ? (
+                              <QuizQuestionView
+                                question={currentQuizQuestion}
+                                currentIndex={currentQuestionIndex}
+                                totalQuestions={quizQuestions.length}
+                                selectedAnswer={answers[currentQuizQuestion.id]}
+                                timeLeft={timeLeftSeconds}
+                                onAnswer={(questionId, optionIndex) =>
+                                  setAnswers((prev) => ({
+                                    ...prev,
+                                    [questionId]: optionIndex,
+                                  }))
+                                }
+                                onNext={() =>
+                                  setCurrentQuestionIndex((prev) => prev + 1)
+                                }
+                                onPrevious={() =>
+                                  setCurrentQuestionIndex((prev) =>
+                                    Math.max(0, prev - 1),
+                                  )
+                                }
+                                onFinish={() => finishQuiz("manual")}
+                              />
+                            ) : result ? (
+                              <QuizResultView
+                                result={result}
+                                gradingMessage={gradingMessage}
+                                onClose={handleCloseResult}
+                              />
+                            ) : selectedThemeAttempt &&
+                              selectedThemeIsLinked ? (
+                              <div className="text-center py-8">
+                                <div className="h-16 w-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+                                  <CheckCircle className="h-8 w-8 text-emerald-600" />
+                                </div>
+                                <h4 className="text-lg font-semibold text-slate-900 mb-2">
+                                  Quiz Already Completed
+                                </h4>
+                                <p className="text-slate-600 mb-4">
+                                  Your score: {selectedThemeAttempt.correct} /{" "}
+                                  {selectedThemeAttempt.total} (
+                                  {selectedThemeAttempt.percentage}%)
+                                </p>
+                                <button
+                                  onClick={() => setSelectedTheme("")}
+                                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
                                 >
-                                  {attempt.percentage}%
-                                </span>
+                                  Choose Another Theme
+                                </button>
                               </div>
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="text-gray-500">
-                                  {formatDateTime(attempt.createdAt)}
-                                </span>
-                                <span className="text-gray-600">
-                                  {attempt.correct}/{attempt.total} correct
-                                </span>
+                            ) : (
+                              <div className="text-center py-12">
+                                <p className="text-slate-600">
+                                  Click "Start Quiz" to begin
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      {Object.keys(attemptsByTheme).length > 0 && (
+                        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                          <div className="px-4 py-3 border-b border-slate-200">
+                            <div className="flex items-center gap-3">
+                              <div className="h-9 w-9 rounded-lg bg-emerald-100 flex items-center justify-center">
+                                <TrendingUp className="h-5 w-5 text-emerald-600" />
+                              </div>
+                              <div>
+                                <h3 className="text-base font-bold text-slate-900">
+                                  Progress Overview
+                                </h3>
+                                <p className="text-xs text-slate-500">
+                                  Completion status by theme
+                                </p>
                               </div>
                             </div>
-                          ))}
+                          </div>
+                          <div className="p-4">
+                            <div className="space-y-2">
+                              <div>
+                                <div className="flex justify-between text-sm mb-2">
+                                  <span className="text-slate-600">
+                                    Themes Completed
+                                  </span>
+                                  <span className="font-semibold text-slate-900">
+                                    {stats.completedQuizzes}/{stats.totalThemes}
+                                  </span>
+                                </div>
+                                <progress
+                                  max={100}
+                                  value={
+                                    stats.totalThemes > 0
+                                      ? Math.max(
+                                          0,
+                                          Math.min(100, (stats.completedQuizzes / stats.totalThemes) * 100),
+                                        )
+                                      : 0
+                                  }
+                                  className="h-3 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-slate-200 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-emerald-500 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-emerald-500"
+                                />
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-3 pt-2">
+                                <div className="p-4 bg-slate-50 rounded-xl text-center">
+                                  <p className="text-lg font-extrabold leading-5 text-slate-900">
+                                    {stats.completedQuizzes}
+                                  </p>
+                                  <p className="text-xs text-slate-600">
+                                    Completed
+                                  </p>
+                                </div>
+                                <div className="p-4 bg-slate-50 rounded-xl text-center">
+                                  <p className="text-lg font-extrabold leading-5 text-slate-900">
+                                    {stats.pendingThemes}
+                                  </p>
+                                  <p className="text-xs text-slate-600">
+                                    Pending
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      )}
+
+                      {attemptHistory.length > 0 && (
+                        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                          <div className="px-4 py-3 border-b border-slate-200">
+                            <div className="flex items-center gap-3">
+                              <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
+                                <Clock className="h-5 w-5 text-sky-600" />
+                              </div>
+                              <div>
+                                <h3 className="text-base font-bold text-slate-900">
+                                  Recent Attempts
+                                </h3>
+                                <p className="text-xs text-slate-500">
+                                  Latest quiz results and scores
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="p-4">
+                            <div className="space-y-2">
+                              {attemptHistory.map((attempt, index) => (
+                                <div
+                                  key={`${attempt.id}-${index}`}
+                                  className="p-3 bg-slate-50 rounded-xl"
+                                >
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-sm font-medium text-slate-700">
+                                      {attempt.theme}
+                                    </span>
+                                    <span
+                                      className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                                        attempt.percentage >= 70
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : attempt.percentage >= 50
+                                            ? "bg-amber-100 text-amber-700"
+                                            : "bg-rose-100 text-rose-700"
+                                      }`}
+                                    >
+                                      {attempt.percentage}%
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-slate-500">
+                                      {formatDateTime(attempt.createdAt)}
+                                    </span>
+                                    <span className="text-slate-600">
+                                      {attempt.correct}/{attempt.total} correct
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                )}
+              </>
             )}
-          </>
-        )}
-
-        <Modal
-          isOpen={showStartWarning}
-          onClose={() => {
-            setShowStartWarning(false);
-            setPendingStartTheme(null);
-          }}
-          title="Before you start"
-        >
-          <div className="space-y-2">
-            <div className="p-4 bg-blue-50 rounded-xl">
-              <p className="font-medium text-blue-800">
-                Theme: <span className="font-bold">{pendingStartTheme}</span>
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-start gap-3">
-                <div className="h-6 w-6 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-                  <Clock className="h-3 w-3 text-gray-600" />
-                </div>
-                <div>
-                  <p className="font-medium text-gray-900">Time Limit</p>
-                  <p className="text-sm text-gray-600">
-                    {formatDuration(pendingThemeTimeLimitSeconds)} (
-                    {QUIZ_SECONDS_PER_QUESTION} seconds per question)
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="h-6 w-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                  <HelpCircle className="h-3 w-3 text-blue-600" />
-                </div>
-                <div>
-                  <p className="font-medium text-gray-900">Attempts</p>
-                  <p className="text-sm text-gray-600">
-                    {pendingThemeIsLinked
-                      ? "This quiz is linked to a grade sheet - only one attempt allowed"
-                      : `This is a practice quiz - ${MAX_UNLINKED_ATTEMPTS} attempts allowed`}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="h-6 w-6 rounded-full bg-yellow-100 flex items-center justify-center flex-shrink-0">
-                  <AlertCircle className="h-3 w-3 text-yellow-600" />
-                </div>
-                <div>
-                  <p className="font-medium text-gray-900">Auto-submit</p>
-                  <p className="text-sm text-gray-600">
-                    When time runs out, your quiz will be submitted
-                    automatically
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
-              <button
-                onClick={() => {
-                  setShowStartWarning(false);
-                  setPendingStartTheme(null);
-                }}
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmStartQuiz}
-                className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-              >
-                Start Quiz
-              </button>
-            </div>
           </div>
-        </Modal>
 
-        <ConfirmModal
-          isOpen={!!showDeleteConfirm}
-          onClose={() => setShowDeleteConfirm(null)}
-          onConfirm={() =>
-            showDeleteConfirm && handleDeleteQuestion(showDeleteConfirm)
-          }
-          title="Delete Question"
-          message="Are you sure you want to delete this question? This action cannot be undone."
-          confirmText="Delete"
-          cancelText="Cancel"
-          type="danger"
-        />
+          <Modal
+            isOpen={showStartWarning}
+            onClose={() => {
+              setShowStartWarning(false);
+              setPendingStartTheme(null);
+            }}
+            title="Before you start"
+          >
+            <div className="space-y-2">
+              <div className="p-4 bg-sky-50 rounded-xl">
+                <p className="font-medium text-sky-800">
+                  Theme: <span className="font-bold">{pendingStartTheme}</span>
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-start gap-3">
+                  <div className="h-6 w-6 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
+                    <Clock className="h-3 w-3 text-slate-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-slate-900">Time Limit</p>
+                    <p className="text-xs text-slate-500">
+                      {formatDuration(pendingThemeTimeLimitSeconds)} (
+                      {QUIZ_SECONDS_PER_QUESTION} seconds per question)
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="h-6 w-6 rounded-full bg-sky-100 flex items-center justify-center flex-shrink-0">
+                    <HelpCircle className="h-3 w-3 text-sky-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-slate-900">Attempts</p>
+                    <p className="text-xs text-slate-500">
+                      {pendingThemeIsLinked
+                        ? "This quiz is linked to a grade sheet - only one attempt allowed"
+                        : `This is a practice quiz - ${MAX_UNLINKED_ATTEMPTS} attempts allowed`}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="h-6 w-6 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                    <AlertCircle className="h-3 w-3 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-slate-900">Auto-submit</p>
+                    <p className="text-xs text-slate-500">
+                      When time runs out, your quiz will be submitted
+                      automatically
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+                <button
+                  onClick={() => {
+                    setShowStartWarning(false);
+                    setPendingStartTheme(null);
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmStartQuiz}
+                  className="px-4 py-2 text-sm font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors"
+                >
+                  Start Quiz
+                </button>
+              </div>
+            </div>
+          </Modal>
+
+          <ConfirmModal
+            isOpen={!!showDeleteConfirm}
+            onClose={() => setShowDeleteConfirm(null)}
+            onConfirm={() =>
+              showDeleteConfirm && handleDeleteQuestion(showDeleteConfirm)
+            }
+            title="Delete Question"
+            message="Are you sure you want to delete this question? This action cannot be undone."
+            confirmText="Delete"
+            cancelText="Cancel"
+            type="danger"
+          />
+        </div>
       </div>
     </DashboardLayout>
   );

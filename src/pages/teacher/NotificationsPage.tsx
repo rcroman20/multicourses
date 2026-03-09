@@ -21,7 +21,7 @@ import { firebaseDB } from "@/lib/firebase";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  Bell,
+  Bell,AlertCircle,
   BellRing,
   BellOff,
   BookOpen,
@@ -93,7 +93,6 @@ import {
   AlarmClock,
   Timer,
   Hourglass,
-  Infinity,
   Target,
   Compass,
   MapPin,
@@ -134,6 +133,13 @@ interface QuickTemplate {
   link: string;
   icon: React.ReactNode;
   color: string;
+}
+
+interface PresetLinkOption {
+  id: string;
+  label: string;
+  value: string;
+  disabled?: boolean;
 }
 
 type SendMode = "now" | "scheduled";
@@ -217,16 +223,13 @@ export default function NotificationsPage() {
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [sending, setSending] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const [expandedSections, setExpandedSections] = useState({
-    templates: true,
-    form: true,
-    preview: false,
-  });
 
   const [tab, setTab] = useState<HubTab>("compose");
   const [targetMode, setTargetMode] = useState<"course" | "student">("course");
   const [targetStudentIds, setTargetStudentIds] = useState<string[]>([]);
   const [sendToMe, setSendToMe] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [selectedPresetLinkId, setSelectedPresetLinkId] = useState("none");
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [type, setType] = useState<NotificationType>("info");
@@ -280,7 +283,7 @@ export default function NotificationsPage() {
       {
         id: "deadline",
         label: "Deadline reminder",
-        title: "⏰ Reminder: Upcoming deadline",
+        title: "⏰ Upcoming deadline",
         message:
           "Hi {studentName}, please submit pending work for {courseName} before the deadline.",
         type: "warning",
@@ -356,8 +359,123 @@ export default function NotificationsPage() {
         icon: <Bell className="h-3 w-3" />,
         color: "blue",
       },
+      {
+        id: "exam-24h",
+        label: "Exam reminder (24h)",
+        title: "📝 Exam reminder: tomorrow",
+        message:
+          "Reminder: your **{courseName}** assessment is scheduled for {date}. Please review all materials and be ready.",
+        type: "warning",
+        link: selectedCourse ? `/courses/${selectedCourse.code}/assessments` : "",
+        icon: <AlarmClock className="h-3 w-3" />,
+        color: "blue",
+      },
+      {
+        id: "late-submission",
+        label: "Late submission warning",
+        title: "⚠️ Late submission alert",
+        message:
+          "We detected pending or late submissions in {courseName}. Please submit your activities as soon as possible.",
+        type: "warning",
+        link: selectedCourse ? `/courses/${selectedCourse.code}/assessments` : "",
+        icon: <Clock3 className="h-3 w-3" />,
+        color: "gray",
+      },
+      {
+        id: "attendance-alert",
+        label: "Attendance alert",
+        title: "👥 Attendance follow-up",
+        message:
+          "Your attendance in {courseName} needs attention. If you had a valid reason, please contact your teacher.",
+        type: "warning",
+        link: selectedCourse ? `/courses/view/${selectedCourse.code}` : "",
+        icon: <UserCheck className="h-3 w-3" />,
+        color: "gray",
+      },
+      {
+        id: "classroom-change",
+        label: "Classroom change",
+        title: "📍 Classroom / meeting link changed",
+        message:
+          "The classroom or meeting link for {courseName} has changed. Please review the updated details before class.",
+        type: "info",
+        link: selectedCourse ? `/courses/view/${selectedCourse.code}` : "",
+        icon: <MapPin className="h-3 w-3" />,
+        color: "blue",
+      },
+      {
+        id: "platform-issue",
+        label: "Platform issue",
+        title: "🛠️ Temporary platform issue",
+        message:
+          "We are experiencing a temporary platform issue affecting {courseName}. We will notify you once it is resolved.",
+        type: "info",
+        link: "/calendar",
+        icon: <AlertCircle className="h-3 w-3" />,
+        color: "gray",
+      },
+      {
+        id: "makeup-class",
+        label: "Make-up class",
+        title: "🔁 Make-up class scheduled",
+        message:
+          "A make-up class for {courseName} has been scheduled. Please check the new date and time.",
+        type: "info",
+        link: "/calendar",
+        icon: <CalendarDays className="h-3 w-3" />,
+        color: "blue",
+      },
+      {
+        id: "congratulations",
+        label: "Congratulations",
+        title: "🏆 Great progress in {courseName}",
+        message:
+          "Excellent work in {courseName}! Keep your momentum and continue submitting high-quality activities.",
+        type: "success",
+        link: "/grades",
+        icon: <Trophy className="h-3 w-3" />,
+        color: "blue",
+      },
     ],
     [selectedCourse],
+  );
+
+  const presetLinkOptions = useMemo<PresetLinkOption[]>(() => {
+    const courseCode = selectedCourse?.code;
+    return [
+      { id: "none", label: "No link", value: "" },
+      {
+        id: "course-overview",
+        label: "Course overview",
+        value: courseCode ? `/courses/view/${courseCode}` : "",
+        disabled: !courseCode,
+      },
+      {
+        id: "assessments",
+        label: "Assessments",
+        value: courseCode ? `/courses/${courseCode}/assessments` : "",
+        disabled: !courseCode,
+      },
+      {
+        id: "files",
+        label: "Files",
+        value: courseCode ? `/courses/${courseCode}/files` : "",
+        disabled: !courseCode,
+      },
+      { id: "grades", label: "Grades", value: "/grades" },
+      { id: "calendar", label: "Calendar", value: "/calendar" },
+      { id: "custom", label: "Custom link", value: "", disabled: true },
+    ];
+  }, [selectedCourse?.code]);
+
+  const resolvePresetLinkId = useCallback(
+    (rawLink: string) => {
+      const clean = rawLink.trim();
+      if (!clean) return "none";
+      const match = presetLinkOptions.find((item) => item.value === clean);
+      return match ? match.id : "custom";
+    },
+    [presetLinkOptions],
   );
 
   const filteredStudents = useMemo(() => {
@@ -429,24 +547,48 @@ export default function NotificationsPage() {
   const getTypeIcon = (type: NotificationType) => {
     switch (type) {
       case "success":
-        return <CheckCircle className="h-4 w-4 text-blue-500" />;
+        return <CheckCircle className="h-4 w-4 text-emerald-600" />;
       case "warning":
-        return <AlertTriangle className="h-4 w-4 text-blue-500" />;
+        return <AlertTriangle className="h-4 w-4 text-amber-600" />;
       case "info":
       default:
-        return <Info className="h-4 w-4 text-blue-500" />;
+        return <Info className="h-4 w-4 text-sky-600" />;
     }
   };
 
-  const getTypeColor = (type: NotificationType) => {
+  const getTypeTextClass = (type: NotificationType) => {
     switch (type) {
       case "success":
-        return "blue";
+        return "text-emerald-700";
       case "warning":
-        return "gray";
+        return "text-amber-700";
       case "info":
       default:
-        return "blue";
+        return "text-sky-700";
+    }
+  };
+
+  const getTypeBadgeClass = (type: NotificationType) => {
+    switch (type) {
+      case "success":
+        return "inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700";
+      case "warning":
+        return "inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700";
+      case "info":
+      default:
+        return "inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700";
+    }
+  };
+
+  const getStatusBadgeClass = (status: HistoryStatus) => {
+    switch (status) {
+      case "sent":
+        return "inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700";
+      case "scheduled":
+        return "inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700";
+      case "cancelled":
+      default:
+        return "inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700";
     }
   };
 
@@ -592,17 +734,28 @@ export default function NotificationsPage() {
   );
 
   const applyTemplate = (template: QuickTemplate) => {
+    setSelectedTemplateId(template.id);
     setTitle(interpolateTemplate(template.title));
     setMessage(interpolateTemplate(template.message));
     setType(template.type);
     setLink(template.link);
+    setSelectedPresetLinkId(resolvePresetLinkId(template.link));
     toast.success(
       <div className="flex items-center gap-2">
-        <CheckCircle className="h-4 w-4 text-blue-500" />
+        <CheckCircle className="h-4 w-4 text-sky-500" />
         <span>Template "{template.label}" applied</span>
       </div>
     );
   };
+
+  useEffect(() => {
+    if (selectedPresetLinkId === "custom") return;
+    const selectedPreset = presetLinkOptions.find(
+      (item) => item.id === selectedPresetLinkId,
+    );
+    if (!selectedPreset) return;
+    setLink(selectedPreset.value);
+  }, [presetLinkOptions, selectedPresetLinkId]);
 
   const computeRecipients = useCallback(() => {
     const recipientIds = new Set<string>();
@@ -627,8 +780,12 @@ export default function NotificationsPage() {
         link?: string;
       },
     ) => {
-      await Promise.all(
-        recipientIds.map((recipientId) =>
+      const uniqueRecipientIds = Array.from(
+        new Set(recipientIds.filter((entry) => Boolean(entry))),
+      );
+
+      const results = await Promise.allSettled(
+        uniqueRecipientIds.map((recipientId) =>
           notificationService.createNotification(recipientId, {
             title: payload.title,
             message: payload.message,
@@ -637,6 +794,19 @@ export default function NotificationsPage() {
           }),
         ),
       );
+
+      const deliveredIds: string[] = [];
+      const failedIds: string[] = [];
+
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          deliveredIds.push(uniqueRecipientIds[index]);
+        } else {
+          failedIds.push(uniqueRecipientIds[index]);
+        }
+      });
+
+      return { deliveredIds, failedIds };
     },
     [],
   );
@@ -705,7 +875,7 @@ export default function NotificationsPage() {
       });
       toast.success(
         <div className="flex items-center gap-2">
-          <Clock className="h-4 w-4 text-blue-500" />
+          <Clock className="h-4 w-4 text-sky-500" />
           <span>Notification scheduled successfully</span>
         </div>
       );
@@ -715,23 +885,39 @@ export default function NotificationsPage() {
 
     setSending(true);
     try {
-      await deliverNotification(recipientIds, {
+      const { deliveredIds, failedIds } = await deliverNotification(recipientIds, {
         title: cleanTitle,
         message: cleanMessage,
         type,
         link: cleanLink || undefined,
       });
 
-      addHistoryItem(baseHistory);
-      toast.success(
-        <div className="flex items-center gap-2">
-          <CheckCircle className="h-4 w-4 text-blue-500" />
-          <span>Notification sent to {recipientIds.length} user(s)</span>
-        </div>
-      );
+      if (deliveredIds.length === 0) {
+        toast.error("Could not send notification");
+        return;
+      }
+
+      addHistoryItem({
+        ...baseHistory,
+        recipientIds: deliveredIds,
+        recipientCount: deliveredIds.length,
+      });
+      if (failedIds.length > 0) {
+        toast.warning(
+          `Notification sent to ${deliveredIds.length} user(s). ${failedIds.length} failed.`,
+        );
+      } else {
+        toast.success(
+          <div className="flex items-center gap-2">
+            <CheckCircle className="h-4 w-4 text-sky-500" />
+            <span>Notification sent to {deliveredIds.length} user(s)</span>
+          </div>
+        );
+      }
       setTitle("");
       setMessage("");
       setLink("");
+      setSelectedPresetLinkId("none");
     } catch {
       toast.error("Could not send notification");
     } finally {
@@ -770,18 +956,34 @@ export default function NotificationsPage() {
               continue;
             }
 
-            await deliverNotification(item.recipientIds, {
+            const { deliveredIds } = await deliverNotification(item.recipientIds, {
               title: item.title,
               message: item.message,
               type: item.type,
               link: item.link,
             });
+            if (deliveredIds.length === 0) {
+              setHistory((prev) =>
+                prev.map((entry) =>
+                  entry.id === item.id
+                    ? { ...entry, status: "cancelled" }
+                    : entry,
+                ),
+              );
+              continue;
+            }
             deliveredCount += 1;
 
             setHistory((prev) =>
               prev.map((entry) =>
                 entry.id === item.id
-                  ? { ...entry, status: "sent", sentAt: Date.now() }
+                  ? {
+                      ...entry,
+                      status: "sent",
+                      sentAt: Date.now(),
+                      recipientIds: deliveredIds,
+                      recipientCount: deliveredIds.length,
+                    }
                   : entry,
               ),
             );
@@ -830,21 +1032,37 @@ export default function NotificationsPage() {
 
     setSending(true);
     try {
-      await deliverNotification(item.recipientIds, {
+      const { deliveredIds, failedIds } = await deliverNotification(item.recipientIds, {
         title: item.title,
         message: item.message,
         type: item.type,
         link: item.link,
       });
+      if (deliveredIds.length === 0) {
+        toast.error("Could not send scheduled notification");
+        return;
+      }
 
       setHistory((prev) =>
         prev.map((entry) =>
           entry.id === id
-            ? { ...entry, status: "sent", sentAt: Date.now() }
+            ? {
+                ...entry,
+                status: "sent",
+                sentAt: Date.now(),
+                recipientIds: deliveredIds,
+                recipientCount: deliveredIds.length,
+              }
             : entry,
         ),
       );
-      toast.success("Scheduled notification sent now");
+      if (failedIds.length > 0) {
+        toast.warning(
+          `Scheduled notification sent to ${deliveredIds.length}. ${failedIds.length} failed.`,
+        );
+      } else {
+        toast.success("Scheduled notification sent now");
+      }
     } catch {
       toast.error("Could not send scheduled notification");
     } finally {
@@ -914,94 +1132,139 @@ export default function NotificationsPage() {
     ];
   }, [message, title, type]);
 
-  const toggleSection = (section: keyof typeof expandedSections) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [section]: !prev[section]
-    }));
-  };
+  const tabOptions = [
+    { id: "compose" as HubTab, label: "Compose", icon: <Megaphone className="h-4 w-4" /> },
+    { id: "history" as HubTab, label: "History", icon: <History className="h-4 w-4" />, count: filteredHistory.length },
+    { id: "scheduled" as HubTab, label: "Scheduled", icon: <Clock className="h-4 w-4" />, count: scheduledItems.length },
+    { id: "automations" as HubTab, label: "Automations", icon: <Settings2 className="h-4 w-4" /> },
+    { id: "preferences" as HubTab, label: "Preferences", icon: <Filter className="h-4 w-4" /> },
+  ];
 
   return (
-    <DashboardLayout
-      title="Notifications Center"
-      subtitle="Communication hub for courses and students"  contentClassName="pt-0 lg:pt-1"
-    >
-      <div className="space-y-2">
-   
+    <DashboardLayout contentClassName="pt-0 lg:pt-1">
+      <div className="relative overflow-x-clip">
+        <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+        <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-    
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
+            <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
+            <div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                  <BellRing className="h-3.5 w-3.5" />
+                  Notification Workspace
+                </div>
+                <h2 className="mt-3 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
+                  Notification Control Center
+                </h2>
+                <p className="mt-1.5 max-w-3xl text-sm text-slate-600">
+                  Compose messages, schedule delivery windows, and manage alert preferences from one place.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPreview((prev) => !prev)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  {showPreview ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPreview ? "Hide Preview" : "Show Preview"}
+                </button>
+              </div>
+            </div>
+          </section>
 
-        {/* Tabs de navegación */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          <button
-            onClick={() => setTab("compose")}
-            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${
-              tab === "compose"
-                ? "bg-blue-600 text-white shadow-md"
-                : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <Megaphone className="h-4 w-4" />
-            Compose
-          </button>
-          <button
-            onClick={() => setTab("history")}
-            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${
-              tab === "history"
-                ? "bg-blue-600 text-white shadow-md"
-                : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <History className="h-4 w-4" />
-            History
-          </button>
-          <button
-            onClick={() => setTab("scheduled")}
-            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${
-              tab === "scheduled"
-                ? "bg-blue-600 text-white shadow-md"
-                : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <Clock className="h-4 w-4" />
-            Scheduled
-          </button>
-          <button
-            onClick={() => setTab("automations")}
-            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${
-              tab === "automations"
-                ? "bg-blue-600 text-white shadow-md"
-                : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <Settings2 className="h-4 w-4" />
-            Automations
-          </button>
-          <button
-            onClick={() => setTab("preferences")}
-            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${
-              tab === "preferences"
-                ? "bg-blue-600 text-white shadow-md"
-                : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            <Filter className="h-4 w-4" />
-            Preferences
-          </button>
-        </div>
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div
+              className="grid grid-cols-2 gap-2 lg:grid-cols-5"
+              role="tablist"
+              aria-label="Notification sections"
+            >
+              {tabOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setTab(option.id)}
+                  className={`
+                    inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition-colors
+                    ${
+                      tab === option.id
+                        ? "border-sky-300 bg-sky-50 text-sky-700"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                    }
+                  `}
+                >
+                  {option.icon}
+                  <span>{option.label}</span>
+                  {typeof option.count === "number" && (
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                      {option.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <article className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                  <Users className="h-4 w-4" />
+                </div>
+                <p className="text-lg font-extrabold leading-5 text-slate-900">{recipientCount}</p>
+              </div>
+              <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Recipients</p>
+            </article>
+            <article className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+                  <History className="h-4 w-4" />
+                </div>
+                <p className="text-lg font-extrabold leading-5 text-slate-900">{filteredHistory.length}</p>
+              </div>
+              <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">History Records</p>
+            </article>
+            <article className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+                  <Clock className="h-4 w-4" />
+                </div>
+                <p className="text-lg font-extrabold leading-5 text-slate-900">{scheduledItems.length}</p>
+              </div>
+              <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Scheduled</p>
+            </article>
+            <article className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
+                  {hubPreferences.quietHoursEnabled ? (
+                    <Moon className="h-4 w-4" />
+                  ) : (
+                    <Sun className="h-4 w-4" />
+                  )}
+                </div>
+                <p className="text-lg font-extrabold leading-5 text-slate-900">
+                  {hubPreferences.quietHoursEnabled ? "On" : "Off"}
+                </p>
+              </div>
+              <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Quiet Hours</p>
+            </article>
+          </div>
 
         {/* Alerta de horas de silencio */}
         {quietHoursActiveNow && (
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 mb-4">
+          <div className="mt-4 mb-4 rounded-2xl border border-sky-200 bg-sky-50 p-4">
             <div className="flex items-start gap-3">
-              <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-                <Moon className="h-4 w-4 text-blue-600" />
+              <div className="h-8 w-8 rounded-lg bg-sky-100 flex items-center justify-center flex-shrink-0">
+                <Moon className="h-4 w-4 text-sky-600" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-blue-800">
+                <p className="text-sm font-semibold text-sky-800">
                   Quiet hours are active ({hubPreferences.quietHourStart} - {hubPreferences.quietHourEnd})
                 </p>
-                <p className="text-xs text-blue-700 mt-1">
+                <p className="text-xs text-sky-700 mt-1">
                   Automatic notifications are paused. Scheduled items will be delivered after this window.
                 </p>
               </div>
@@ -1011,30 +1274,30 @@ export default function NotificationsPage() {
 
         {/* Vista previa */}
         {showPreview && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm mb-4">
+          <div className="mt-4 mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-start gap-2">
-                <Eye className="h-4 w-4 text-gray-500 mt-0.5" />
+                <Eye className="h-4 w-4 text-slate-500 mt-0.5" />
                 <div>
-                  <h3 className="font-semibold text-gray-900">Preview</h3>
-                  <p className="text-xs text-gray-600">Live notification preview</p>
+                  <h3 className="font-semibold text-slate-900">Preview</h3>
+                  <p className="text-xs text-slate-600">Live notification preview</p>
                 </div>
               </div>
               <button
                 onClick={() => setShowPreview(false)}
-                className="p-1 hover:bg-gray-100 rounded-lg"
+                className="p-1 hover:bg-slate-100 rounded-lg"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="border border-gray-200 rounded-xl overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
-                <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                  <Bell className="h-4 w-4 text-blue-500" />
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+                <p className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                  <Bell className="h-4 w-4 text-sky-500" />
                   Notifications
                 </p>
-                <span className="text-xs text-blue-600 hover:underline cursor-pointer">
+                <span className="text-xs text-sky-600 hover:underline cursor-pointer">
                   Mark all read
                 </span>
               </div>
@@ -1042,33 +1305,33 @@ export default function NotificationsPage() {
               {previewItems.map((item, idx) => (
                 <div
                   key={item.id}
-                  className="px-4 py-3 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors"
+                  className="px-4 py-3 border-b border-slate-100 last:border-b-0 hover:bg-slate-50 transition-colors"
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex-shrink-0 mt-1">
                       {item.type === "success" ? (
-                        <CheckCircle className="h-4 w-4 text-blue-500" />
+                        <CheckCircle className="h-4 w-4 text-sky-500" />
                       ) : item.type === "warning" ? (
-                        <AlertTriangle className="h-4 w-4 text-blue-500" />
+                        <AlertTriangle className="h-4 w-4 text-sky-500" />
                       ) : (
-                        <Info className="h-4 w-4 text-blue-500" />
+                        <Info className="h-4 w-4 text-sky-500" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-gray-900">
+                        <p className="text-sm font-semibold text-slate-900">
                           {item.title}
                         </p>
                         {idx === 0 && (
-                          <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px] font-medium">
+                          <span className="px-1.5 py-0.5 bg-sky-100 text-sky-700 rounded-full text-[10px] font-medium">
                             New
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-gray-600 mt-1 line-clamp-2">
+                      <p className="text-xs text-slate-600 mt-1 line-clamp-2">
                         {item.message}
                       </p>
-                      <p className="text-[10px] text-gray-400 mt-2">
+                      <p className="text-[10px] text-slate-400 mt-2">
                         {item.createdAt}
                       </p>
                     </div>
@@ -1081,20 +1344,20 @@ export default function NotificationsPage() {
 
         {/* Contenido según pestaña */}
         {tab === "compose" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
             {/* Columna izquierda - Formulario */}
             <div className="lg:col-span-2 space-y-4">
-              <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                      <MessageSquare className="h-4 w-4 text-blue-500" />
+                    <div className="h-8 w-8 rounded-xl bg-sky-100 flex items-center justify-center">
+                      <MessageSquare className="h-4 w-4 text-sky-500" />
                     </div>
                     <div>
-                      <h2 className="text-xl font-bold text-gray-900">
+                      <h2 className="text-xl font-bold text-slate-900">
                         Create Notification
                       </h2>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-slate-600">
                         Compose and send announcements
                       </p>
                     </div>
@@ -1103,48 +1366,82 @@ export default function NotificationsPage() {
 
                 {teacherCourses.length === 0 ? (
                   <div className="text-center py-8">
-                    <div className="h-16 w-16 mx-auto mb-4 rounded-full bg-blue-50 flex items-center justify-center">
-                      <BookOpen className="h-8 w-8 text-blue-400" />
+                    <div className="h-16 w-16 mx-auto mb-4 rounded-full bg-sky-50 flex items-center justify-center">
+                      <BookOpen className="h-8 w-8 text-sky-400" />
                     </div>
-                    <p className="text-gray-900 font-semibold text-lg">No courses found</p>
-                    <p className="text-sm text-gray-600 mt-2">
+                    <p className="text-slate-900 font-semibold text-lg">No courses found</p>
+                    <p className="text-sm text-slate-600 mt-2">
                       You need at least one course as teacher to send notifications.
                     </p>
                   </div>
                 ) : (
                   <form onSubmit={handleSubmit} className="space-y-5">
                     {/* Quick Templates */}
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-gray-700 flex items-center gap-2">
-                        <Copy className="h-4 w-4 text-gray-500" />
-                        Quick Templates
-                      </label>
-                      <select
-                        defaultValue=""
-                        onChange={(event) => {
-                          const selectedId = event.target.value;
-                          const template = quickTemplates.find((item) => item.id === selectedId);
-                          if (template) applyTemplate(template);
-                          event.target.value = "";
-                        }}
-                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      >
-                        <option value="">Select a template</option>
-                        {quickTemplates.map((template) => (
-                          <option key={template.id} value={template.id}>
-                            {template.label}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Choosing a template auto-fills title and message.
-                      </p>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700 flex items-center gap-2">
+                          <Copy className="h-4 w-4 text-slate-500" />
+                          Quick Templates
+                        </label>
+                        <select
+                          value={selectedTemplateId}
+                          onChange={(event) => {
+                            const selectedId = event.target.value;
+                            setSelectedTemplateId(selectedId);
+                            const template = quickTemplates.find((item) => item.id === selectedId);
+                            if (template) applyTemplate(template);
+                          }}
+                          className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                        >
+                          <option value="">Select a template</option>
+                          {quickTemplates.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.label}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Choosing a template auto-fills title and message.
+                        </p>
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                          Link (preset)
+                        </label>
+                        <select
+                          value={selectedPresetLinkId}
+                          onChange={(event) => {
+                            const nextId = event.target.value;
+                            setSelectedPresetLinkId(nextId);
+                            const selectedPreset = presetLinkOptions.find(
+                              (item) => item.id === nextId,
+                            );
+                            if (selectedPreset && nextId !== "custom") {
+                              setLink(selectedPreset.value);
+                            }
+                          }}
+                          className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+                        >
+                          {presetLinkOptions.map((preset) => (
+                            <option
+                              key={preset.id}
+                              value={preset.id}
+                              disabled={Boolean(preset.disabled)}
+                            >
+                              {preset.label}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Pick a preconfigured link or keep custom.
+                        </p>
+                      </div>
                     </div>
 
                     {/* Course and Send Mode */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className="mb-1 block text-sm font-medium text-gray-700">
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
                           Course
                         </label>
                         <select
@@ -1152,7 +1449,7 @@ export default function NotificationsPage() {
                           onChange={(event) =>
                             setSelectedCourseId(event.target.value)
                           }
-                          className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                         >
                           {teacherCourses.map((course) => (
                             <option key={course.id} value={course.id}>
@@ -1163,7 +1460,7 @@ export default function NotificationsPage() {
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-sm font-medium text-gray-700">
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
                           Send Mode
                         </label>
                         <select
@@ -1171,7 +1468,7 @@ export default function NotificationsPage() {
                           onChange={(event) =>
                             setSendMode(event.target.value as SendMode)
                           }
-                          className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                         >
                           <option value="now">📨 Send now</option>
                           <option value="scheduled">⏰ Schedule send</option>
@@ -1182,14 +1479,14 @@ export default function NotificationsPage() {
                     {/* Schedule datetime */}
                     {sendMode === "scheduled" && (
                       <div>
-                        <label className="mb-1 block text-sm font-medium text-gray-700">
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
                           Schedule date & time
                         </label>
                         <input
                           type="datetime-local"
                           value={scheduledAt}
                           onChange={(event) => setScheduledAt(event.target.value)}
-                          className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                         />
                       </div>
                     )}
@@ -1197,7 +1494,7 @@ export default function NotificationsPage() {
                     {/* Target and Type */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className="mb-1 block text-sm font-medium text-gray-700">
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
                           Target
                         </label>
                         <select
@@ -1207,7 +1504,7 @@ export default function NotificationsPage() {
                               event.target.value as "course" | "student",
                             )
                           }
-                          className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                         >
                           <option value="course">📢 All students</option>
                           <option value="student">👤 Selected students</option>
@@ -1215,7 +1512,7 @@ export default function NotificationsPage() {
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-sm font-medium text-gray-700">
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
                           Type
                         </label>
                         <select
@@ -1223,7 +1520,7 @@ export default function NotificationsPage() {
                           onChange={(event) =>
                             setType(event.target.value as NotificationType)
                           }
-                          className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                         >
                           <option value="info">ℹ️ Info</option>
                           <option value="success">✅ Success</option>
@@ -1236,7 +1533,7 @@ export default function NotificationsPage() {
                     {targetMode === "student" && (
                       <div className="space-y-3">
                         <div className="relative">
-                          <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                           <input
                             type="text"
                             value={studentSearch}
@@ -1244,7 +1541,7 @@ export default function NotificationsPage() {
                               setStudentSearch(event.target.value)
                             }
                             placeholder="Search student by name or email"
-                            className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                           />
                         </div>
                         <select
@@ -1260,7 +1557,7 @@ export default function NotificationsPage() {
                           disabled={
                             loadingStudents || filteredStudents.length === 0
                           }
-                          className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 min-h-[180px]"
+                          className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent disabled:bg-slate-100 min-h-[180px]"
                         >
                           {loadingStudents ? (
                             <option value="">Loading students...</option>
@@ -1275,7 +1572,7 @@ export default function NotificationsPage() {
                           )}
                         </select>
                         {filteredStudents.length > 0 && (
-                          <p className="text-xs text-gray-500">
+                          <p className="text-xs text-slate-500">
                             Hold Ctrl/Cmd to select multiple students.
                           </p>
                         )}
@@ -1284,7 +1581,7 @@ export default function NotificationsPage() {
 
                     {/* Title */}
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-gray-700">
+                      <label className="mb-1 block text-sm font-medium text-slate-700">
                         Title
                       </label>
                       <input
@@ -1292,13 +1589,13 @@ export default function NotificationsPage() {
                         value={title}
                         onChange={(event) => setTitle(event.target.value)}
                         placeholder="e.g., Class moved to 10:00 AM"
-                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                       />
                     </div>
 
                     {/* Message */}
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-gray-700">
+                      <label className="mb-1 block text-sm font-medium text-slate-700">
                         Message
                       </label>
                       <textarea
@@ -1306,41 +1603,45 @@ export default function NotificationsPage() {
                         onChange={(event) => setMessage(event.target.value)}
                         rows={4}
                         placeholder="Write your message here..."
-                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                        className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent resize-none"
                       />
                     </div>
 
                     {/* Link */}
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-gray-700">
+                      <label className="mb-1 block text-sm font-medium text-slate-700">
                         Link (optional)
                       </label>
                       <div className="relative">
-                        <LinkIcon className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                        <LinkIcon className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                         <input
                           type="text"
                           value={link}
-                          onChange={(event) => setLink(event.target.value)}
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            setLink(nextValue);
+                            setSelectedPresetLinkId(resolvePresetLinkId(nextValue));
+                          }}
                           placeholder="/courses/ENG-A1/assessments"
-                          className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                         />
                       </div>
                     </div>
 
                     {/* Options */}
                     <div className="flex items-center gap-4">
-                      <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                      <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={sendToMe}
                           onChange={(event) => setSendToMe(event.target.checked)}
-                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                         />
                         Send a copy to me
                       </label>
 
                       {recipientCount > 0 && (
-                        <span className="text-xs text-gray-500 flex items-center gap-1">
+                        <span className="text-xs text-slate-500 flex items-center gap-1">
                           <Users className="h-3 w-3" />
                           {recipientCount} recipient(s)
                         </span>
@@ -1351,7 +1652,7 @@ export default function NotificationsPage() {
                     <button
                       type="submit"
                       disabled={sending || recipientCount === 0}
-                      className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
+                      className="w-full inline-flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-700 text-white font-semibold py-3 px-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
                     >
                       {sending ? (
                         <>
@@ -1376,38 +1677,38 @@ export default function NotificationsPage() {
             </div>
 
             {/* Columna derecha - Summary and Student List */}
-            <div className="space-y-4">
+            <div className="space-y-4 lg:sticky lg:top-24 lg:self-start">
               {/* Delivery Summary */}
-              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
+              <div className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4 shadow-sm">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <Bell className="h-4 w-4 text-blue-600" />
+                  <div className="h-8 w-8 rounded-xl bg-sky-100 flex items-center justify-center">
+                    <Bell className="h-4 w-4 text-sky-600" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-gray-900">Delivery Summary</h3>
-                    <p className="text-xs text-gray-600">Current selection</p>
+                    <h3 className="font-semibold text-slate-900">Delivery Summary</h3>
+                    <p className="text-xs text-slate-600">Current selection</p>
                   </div>
                 </div>
 
                 <div className="text-center mb-4">
-                  <span className="text-4xl font-bold text-blue-600">{recipientCount}</span>
-                  <p className="text-sm text-gray-600 mt-1">recipient(s)</p>
+                  <span className="text-3xl font-extrabold text-sky-700">{recipientCount}</span>
+                  <p className="text-sm text-slate-600 mt-1">recipient(s)</p>
                 </div>
 
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
-                    <span className="text-gray-600">Course:</span>
-                    <span className="font-medium text-gray-900">{selectedCourse?.name || "-"}</span>
+                    <span className="text-slate-600">Course:</span>
+                    <span className="font-medium text-slate-900">{selectedCourse?.name || "-"}</span>
                   </div>
                   <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
-                    <span className="text-gray-600">Type:</span>
-                    <span className={`font-medium text-${getTypeColor(type)}-600 capitalize`}>
+                    <span className="text-slate-600">Type:</span>
+                    <span className={`font-medium capitalize ${getTypeTextClass(type)}`}>
                       {type}
                     </span>
                   </div>
                   <div className="flex justify-between items-center p-2 bg-white/50 rounded-lg">
-                    <span className="text-gray-600">Mode:</span>
-                    <span className="font-medium text-gray-900">
+                    <span className="text-slate-600">Mode:</span>
+                    <span className="font-medium text-slate-900">
                       {sendMode === "scheduled" ? "Scheduled" : "Send now"}
                     </span>
                   </div>
@@ -1415,48 +1716,48 @@ export default function NotificationsPage() {
               </div>
 
               {/* Student List */}
-              <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="h-8 w-8 rounded-lg bg-gray-100 flex items-center justify-center">
-                    <Users className="h-4 w-4 text-blue-500" />
+                  <div className="h-8 w-8 rounded-lg bg-slate-100 flex items-center justify-center">
+                    <Users className="h-4 w-4 text-sky-500" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-gray-900">Enrolled Students</h3>
-                    <p className="text-xs text-gray-500">{students.length} total</p>
+                    <h3 className="font-semibold text-slate-900">Enrolled Students</h3>
+                    <p className="text-xs text-slate-500">{students.length} total</p>
                   </div>
                 </div>
  
                 {loadingStudents ? (
                   <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                    <Loader2 className="h-4 w-4 animate-spin text-sky-500" />
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
                     {students.map((student) => (
-                      <div key={student.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                        <div className="flex items-center gap-2 min-w-0">
+                      <div key={student.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
                           {student.avatarUrl ? (
                             <img
                               src={student.avatarUrl}
                               alt={student.name}
-                              className="h-4 w-4 rounded-full object-cover"
+                              className="h-7 w-7 rounded-full object-cover"
                             />
                           ) : (
-                            <div className="h-4 w-4 rounded-full bg-blue-100 flex items-center justify-center">
-                              <span className="text-xs font-medium text-blue-700">
+                            <div className="h-7 w-7 rounded-full bg-sky-100 flex items-center justify-center">
+                              <span className="text-[11px] font-semibold text-sky-700">
                                 {student.avatarEmoji || student.name.charAt(0)}
                               </span>
                             </div>
                           )}
-                          <span className="text-sm text-gray-700 truncate max-w-[120px]">
-                            {student.name}
-                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-slate-800">{student.name}</p>
+                            <p className="truncate text-xs text-slate-500">{student.email || "No email"}</p>
+                          </div>
                         </div>
-                      
                       </div>
                     ))}
                     {students.length === 0 && (
-                      <p className="text-sm text-gray-500 text-center py-4">
+                      <p className="text-sm text-slate-500 text-center py-4">
                         No students enrolled yet
                       </p>
                     )}
@@ -1468,33 +1769,33 @@ export default function NotificationsPage() {
         )}
 
         {tab === "history" && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                  <History className="h-4 w-4 text-blue-500" />
+                <div className="h-8 w-8 rounded-xl bg-sky-100 flex items-center justify-center">
+                  <History className="h-4 w-4 text-sky-500" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900">
+                  <h2 className="text-xl font-bold text-slate-900">
                     Notification History
                   </h2>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-slate-600">
                     Track all sent and scheduled notifications
                   </p>
                 </div>
               </div>
-              <Sparkles className="h-4 w-4 text-blue-400 hidden md:block" />
+              <Sparkles className="h-4 w-4 text-sky-400 hidden md:block" />
             </div>
 
             {/* Filters */}
             <div className="flex flex-col md:flex-row md:items-center gap-3 mb-6">
               <div className="relative flex-1">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                 <input
                   value={historySearch}
                   onChange={(event) => setHistorySearch(event.target.value)}
                   placeholder="Search history..."
-                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                 />
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1505,7 +1806,7 @@ export default function NotificationsPage() {
                       event.target.value as "all" | NotificationType,
                     )
                   }
-                  className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                 >
                   <option value="all">All types</option>
                   <option value="info">Info</option>
@@ -1519,7 +1820,7 @@ export default function NotificationsPage() {
                       event.target.value as "all" | HistoryStatus,
                     )
                   }
-                  className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                 >
                   <option value="all">All status</option>
                   <option value="sent">Sent</option>
@@ -1531,7 +1832,7 @@ export default function NotificationsPage() {
                   onChange={(event) =>
                     setHistoryCourseFilter(event.target.value)
                   }
-                  className="px-3 py-2.5 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                 >
                   <option value="all">All courses</option>
                   {historyCourseOptions.map(([courseId, courseName]) => (
@@ -1543,7 +1844,7 @@ export default function NotificationsPage() {
                 <button
                   type="button"
                   onClick={exportHistoryCsv}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
                 >
                   <Download className="h-4 w-4" />
                   Export
@@ -1552,10 +1853,10 @@ export default function NotificationsPage() {
             </div>
 
             {/* Table */}
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr className="text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                <thead className="bg-slate-50">
+                  <tr className="text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
                     <th className="px-4 py-3">Date</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Course</th>
@@ -1565,44 +1866,36 @@ export default function NotificationsPage() {
                     <th className="px-4 py-3">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200">
+                <tbody className="divide-y divide-slate-200">
                   {filteredHistory.map((item) => (
-                    <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                         {formatDateTime(item.sentAt || item.createdAt)}
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`px-2 py-1 rounded-full text-xs font-medium inline-flex items-center gap-1 ${
-                            item.status === "sent"
-                              ? "bg-blue-100 text-blue-700"
-                              : item.status === "scheduled"
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-gray-200 text-gray-700"
-                          }`}
-                        >
+                        <span className={getStatusBadgeClass(item.status)}>
                           {item.status === "sent" && <CheckCircle className="h-3 w-3" />}
                           {item.status === "scheduled" && <Clock className="h-3 w-3" />}
                           {item.status === "cancelled" && <X className="h-3 w-3" />}
                           {item.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-gray-700">
-                        <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs">
+                      <td className="px-4 py-3 text-slate-700">
+                        <span className="px-2 py-1 bg-slate-100 text-slate-700 rounded-full text-xs">
                           {item.courseCode}
                         </span>
                       </td>
-                      <td className="px-4 py-3 capitalize text-gray-700">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium bg-${getTypeColor(item.type)}-100 text-${getTypeColor(item.type)}-700`}>
+                      <td className="px-4 py-3 capitalize text-slate-700">
+                        <span className={getTypeBadgeClass(item.type)}>
                           {item.type}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-gray-900 max-w-[200px] truncate">
+                      <td className="px-4 py-3 text-slate-900 max-w-[200px] truncate">
                         {item.title}
                       </td>
-                      <td className="px-4 py-3 text-gray-700">
+                      <td className="px-4 py-3 text-slate-700">
                         <span className="flex items-center gap-1">
-                          <Users className="h-3 w-3 text-gray-500" />
+                          <Users className="h-3 w-3 text-slate-500" />
                           {item.recipientCount}
                         </span>
                       </td>
@@ -1613,7 +1906,7 @@ export default function NotificationsPage() {
                               <button
                                 type="button"
                                 onClick={() => sendScheduledNow(item.id)}
-                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                                className="p-1.5 rounded-lg text-sky-600 hover:bg-sky-50 transition-colors"
                                 title="Send now"
                               >
                                 <PlayCircle className="h-4 w-4" />
@@ -1621,7 +1914,7 @@ export default function NotificationsPage() {
                               <button
                                 type="button"
                                 onClick={() => cancelScheduled(item.id)}
-                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                                className="p-1.5 rounded-lg text-sky-600 hover:bg-sky-50 transition-colors"
                                 title="Cancel schedule"
                               >
                                 <PauseCircle className="h-4 w-4" />
@@ -1644,10 +1937,10 @@ export default function NotificationsPage() {
               </table>
               {filteredHistory.length === 0 && (
                 <div className="text-center py-8">
-                  <div className="h-12 w-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                    <History className="h-4 w-4 text-gray-400" />
+                  <div className="h-12 w-12 mx-auto mb-3 rounded-full bg-slate-100 flex items-center justify-center">
+                    <History className="h-4 w-4 text-slate-400" />
                   </div>
-                  <p className="text-sm text-gray-500">No notification history matches the filters</p>
+                  <p className="text-sm text-slate-500">No notification history matches the filters</p>
                 </div>
               )}
             </div>
@@ -1655,31 +1948,31 @@ export default function NotificationsPage() {
         )}
 
         {tab === "scheduled" && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                  <Clock className="h-4 w-4 text-blue-500" />
+                <div className="h-8 w-8 rounded-xl bg-sky-100 flex items-center justify-center">
+                  <Clock className="h-4 w-4 text-sky-500" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900">
+                  <h2 className="text-xl font-bold text-slate-900">
                     Scheduled Notifications
                   </h2>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-slate-600">
                     {scheduledItems.length} notification(s) waiting to be sent
                   </p>
                 </div>
               </div>
-              <Sparkles className="h-4 w-4 text-blue-400 hidden md:block" />
+              <Sparkles className="h-4 w-4 text-sky-400 hidden md:block" />
             </div>
 
             {scheduledItems.length === 0 ? (
               <div className="text-center py-8">
-                <div className="h-16 w-16 mx-auto mb-4 rounded-full bg-blue-50 flex items-center justify-center">
-                  <Clock className="h-8 w-8 text-blue-400" />
+                <div className="h-16 w-16 mx-auto mb-4 rounded-full bg-sky-50 flex items-center justify-center">
+                  <Clock className="h-8 w-8 text-sky-400" />
                 </div>
-                <p className="text-gray-900 font-semibold text-lg">No scheduled notifications</p>
-                <p className="text-sm text-gray-600 mt-2">
+                <p className="text-slate-900 font-semibold text-lg">No scheduled notifications</p>
+                <p className="text-sm text-slate-600 mt-2">
                   Schedule a notification from the Compose tab
                 </p>
               </div>
@@ -1690,25 +1983,25 @@ export default function NotificationsPage() {
                   .map((item) => (
                     <div
                       key={item.id}
-                      className="p-4 rounded-xl border border-gray-200 bg-gray-50 hover:bg-white transition-all"
+                      className="p-4 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white transition-all"
                     >
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium bg-${getTypeColor(item.type)}-100 text-${getTypeColor(item.type)}-700`}>
+                            <span className={getTypeBadgeClass(item.type)}>
                               {item.type}
                             </span>
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-slate-500">
                               {item.courseCode}
                             </span>
                           </div>
-                          <p className="text-sm font-semibold text-gray-900 mb-1">
+                          <p className="text-sm font-semibold text-slate-900 mb-1">
                             {item.title}
                           </p>
-                          <p className="text-xs text-gray-600 mb-2 line-clamp-2">
+                          <p className="text-xs text-slate-600 mb-2 line-clamp-2">
                             {item.message}
                           </p>
-                          <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <div className="flex items-center gap-4 text-xs text-slate-500">
                             <span className="flex items-center gap-1">
                               <Users className="h-3 w-3" />
                               {item.recipientCount} recipients
@@ -1722,14 +2015,14 @@ export default function NotificationsPage() {
                         <div className="flex items-center gap-2 md:self-center">
                           <button
                             onClick={() => sendScheduledNow(item.id)}
-                            className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1"
+                            className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-sky-700"
                           >
                             <PlayCircle className="h-3 w-3" />
                             Send now
                           </button>
                           <button
                             onClick={() => cancelScheduled(item.id)}
-                            className="px-3 py-1.5 border border-gray-300 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-100 transition-colors flex items-center gap-1"
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
                           >
                             <X className="h-3 w-3" />
                             Cancel
@@ -1744,22 +2037,22 @@ export default function NotificationsPage() {
         )}
 
         {tab === "automations" && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-xl bg-gray-100 flex items-center justify-center">
-                  <Settings2 className="h-4 w-4 text-gray-700" />
+                <div className="h-8 w-8 rounded-xl bg-slate-100 flex items-center justify-center">
+                  <Settings2 className="h-4 w-4 text-slate-700" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900">
+                  <h2 className="text-xl font-bold text-slate-900">
                     Automation Rules
                   </h2>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-slate-600">
                     Configure automatic notifications for course events
                   </p>
                 </div>
               </div>
-              <Sparkles className="h-4 w-4 text-blue-400 hidden md:block" />
+              <Sparkles className="h-4 w-4 text-sky-400 hidden md:block" />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -1775,14 +2068,14 @@ export default function NotificationsPage() {
               ).map(([key, label, description]) => (
                 <div
                   key={key}
-                  className="p-4 rounded-xl border border-gray-200 bg-gray-50 hover:bg-white transition-all"
+                  className="p-4 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white transition-all"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-1">
+                      <h4 className="text-sm font-semibold text-slate-900 mb-1">
                         {label}
                       </h4>
-                      <p className="text-xs text-gray-600 mb-2">
+                      <p className="text-xs text-slate-600 mb-2">
                         {description}
                       </p>
                     </div>
@@ -1798,16 +2091,16 @@ export default function NotificationsPage() {
                         }
                         className="sr-only peer"
                       />
-                      <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                      <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-checked:bg-sky-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
                     </label>
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="p-4 rounded-xl border border-gray-200 bg-gray-50">
-              <label className="mb-2 block text-sm font-medium text-gray-700 flex items-center gap-2">
-                <Clock className="h-4 w-4 text-gray-700" />
+            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+              <label className="mb-2 block text-sm font-medium text-slate-700 flex items-center gap-2">
+                <Clock className="h-4 w-4 text-slate-700" />
                 Deadline reminder window
               </label>
               <select
@@ -1818,7 +2111,7 @@ export default function NotificationsPage() {
                     deadlineReminderHours: Number(event.target.value),
                   }))
                 }
-                className="w-full md:w-64 rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full md:w-64 rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
               >
                 <option value={1}>1 hour before</option>
                 <option value={6}>6 hours before</option>
@@ -1827,7 +2120,7 @@ export default function NotificationsPage() {
                 <option value={48}>48 hours before</option>
                 <option value={72}>72 hours before</option>
               </select>
-              <p className="text-xs text-gray-500 mt-2">
+              <p className="text-xs text-slate-500 mt-2">
                 Students will receive reminders before assessment deadlines
               </p>
             </div>
@@ -1835,39 +2128,39 @@ export default function NotificationsPage() {
         )}
 
         {tab === "preferences" && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all duration-300">
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-xl bg-gray-100 flex items-center justify-center">
-                  <Filter className="h-4 w-4 text-blue-500" />
+                <div className="h-8 w-8 rounded-xl bg-slate-100 flex items-center justify-center">
+                  <Filter className="h-4 w-4 text-sky-500" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-gray-900">
+                  <h2 className="text-xl font-bold text-slate-900">
                     Notification Preferences
                   </h2>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-slate-600">
                     Control how and when you receive notifications
                   </p>
                 </div>
               </div>
-              <Sparkles className="h-4 w-4 text-blue-400 hidden md:block" />
+              <Sparkles className="h-4 w-4 text-sky-400 hidden md:block" />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Quiet Hours */}
               <div className="space-y-4">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                    <Moon className="h-4 w-4 text-blue-500" />
+                  <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                    <Moon className="h-4 w-4 text-sky-500" />
                     Quiet Hours
                   </h3>
-                  <p className="text-xs text-gray-600 mt-1">Pause notifications during selected hours</p>
+                  <p className="text-xs text-slate-600 mt-1">Pause notifications during selected hours</p>
                 </div>
                 
-                <label className="flex items-center justify-between p-4 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
+                <label className="flex items-center justify-between p-4 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
                   <div className="flex items-center gap-3">
-                    <BellOff className="h-4 w-4 text-gray-600" />
-                    <span className="text-sm font-medium text-gray-700">Enable quiet hours</span>
+                    <BellOff className="h-4 w-4 text-slate-600" />
+                    <span className="text-sm font-medium text-slate-700">Enable quiet hours</span>
                   </div>
                   <div className="relative">
                     <input
@@ -1881,13 +2174,13 @@ export default function NotificationsPage() {
                       }
                       className="sr-only peer"
                     />
-                    <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                    <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-checked:bg-sky-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
                   </div>
                 </label>
 
                 {hubPreferences.quietHoursEnabled && (
-                  <div className="p-4 bg-gray-50 rounded-xl">
-                    <p className="text-xs text-gray-500 mb-2">Quiet hours range</p>
+                  <div className="p-4 bg-slate-50 rounded-xl">
+                    <p className="text-xs text-slate-500 mb-2">Quiet hours range</p>
                     <div className="flex items-center gap-2">
                       <input
                         type="time"
@@ -1898,9 +2191,9 @@ export default function NotificationsPage() {
                             quietHourStart: event.target.value,
                           }))
                         }
-                        className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                       />
-                      <span className="text-gray-500">to</span>
+                      <span className="text-slate-500">to</span>
                       <input
                         type="time"
                         value={hubPreferences.quietHourEnd}
@@ -1910,7 +2203,7 @@ export default function NotificationsPage() {
                             quietHourEnd: event.target.value,
                           }))
                         }
-                        className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500 focus:border-transparent"
                       />
                     </div>
                   </div>
@@ -1920,18 +2213,18 @@ export default function NotificationsPage() {
               {/* Mute Types */}
               <div className="space-y-4">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                    <VolumeX className="h-4 w-4 text-blue-500" />
+                  <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                    <VolumeX className="h-4 w-4 text-sky-500" />
                     Mute by Type
                   </h3>
-                  <p className="text-xs text-gray-600 mt-1">Control which notification categories are silent</p>
+                  <p className="text-xs text-slate-600 mt-1">Control which notification categories are silent</p>
                 </div>
 
                 <div className="space-y-3">
-                  <label className="flex items-center justify-between p-4 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
+                  <label className="flex items-center justify-between p-4 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
                     <div className="flex items-center gap-3">
-                      <Info className="h-4 w-4 text-blue-500" />
-                      <span className="text-sm font-medium text-gray-700">Mute info notifications</span>
+                      <Info className="h-4 w-4 text-sky-500" />
+                      <span className="text-sm font-medium text-slate-700">Mute info notifications</span>
                     </div>
                     <div className="relative">
                       <input
@@ -1945,14 +2238,14 @@ export default function NotificationsPage() {
                         }
                         className="sr-only peer"
                       />
-                      <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                      <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-checked:bg-sky-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
                     </div>
                   </label>
 
-                  <label className="flex items-center justify-between p-4 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
+                  <label className="flex items-center justify-between p-4 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
                     <div className="flex items-center gap-3">
-                      <CheckCircle className="h-4 w-4 text-blue-500" />
-                      <span className="text-sm font-medium text-gray-700">Mute success notifications</span>
+                      <CheckCircle className="h-4 w-4 text-sky-500" />
+                      <span className="text-sm font-medium text-slate-700">Mute success notifications</span>
                     </div>
                     <div className="relative">
                       <input
@@ -1966,14 +2259,14 @@ export default function NotificationsPage() {
                         }
                         className="sr-only peer"
                       />
-                      <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                      <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-checked:bg-sky-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
                     </div>
                   </label>
 
-                  <label className="flex items-center justify-between p-4 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
+                  <label className="flex items-center justify-between p-4 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
                     <div className="flex items-center gap-3">
-                      <AlertTriangle className="h-4 w-4 text-blue-500" />
-                      <span className="text-sm font-medium text-gray-700">Mute warning notifications</span>
+                      <AlertTriangle className="h-4 w-4 text-sky-500" />
+                      <span className="text-sm font-medium text-slate-700">Mute warning notifications</span>
                     </div>
                     <div className="relative">
                       <input
@@ -1987,15 +2280,15 @@ export default function NotificationsPage() {
                         }
                         className="sr-only peer"
                       />
-                      <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                      <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-checked:bg-sky-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
                     </div>
                   </label>
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <p className="text-xs text-gray-500 text-center">
+            <div className="mt-6 pt-6 border-t border-slate-200">
+              <p className="text-xs text-slate-500 text-center">
                 Preferences are saved automatically and synced across devices
               </p>
             </div>
@@ -2014,7 +2307,7 @@ export default function NotificationsPage() {
                 setTab("compose");
               }
             }}
-            className="h-14 w-14 rounded-full bg-blue-600 text-white shadow-lg flex items-center justify-center hover:shadow-xl transition-all"
+            className="h-14 w-14 rounded-full bg-sky-600 text-white shadow-lg flex items-center justify-center hover:shadow-xl transition-all"
           >
             {tab === "compose" ? (
               sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />
@@ -2022,6 +2315,7 @@ export default function NotificationsPage() {
               <Plus className="h-4 w-4" />
             )}
           </button>
+          </div>
         </div>
       </div>
     </DashboardLayout>

@@ -14,6 +14,54 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
+const DISPLAY_MAX_SCORE = 5;
+
+const toFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value));
+
+const calculateStudentMetrics = (
+  grades: Record<string, { value?: number | null }>,
+  activities: Array<{ id: string; maxScore?: number }>
+): { total: number; status: 'pending' | 'completed' | 'incomplete' } => {
+  let normalizedSum = 0;
+  let gradedActivities = 0;
+
+  for (const activity of activities) {
+    const rawValue = toFiniteNumber(grades?.[activity.id]?.value);
+    if (rawValue === null) continue;
+
+    const activityMax = toFiniteNumber(activity.maxScore);
+    const safeMax = activityMax && activityMax > 0 ? activityMax : DISPLAY_MAX_SCORE;
+    const clampedRaw = clamp(rawValue, 0, safeMax);
+    const normalized = clamp((clampedRaw / safeMax) * DISPLAY_MAX_SCORE, 0, DISPLAY_MAX_SCORE);
+    normalizedSum += normalized;
+    gradedActivities += 1;
+  }
+
+  const total =
+    gradedActivities > 0 ? clamp(normalizedSum / gradedActivities, 0, DISPLAY_MAX_SCORE) : 0;
+
+  if (gradedActivities === 0) {
+    return { total, status: 'pending' };
+  }
+
+  const status =
+    activities.length > 0 && gradedActivities === activities.length
+      ? 'completed'
+      : 'incomplete';
+
+  return { total, status };
+};
+
 // Define la interfaz StudentGrade primero
 export interface StudentGrade {
   studentId: string;
@@ -259,12 +307,18 @@ export const gradeSheetService = {
       
       const data = sheetDoc.data();
       const students = data.students || [];
+      const activities = data.activities || [];
+      const targetActivity = activities.find((activity: any) => activity.id === activityId);
+      const rawGrade = toFiniteNumber(grade) ?? 0;
+      const activityMax = toFiniteNumber(targetActivity?.maxScore);
+      const safeMax = activityMax && activityMax > 0 ? activityMax : DISPLAY_MAX_SCORE;
+      const sanitizedGrade = clamp(rawGrade, 0, safeMax);
       
       // Buscar o crear el estudiante
       const studentIndex = students.findIndex((s: any) => s.studentId === studentId);
       
       const gradeData = {
-        value: grade,
+        value: sanitizedGrade,
         comment: comment,
         submittedAt: Timestamp.now()
       };
@@ -275,23 +329,22 @@ export const gradeSheetService = {
           ...students[studentIndex].grades,
           [activityId]: gradeData
         };
-        students[studentIndex].status = 'completed';
-        
-        // Calcular total
-        const grades = Object.values(students[studentIndex].grades);
-        const total = grades.reduce((sum: number, g: any) => sum + (g.value || 0), 0);
-        students[studentIndex].total = total;
+        const metrics = calculateStudentMetrics(students[studentIndex].grades || {}, activities);
+        students[studentIndex].status = metrics.status;
+        students[studentIndex].total = metrics.total;
       } else {
         // Crear nuevo estudiante
         console.warn(`Student ${studentId} not found in grade sheet, creating new entry`);
+        const initialGrades = {
+          [activityId]: gradeData
+        };
+        const metrics = calculateStudentMetrics(initialGrades, activities);
         const newStudent: any = {
           studentId: studentId,
           name: `Student ${studentId.substring(0, 8)}`,
-          grades: {
-            [activityId]: gradeData
-          },
-          status: 'completed',
-          total: grade
+          grades: initialGrades,
+          status: metrics.status,
+          total: metrics.total
         };
         students.push(newStudent);
       }

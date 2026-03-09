@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentType, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAcademic } from "@/contexts/AcademicContext";
@@ -8,20 +8,19 @@ import {
   BookOpen,
   Users,
   TrendingUp,
+  HeartPulse,
+  Layers3,
   Plus,
-  BarChart3,
   AlertTriangle,
   Presentation,
   FileSpreadsheet,
   CheckCircle2,
   FileText,
+  ChevronLeft,
   ChevronRight,
   Loader2,
   Zap,
   CalendarClock,
-  UserCheck,
-  ChevronDown,
-  Building,
   AlertCircle,
   Clock,
   FolderOpen,
@@ -124,6 +123,224 @@ const stripHtmlPreview = (value?: string): string => {
   }
 };
 
+const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value));
+
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const getHealthTone = (score: number) => {
+  if (score >= 85) {
+    return {
+      text: "text-emerald-700",
+      bg: "bg-emerald-50",
+      border: "border-emerald-200",
+    };
+  }
+  if (score >= 70) {
+    return {
+      text: "text-sky-700",
+      bg: "bg-sky-50",
+      border: "border-sky-200",
+    };
+  }
+  if (score >= 55) {
+    return {
+      text: "text-amber-700",
+      bg: "bg-amber-50",
+      border: "border-amber-200",
+    };
+  }
+  return {
+    text: "text-rose-700",
+    bg: "bg-rose-50",
+    border: "border-rose-200",
+  };
+};
+
+const normalizeText = (value: string): string =>
+  value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+const normalizeTextField = (value: unknown): string => {
+  if (typeof value === "string") return value.trim();
+  return "";
+};
+
+const parseDueDateValue = (
+  value?: string,
+): { date: Date; hasExplicitTime: boolean } | null => {
+  if (!value) return null;
+  const raw = value.trim();
+  if (!raw) return null;
+
+  const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch;
+    const date = new Date(Number(year), Number(month) - 1, Number(day), 0, 0, 0, 0);
+    if (Number.isNaN(date.getTime())) return null;
+    return { date, hasExplicitTime: false };
+  }
+
+  const localDateTimeMatch = raw.match(
+    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/,
+  );
+  if (localDateTimeMatch) {
+    const [, year, month, day, hour, minute, second = "0"] = localDateTimeMatch;
+    const date = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+      0,
+    );
+    if (Number.isNaN(date.getTime())) return null;
+    return { date, hasExplicitTime: true };
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return { date: parsed, hasExplicitTime: /[T ]\d{2}:\d{2}/.test(raw) };
+};
+
+const getDueComparisonDate = (value?: string): Date | null => {
+  const parsed = parseDueDateValue(value);
+  if (!parsed) return null;
+  if (parsed.hasExplicitTime) return parsed.date;
+  const endOfDay = new Date(parsed.date);
+  endOfDay.setHours(23, 59, 59, 999);
+  return endOfDay;
+};
+
+const formatDueDateTime = (value?: string): string => {
+  const parsed = parseDueDateValue(value);
+  if (!parsed) return "No due date";
+  if (!parsed.hasExplicitTime) {
+    return `${format(parsed.date, "EEE, MMM d", { locale: enUS })} • All day`;
+  }
+  return `${format(parsed.date, "EEE, MMM d", { locale: enUS })} • ${format(parsed.date, "h:mm a", { locale: enUS })}`;
+};
+
+const isWithinNextSevenDays = (value?: string): boolean => {
+  const dueDate = getDueComparisonDate(value);
+  if (!dueDate) return false;
+  const now = new Date();
+  const limit = new Date(now.getTime() + 7 * DAY_IN_MS);
+  return dueDate >= now && dueDate <= limit;
+};
+
+const parseTimeToMinutes = (value?: string): number | null => {
+  if (!value) return null;
+  const match = value.match(/(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+};
+
+const formatTimeToMeridiem = (value?: string): string => {
+  if (!value) return "";
+  const match = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return value;
+  const hours = Number(match[1]);
+  const minutes = match[2];
+  if (!Number.isFinite(hours) || hours < 0 || hours > 23) return value;
+  const suffix = hours >= 12 ? "PM" : "AM";
+  const displayHour = hours % 12 === 0 ? 12 : hours % 12;
+  return `${displayHour}:${minutes} ${suffix}`;
+};
+
+const formatTimeRangeLabel = (value?: string): string => {
+  if (!value) return "";
+  if (/\b(am|pm)\b/i.test(value)) return value;
+  const matches = value.match(/\b\d{1,2}:\d{2}\b/g);
+  if (!matches || matches.length === 0) return value;
+  let formatted = value;
+  matches.forEach((timeText) => {
+    formatted = formatted.replace(timeText, formatTimeToMeridiem(timeText));
+  });
+  return formatted.replace(/\s*-\s*/g, " - ");
+};
+
+const parseClassDayIndexesFromText = (value?: string): number[] => {
+  if (!value) return [];
+  const normalized = normalizeText(value);
+  const days = [
+    { index: 0, tokens: ["sunday", "sun", "domingo", "dom"] },
+    { index: 1, tokens: ["monday", "mon", "lunes", "lun"] },
+    { index: 2, tokens: ["tuesday", "tue", "martes", "mar"] },
+    { index: 3, tokens: ["wednesday", "wed", "miercoles", "miércoles", "mie"] },
+    { index: 4, tokens: ["thursday", "thu", "jueves", "jue"] },
+    { index: 5, tokens: ["friday", "fri", "viernes", "vie"] },
+    { index: 6, tokens: ["saturday", "sat", "sabado", "sábado", "sab"] },
+  ];
+
+  return days
+    .filter((day) => day.tokens.some((token) => normalized.includes(token)))
+    .map((day) => day.index);
+};
+
+type CourseClassScheduleSlot = {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  location?: string;
+};
+
+const normalizeCourseClassSchedule = (value: unknown): CourseClassScheduleSlot[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const payload = entry as {
+        dayOfWeek?: unknown;
+        startTime?: unknown;
+        endTime?: unknown;
+        location?: unknown;
+      };
+      const dayOfWeek = Number(payload.dayOfWeek);
+      const startTime = normalizeTextField(payload.startTime);
+      const endTime = normalizeTextField(payload.endTime);
+      if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) return null;
+      if (!startTime || !endTime) return null;
+      const slot: CourseClassScheduleSlot = { dayOfWeek, startTime, endTime };
+      const location = normalizeTextField(payload.location);
+      if (location) slot.location = location;
+      return slot;
+    })
+    .filter((slot): slot is CourseClassScheduleSlot => slot !== null)
+    .sort((a, b) => {
+      if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
+      return (parseTimeToMinutes(a.startTime) ?? 9999) - (parseTimeToMinutes(b.startTime) ?? 9999);
+    });
+};
+
+const formatClassScheduleSlot = (slot: CourseClassScheduleSlot, includeDay = false): string => {
+  const timeLabel = `${formatTimeToMeridiem(slot.startTime)} - ${formatTimeToMeridiem(slot.endTime)}`;
+  if (!includeDay) return timeLabel;
+  const dayLabel = WEEKDAY_SHORT[slot.dayOfWeek] ?? "Day";
+  return `${dayLabel} ${timeLabel}`;
+};
+
+const resolveUpcomingTag = (
+  item: { assessmentType?: string; type?: string },
+): { label: string; tone: "activity" | "forum" | "announcement" } => {
+  const rawType = String(item.assessmentType || item.type || "").trim().toLowerCase();
+  if (rawType.includes("forum")) {
+    return { label: "Forum", tone: "forum" };
+  }
+  if (rawType.includes("announcement") || rawType.includes("aviso")) {
+    return { label: "Announcement", tone: "announcement" };
+  }
+  return { label: "Activity", tone: "activity" };
+};
+
 interface Slide {
   id: string;
   title: string;
@@ -203,6 +420,12 @@ interface Course {
   semester: string;
   status: string;
   createdAt: Timestamp;
+  classSchedule?: CourseClassScheduleSlot[];
+  classDays?: string;
+  classTime?: string;
+  scheduleText?: string;
+  classRoom?: string;
+  location?: string;
 }
 
 interface Student {
@@ -213,6 +436,44 @@ interface Student {
   whatsApp?: string;
   courses?: string[];
 }
+
+type DashboardMetric = {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  value: string | number;
+  iconClassName: string;
+};
+
+type SnapshotCardModel = {
+  key: string;
+  title: string;
+  subtitle: string;
+  icon: ComponentType<{ className?: string }>;
+  iconClassName: string;
+  value: string | number;
+  suffix: string;
+  hint: string;
+  metrics: DashboardMetric[];
+};
+
+type UpcomingActivityItem = {
+  id: string;
+  name: string;
+  dueDate: string;
+  courseId: string;
+  courseName: string;
+  courseCode: string;
+  type: string;
+  assessmentType?: string;
+};
+
+type TodayClassItem = {
+  id: string;
+  timeLabel: string;
+  courseLabel: string;
+  courseCode: string;
+  sortOrder: number;
+};
 
 export default function TeacherDashboard() {
   const { user, isAuthenticated } = useAuth();
@@ -231,7 +492,6 @@ export default function TeacherDashboard() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCourseDropdown, setShowCourseDropdown] = useState(false);
   const [showBackupCenter, setShowBackupCenter] = useState(false);
   const [loadingBackupSnapshots, setLoadingBackupSnapshots] = useState(false);
   const [backupSnapshots, setBackupSnapshots] = useState<
@@ -240,9 +500,276 @@ export default function TeacherDashboard() {
   const [isExportingBackup, setIsExportingBackup] = useState(false);
   const [isRestoringBackup, setIsRestoringBackup] = useState(false);
   const restoreFileInputRef = useRef<HTMLInputElement | null>(null);
+  const touchStartXRef = useRef<number | null>(null);
+  const [activeSnapshotIndex, setActiveSnapshotIndex] = useState(0);
   const selectedCourse = useMemo(
     () => courses.find((course) => course.id === selectedCourseId) || null,
     [courses, selectedCourseId],
+  );
+  const courseById = useMemo(
+    () => new Map(courses.map((course) => [course.id, course])),
+    [courses],
+  );
+  const ownedCourseIds = useMemo(
+    () => new Set(courses.map((course) => course.id)),
+    [courses],
+  );
+  const upcomingActivitiesAllCourses = useMemo<UpcomingActivityItem[]>(() => {
+    return assessments
+      .filter((assessment) => {
+        const normalizedCourseId = String(assessment.courseId || "").trim();
+        if (!normalizedCourseId || !ownedCourseIds.has(normalizedCourseId)) {
+          return false;
+        }
+        const status = String(assessment.status || "").toLowerCase();
+        if (status === "draft" || status === "deleted" || status === "archived") {
+          return false;
+        }
+        return isWithinNextSevenDays(assessment.dueDate);
+      })
+      .map((assessment) => {
+        const course = courseById.get(assessment.courseId);
+        return {
+          id: assessment.id,
+          name: assessment.name || "Activity",
+          dueDate: assessment.dueDate || "",
+          courseId: assessment.courseId || "",
+          courseName: course?.name || "Untitled Course",
+          courseCode: course?.code || "",
+          type: assessment.type || "",
+          assessmentType: assessment.assessmentType || "",
+        };
+      })
+      .sort((a, b) => {
+        const dueDelta =
+          (getDueComparisonDate(a.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER) -
+          (getDueComparisonDate(b.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER);
+        if (dueDelta !== 0) return dueDelta;
+        return a.courseName.localeCompare(b.courseName);
+      })
+      .slice(0, 8);
+  }, [assessments, courseById, ownedCourseIds]);
+  const todayClassesAllCourses = useMemo<TodayClassItem[]>(() => {
+    const todayDayIndex = new Date().getDay();
+    const classes: TodayClassItem[] = [];
+
+    courses.forEach((course) => {
+      const scheduleSlots = normalizeCourseClassSchedule(course.classSchedule);
+      if (scheduleSlots.length > 0) {
+        scheduleSlots.forEach((slot, index) => {
+          if (slot.dayOfWeek !== todayDayIndex) return;
+          const roomText =
+            normalizeTextField(slot.location) ||
+            normalizeTextField(course.classRoom) ||
+            normalizeTextField(course.location);
+
+          classes.push({
+            id: `${course.id}-${slot.dayOfWeek}-${slot.startTime}-${index}`,
+            timeLabel: formatClassScheduleSlot(slot),
+            courseLabel: `${course.code || "Course"}${roomText ? ` • ${roomText}` : ""}`,
+            courseCode: course.code || "",
+            sortOrder: parseTimeToMinutes(slot.startTime) ?? 9999,
+          });
+        });
+        return;
+      }
+
+      const dayIndexes = parseClassDayIndexesFromText(
+        `${normalizeTextField(course.classDays)} ${normalizeTextField(course.scheduleText)}`.trim(),
+      );
+      if (!dayIndexes.includes(todayDayIndex)) return;
+
+      const timeText =
+        normalizeTextField(course.classTime) ||
+        normalizeTextField(course.scheduleText) ||
+        "Class session";
+      const roomText = normalizeTextField(course.classRoom) || normalizeTextField(course.location);
+
+      classes.push({
+        id: `${course.id}-legacy-${todayDayIndex}`,
+        timeLabel: formatTimeRangeLabel(timeText),
+        courseLabel: `${course.code || "Course"}${roomText ? ` • ${roomText}` : ""}`,
+        courseCode: course.code || "",
+        sortOrder: parseTimeToMinutes(timeText) ?? 9999,
+      });
+    });
+
+    return classes
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.courseLabel.localeCompare(b.courseLabel))
+      .slice(0, 8);
+  }, [courses]);
+  const courseHealthOverview = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const unitCourseById = new Map<string, string>();
+    units.forEach((unit) => {
+      unitCourseById.set(unit.id, unit.courseId);
+    });
+
+    const weekCourseById = new Map<string, string>();
+    weeks.forEach((week) => {
+      const courseId = unitCourseById.get(week.unitId);
+      if (courseId) weekCourseById.set(week.id, courseId);
+    });
+
+    const filesCountByCourse = new Map<string, number>();
+    const fileWeekIdsByCourse = new Map<string, Set<string>>();
+    courseFiles.forEach((file) => {
+      if (!file.courseId) return;
+      filesCountByCourse.set(
+        file.courseId,
+        (filesCountByCourse.get(file.courseId) || 0) + 1,
+      );
+      if (!file.weekId) return;
+      if (!fileWeekIdsByCourse.has(file.courseId)) {
+        fileWeekIdsByCourse.set(file.courseId, new Set<string>());
+      }
+      fileWeekIdsByCourse.get(file.courseId)?.add(file.weekId);
+    });
+
+    const slidesCountByCourse = new Map<string, number>();
+    slides.forEach((slide) => {
+      const courseId = weekCourseById.get(slide.weekId);
+      if (!courseId) return;
+      slidesCountByCourse.set(courseId, (slidesCountByCourse.get(courseId) || 0) + 1);
+    });
+
+    const assessmentCourseById = new Map<string, string>();
+    const assessmentsByCourse = new Map<string, Assessment[]>();
+    assessments.forEach((assessment) => {
+      assessmentCourseById.set(assessment.id, assessment.courseId);
+      if (!assessmentsByCourse.has(assessment.courseId)) {
+        assessmentsByCourse.set(assessment.courseId, []);
+      }
+      assessmentsByCourse.get(assessment.courseId)?.push(assessment);
+    });
+
+    const pendingByCourse = new Map<string, number>();
+    submissions.forEach((submission) => {
+      const courseId = assessmentCourseById.get(submission.assessmentId);
+      if (!courseId) return;
+      const status = String(submission.status || "").toLowerCase();
+      if (status !== "submitted" && status !== "pending") return;
+      pendingByCourse.set(courseId, (pendingByCourse.get(courseId) || 0) + 1);
+    });
+
+    const weeksCountByCourse = new Map<string, number>();
+    courseWeeks.forEach((week) => {
+      weeksCountByCourse.set(
+        week.courseId,
+        (weeksCountByCourse.get(week.courseId) || 0) + 1,
+      );
+    });
+
+    return courses
+      .map((course) => {
+        const publishedSheets = gradeSheets.filter(
+          (sheet) => sheet.courseId === course.id && sheet.isPublished,
+        );
+        const studentGradesById: Record<string, number[]> = {};
+        const knownStudents = new Set<string>(course.enrolledStudents || []);
+
+        publishedSheets.forEach((sheet) => {
+          sheet.students?.forEach((student) => {
+            if (!student?.studentId) return;
+            knownStudents.add(student.studentId);
+            const value = Number(student.total);
+            if (!Number.isFinite(value) || value <= 0) return;
+            if (!studentGradesById[student.studentId]) {
+              studentGradesById[student.studentId] = [];
+            }
+            studentGradesById[student.studentId].push(value);
+          });
+        });
+
+        const averages = Object.values(studentGradesById).map(
+          (grades) => grades.reduce((sum, value) => sum + value, 0) / grades.length,
+        );
+        const averageGradeValue =
+          averages.length > 0
+            ? averages.reduce((sum, value) => sum + value, 0) / averages.length
+            : 0;
+
+        const totalStudents = Math.max(
+          knownStudents.size,
+          Object.keys(studentGradesById).length,
+        );
+        const passingStudents = averages.filter((value) => value >= 3.5).length;
+        const approvalRate =
+          totalStudents > 0 ? Math.round((passingStudents / totalStudents) * 100) : 0;
+
+        const courseAssessments = assessmentsByCourse.get(course.id) || [];
+        const overdueCount = courseAssessments.filter((assessment) => {
+          if (!assessment.dueDate || assessment.status === "draft") return false;
+          const due = new Date(assessment.dueDate);
+          due.setHours(0, 0, 0, 0);
+          return due < today;
+        }).length;
+
+        const dueSoonCount = courseAssessments.filter((assessment) => {
+          if (!assessment.dueDate || assessment.status === "draft") return false;
+          const due = new Date(assessment.dueDate);
+          due.setHours(0, 0, 0, 0);
+          const diffDays = Math.floor((due.getTime() - today.getTime()) / 86400000);
+          return diffDays >= 0 && diffDays <= 7;
+        }).length;
+
+        const pendingCount = pendingByCourse.get(course.id) || 0;
+        const slidesCount = slidesCountByCourse.get(course.id) || 0;
+        const filesCount = filesCountByCourse.get(course.id) || 0;
+        const materialsCount = slidesCount + filesCount;
+        const totalWeeks = weeksCountByCourse.get(course.id) || 0;
+        const coveredWeeks = fileWeekIdsByCourse.get(course.id)?.size || 0;
+        const coverageRate =
+          totalWeeks > 0
+            ? Math.round((Math.min(coveredWeeks, totalWeeks) / totalWeeks) * 100)
+            : materialsCount > 0
+              ? 100
+              : 0;
+
+        const healthScore = Math.round(
+          clamp(
+            averageGradeValue * 20 * 0.32 +
+              approvalRate * 0.28 +
+              coverageRate * 0.2 +
+              clamp(100 - pendingCount * 6 - overdueCount * 8, 20, 100) * 0.2,
+            0,
+            100,
+          ),
+        );
+
+        return {
+          id: course.id,
+          name: course.name,
+          code: course.code,
+          group: course.group,
+          studentsCount: totalStudents,
+          averageGrade: averageGradeValue,
+          approvalRate,
+          healthScore,
+          pendingCount,
+          overdueCount,
+          dueSoonCount,
+          materialsCount,
+          tone: getHealthTone(healthScore),
+        };
+      })
+      .sort((a, b) => b.healthScore - a.healthScore);
+  }, [
+    assessments,
+    courseFiles,
+    courseWeeks,
+    courses,
+    gradeSheets,
+    slides,
+    submissions,
+    units,
+    weeks,
+  ]);
+  const selectedCourseHealth = useMemo(
+    () => courseHealthOverview.find((course) => course.id === selectedCourseId) || null,
+    [courseHealthOverview, selectedCourseId],
   );
 
   useEffect(() => {
@@ -314,11 +841,6 @@ export default function TeacherDashboard() {
       24,
     );
   }, [courses, isAuthenticated, user?.id, user?.name, user?.role]);
-
-  const handleCourseChange = (course: Course) => {
-    setSelectedCourseId(course.id);
-    setShowCourseDropdown(false);
-  };
 
   const loadBackupSnapshots = async () => {
     if (!user?.id) return;
@@ -467,6 +989,12 @@ export default function TeacherDashboard() {
           semester: data.semester || "",
           status: data.status || "active",
           createdAt: data.createdAt || Timestamp.now(),
+          classSchedule: normalizeCourseClassSchedule(data.classSchedule),
+          classDays: normalizeTextField(data.classDays),
+          classTime: normalizeTextField(data.classTime),
+          scheduleText: normalizeTextField(data.scheduleText),
+          classRoom: normalizeTextField(data.classRoom),
+          location: normalizeTextField(data.location),
         });
       });
 
@@ -1211,23 +1739,187 @@ export default function TeacherDashboard() {
   const missingSubmissions = getMissingSubmissions();
   const assessmentHealth = getAssessmentHealth();
   const contentCoverage = getContentCoverage();
+  const actionAlertsTotal =
+    pendingGrading.length +
+    missingSubmissions.length +
+    assessmentHealth.overdueCount +
+    courseStats.totalAtRisk;
+  const operationalSnapshotTotal =
+    upcomingAssessments.length +
+    courseSlides.length +
+    courseQuizCount +
+    contentCoverage.filesCount;
+  const snapshotCards = useMemo<SnapshotCardModel[]>(
+    () => [
+      {
+        key: "academic-health",
+        title: "Academic Health",
+        subtitle: selectedCourse
+          ? `${selectedCourse.code} • Group ${selectedCourse.group}`
+          : "Selected course",
+        icon: HeartPulse,
+        iconClassName: "text-sky-700",
+        value: selectedCourseHealth?.healthScore ?? 0,
+        suffix: "/100",
+        hint: "Built from grade trends, approval rate, pending queue and coverage.",
+        metrics: [
+          {
+            icon: TrendingUp,
+            label: "Approval",
+            value: `${courseStats.approvalRate}%`,
+            iconClassName: "text-emerald-600",
+          },
+          {
+            icon: FileSpreadsheet,
+            label: "Avg Grade",
+            value: `${courseStats.averageGrade}/5.0`,
+            iconClassName: "text-sky-600",
+          },
+          {
+            icon: CheckCircle2,
+            label: "Passing",
+            value: courseStats.totalPassing,
+            iconClassName: "text-indigo-600",
+          },
+          {
+            icon: AlertTriangle,
+            label: "At Risk",
+            value: courseStats.totalAtRisk,
+            iconClassName: "text-amber-600",
+          },
+        ],
+      },
+      {
+        key: "action-alerts",
+        title: "Action Alerts",
+        subtitle: selectedCourse
+          ? `${selectedCourse.code} • Group ${selectedCourse.group}`
+          : "Selected course",
+        icon: Zap,
+        iconClassName: "text-violet-700",
+        value: actionAlertsTotal,
+        suffix: " items",
+        hint: "Prioritize grading queue, missing submissions and overdue activities.",
+        metrics: [
+          {
+            icon: Clock,
+            label: "To Grade",
+            value: pendingGrading.length,
+            iconClassName: "text-orange-600",
+          },
+          {
+            icon: AlertCircle,
+            label: "Missing",
+            value: missingSubmissions.length,
+            iconClassName: "text-rose-600",
+          },
+          {
+            icon: CalendarClock,
+            label: "Overdue",
+            value: assessmentHealth.overdueCount,
+            iconClassName: "text-red-600",
+          },
+          {
+            icon: FileText,
+            label: "Drafts",
+            value: assessmentHealth.draftCount,
+            iconClassName: "text-amber-600",
+          },
+        ],
+      },
+      {
+        key: "operational-snapshot",
+        title: "Operational Snapshot",
+        subtitle: selectedCourse
+          ? `${selectedCourse.code} • Group ${selectedCourse.group}`
+          : "Selected course",
+        icon: Layers3,
+        iconClassName: "text-cyan-700",
+        value: operationalSnapshotTotal,
+        suffix: " items",
+        hint: "Live operational pulse: upcoming work, slides, files and quizzes.",
+        metrics: [
+          {
+            icon: CalendarClock,
+            label: "Due Soon",
+            value: upcomingAssessments.length,
+            iconClassName: "text-blue-600",
+          },
+          {
+            icon: Presentation,
+            label: "Slides",
+            value: courseSlides.length,
+            iconClassName: "text-violet-600",
+          },
+          {
+            icon: FolderOpen,
+            label: "Coverage",
+            value: `${contentCoverage.weeksWithFiles}/${contentCoverage.weeksCount}`,
+            iconClassName: "text-cyan-600",
+          },
+          {
+            icon: ListChecks,
+            label: "Quizzes",
+            value: courseQuizCount,
+            iconClassName: "text-teal-600",
+          },
+        ],
+      },
+    ],
+    [
+      actionAlertsTotal,
+      assessmentHealth.draftCount,
+      assessmentHealth.overdueCount,
+      contentCoverage.weeksCount,
+      contentCoverage.weeksWithFiles,
+      courseQuizCount,
+      courseSlides.length,
+      courseStats.approvalRate,
+      courseStats.averageGrade,
+      courseStats.totalAtRisk,
+      courseStats.totalPassing,
+      missingSubmissions.length,
+      operationalSnapshotTotal,
+      pendingGrading.length,
+      selectedCourse,
+      selectedCourseHealth?.healthScore,
+      upcomingAssessments.length,
+    ],
+  );
+  const activeSnapshotCard = snapshotCards[activeSnapshotIndex] || null;
+  const ActiveSnapshotIcon = activeSnapshotCard?.icon || null;
+
+  const goToNextSnapshot = () => {
+    if (snapshotCards.length <= 1) return;
+    setActiveSnapshotIndex((current) => (current + 1) % snapshotCards.length);
+  };
+
+  const goToPreviousSnapshot = () => {
+    if (snapshotCards.length <= 1) return;
+    setActiveSnapshotIndex((current) => (current - 1 + snapshotCards.length) % snapshotCards.length);
+  };
+
+  useEffect(() => {
+    setActiveSnapshotIndex(0);
+  }, [selectedCourseId, snapshotCards.length]);
 
   if (loading) {
     return (
-      <DashboardLayout
-        title={`Welcome, ${user?.name?.split(" ")[0]}`}
-        subtitle="Teacher Dashboard"
-      >
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-2">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto" />
-            <div className="space-y-2">
-              <p className="text-lg font-semibold text-gray-900">
-                Loading your dashboard
-              </p>
-              <p className="text-sm text-gray-600">
-                Preparing your personalized teaching overview
-              </p>
+      <DashboardLayout contentClassName="pt-0 lg:pt-1">
+        <div className="relative overflow-x-hidden">
+          <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+          <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="flex min-h-[320px] items-center justify-center">
+              <div className="space-y-2 text-center">
+                <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
+                <p className="text-lg font-semibold text-slate-900">
+                  Loading your dashboard
+                </p>
+                <p className="text-sm text-slate-600">
+                  Preparing your personalized teaching overview
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -1236,11 +1928,7 @@ export default function TeacherDashboard() {
   }
 
   return (
-    <DashboardLayout
-      title={`Hello, ${user?.name?.split(" ")[0]}!`}
-      subtitle="Teacher Dashboard"
-      contentClassName="pt-0 lg:pt-1"
-    >
+    <DashboardLayout contentClassName="pt-0 lg:pt-1">
       <input
         ref={restoreFileInputRef}
         type="file"
@@ -1248,604 +1936,450 @@ export default function TeacherDashboard() {
         className="hidden"
         onChange={handleRestoreBackupFile}
       />
-      <div className="space-y-4">
-        <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-blue-100 flex items-center justify-center hidden sm:flex">
-                  <BookOpen className="h-5 w-5 text-blue-600" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold tracking-wide text-gray-500 uppercase">
+      <div className="relative overflow-x-hidden">
+        <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+        <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="space-y-4">
+        <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+          <div className="pointer-events-none absolute -left-16 -top-20 h-40 w-40 rounded-full bg-sky-200/20" />
+          <div className="pointer-events-none absolute -bottom-24 -right-20 h-48 w-48 rounded-full bg-indigo-200/20" />
+
+          <div className="relative space-y-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1">
+                  <Layers3 className="h-3.5 w-3.5 text-sky-700" />
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
                     Course Workspace
-                  </p>
-                  <div className="relative mt-1">
-                    <button
-                      onClick={() => setShowCourseDropdown(!showCourseDropdown)}
-                      className="flex items-center gap-2 text-left hover:bg-gray-50 rounded-lg px-2 py-1.5 transition-colors"
-                    >
-                      <div className="min-w-0">
-                        <h1 className="text-xl font-bold text-gray-900 truncate">
-                          {selectedCourse?.name || "Select a course"}
-                        </h1>
-                        <p className="text-gray-600 text-sm mt-0.5 truncate">
-                          {selectedCourse
-                            ? `${selectedCourse.code} • Group ${selectedCourse.group} • ${courseStats.totalStudents} students • ${selectedCourse.credits} credits`
-                            : "No courses available"}
-                        </p>
-                      </div>
-                      <ChevronDown
-                        className={`h-5 w-5 flex-shrink-0 transition-transform ${showCourseDropdown ? "rotate-180" : ""}`}
-                      />
-                    </button>
-
-                    {showCourseDropdown && courses.length > 1 && (
-                      <div className="absolute z-10 mt-2 w-full max-w-xl bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                        <div className="p-2">
-                          <p className="text-xs font-semibold text-gray-500 tracking-wider mb-2 px-2">
-                            Your Courses ({courses.length})
-                          </p>
-                          {courses.map((course) => (
-                            <button
-                              key={course.id}
-                              onClick={() => handleCourseChange(course)}
-                              className={`w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors ${
-                                selectedCourse?.id === course.id
-                                  ? "bg-blue-50 border border-blue-100"
-                                  : ""
-                              }`}
-                            >
-                              <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-                                <Building className="h-4 w-4 text-blue-600" />
-                              </div>
-                              <div className="flex-1 text-left min-w-0">
-                                <p className="font-semibold text-gray-900 truncate">
-                                  {course.name}
-                                </p>
-                                <p className="text-sm text-gray-500 truncate">
-                                  {course.code} • Group {course.group} •{" "}
-                                  {course.enrolledStudents.length} students
-                                </p>
-                              </div>
-                              {selectedCourse?.id === course.id && (
-                                <CheckCircle2 className="h-5 w-5 text-blue-500" />
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  </span>
                 </div>
-              </div>
-
-              {selectedCourse?.description && (
-                <p className="text-gray-600 text-sm mt-3 pl-0 sm:pl-[52px] max-w-3xl">
-                  {selectedCourse.description}
-                </p>
-              )}
-            </div>
-
-            <div className="w-full lg:w-auto lg:min-w-[300px]">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-gray-500">
-                    Course Average
+                <h1 className="mt-2 truncate text-2xl font-bold text-slate-900">
+                  {selectedCourse?.name || "Select a course"}
+                </h1>
+                <div className="mt-1 flex items-center gap-2 text-sm text-slate-600">
+                  <p className="min-w-0 truncate">
+                    {selectedCourse
+                      ? `${selectedCourse.code} • Group ${selectedCourse.group} • ${courseStats.totalStudents} students • ${selectedCourse.credits} credits`
+                      : "No courses available"}
                   </p>
-                  <p className="text-xl font-bold text-gray-900 leading-tight">
-                    {courseStats.averageGrade}
-                    <span className="text-sm font-medium text-gray-500"> / 5.0</span>
-                  </p>
+                  {selectedCourseHealth ? (
+                    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white/80 px-2.5 py-1 text-xs text-slate-600">
+                      <span className="font-semibold text-slate-700">
+                        Pending: {selectedCourseHealth.pendingCount}
+                      </span>
+                      <span className="text-slate-300">•</span>
+                      <span>Due soon: {selectedCourseHealth.dueSoonCount}</span>
+                      <span className="text-slate-300">•</span>
+                      <span>Overdue: {selectedCourseHealth.overdueCount}</span>
+                    </span>
+                  ) : null}
                 </div>
-                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-gray-500">
-                    Approval
+                {selectedCourse?.description && (
+                  <p className="mt-3 max-w-3xl text-sm text-slate-600">
+                    {selectedCourse.description}
                   </p>
-                  <p className="text-xl font-bold text-gray-900 leading-tight">
-                    {courseStats.approvalRate}%
-                  </p>
-                </div>
-                <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-                  <p className="text-[11px] uppercase tracking-wide text-gray-500">
-                    Assessments
-                  </p>
-                  <p className="text-xl font-bold text-gray-900 leading-tight">
-                    {courseStats.totalAssessments}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={openBackupCenter}
-                  className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-left hover:bg-blue-100 transition-colors"
-                >
-                  <p className="text-[11px] uppercase tracking-wide text-blue-600">
-                    Recovery
-                  </p>
-                  <p className="text-sm font-semibold text-blue-700 leading-tight">
-                    Open backups
-                  </p>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-gray-600">Pending Grading</p>
-              <Clock className="h-4 w-4 text-blue-600" />
-            </div>
-            <p className="mt-2 text-2xl font-bold text-gray-900">{pendingGrading.length}</p>
-            <p className="text-xs text-gray-500 mt-1">Submissions waiting for review</p>
-          </div>
-          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-gray-600">Missing Work</p>
-              <AlertCircle className="h-4 w-4 text-blue-600" />
-            </div>
-            <p className="mt-2 text-2xl font-bold text-gray-900">{missingSubmissions.length}</p>
-            <p className="text-xs text-gray-500 mt-1">Late and missing submissions</p>
-          </div>
-          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-gray-600">Assessment Health</p>
-              <FileText className="h-4 w-4 text-blue-600" />
-            </div>
-            <p className="mt-2 text-lg font-bold text-gray-900">
-              {assessmentHealth.dueSoonCount} due soon
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              {assessmentHealth.overdueCount} overdue • {assessmentHealth.draftCount} drafts
-            </p>
-          </div>
-          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-gray-600">Content Coverage</p>
-              <FolderOpen className="h-4 w-4 text-blue-600" />
-            </div>
-            <p className="mt-2 text-lg font-bold text-gray-900">
-              {contentCoverage.weeksWithFiles}/{contentCoverage.weeksCount} weeks
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              {contentCoverage.filesCount} files across {contentCoverage.periodsCount} periods
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
-            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm transition-all duration-300">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <CalendarClock className="h-4 w-4 text-blue-500" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900">
-                      Upcoming Assessments
-                    </h2>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Deadlines and upcoming evaluations
-                    </p>
-                  </div>
-                </div>
-                {selectedCourse && (
-                  <Link
-                    to={`/courses/${selectedCourse.code}/assessments/`}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium text-sm"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span className="hidden sm:flex">New</span>
-                  </Link>
                 )}
               </div>
 
-              {!selectedCourse ? (
-                <div className="text-center py-8">
-                  <BookOpen className="h-16 w-16 mx-auto text-blue-300 mb-2" />
-                  <p className="text-gray-500 mb-2 font-medium">
-                    Select a course to view assessments
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Choose a course from the dropdown above
+              <div className="w-full lg:w-auto lg:min-w-[320px]">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 backdrop-blur">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                      Course Average
+                    </p>
+                    <p className="text-xl font-bold leading-tight text-slate-900">
+                      {courseStats.averageGrade}
+                      <span className="text-sm font-medium text-slate-500"> / 5.0</span>
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 backdrop-blur">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                      Approval
+                    </p>
+                    <p className="text-xl font-bold leading-tight text-slate-900">
+                      {courseStats.approvalRate}%
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 backdrop-blur">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                      Assessments
+                    </p>
+                    <p className="text-xl font-bold leading-tight text-slate-900">
+                      {courseStats.totalAssessments}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openBackupCenter}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left transition-colors hover:bg-slate-50"
+                  >
+                    <p className="text-[11px] uppercase tracking-wide text-slate-600">
+                      Recovery
+                    </p>
+                    <p className="text-sm font-semibold leading-tight text-slate-900">
+                      Open backups
+                    </p>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Your Courses</p>
+                  <p className="text-xs text-slate-500">
+                    Tap a card to switch the active dashboard context
                   </p>
                 </div>
-              ) : courseAssessments.length === 0 ? (
-                <div className="text-center py-8">
-                  <CalendarClock className="h-16 w-16 mx-auto text-blue-300 mb-2" />
-                  <p className="text-gray-500 mb-2 font-medium">
-                    No assessments in this course
-                  </p>
-                  <p className="text-sm text-gray-500 max-w-md mx-auto">
-                    Create your first assessment to track student progress
-                  </p>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  {courses.length} total
+                </span>
+              </div>
+
+              {courseHealthOverview.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-600">
+                  No courses available.
                 </div>
-              ) : upcomingAssessments.length === 0 ? (
-                <div className="text-center py-8">
-                  <CheckCircle2 className="h-16 w-16 mx-auto text-blue-300 mb-2" />
-                  <p className="text-gray-500 mb-2 font-medium">
-                    No upcoming assessments
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                  {courseHealthOverview.map((course) => (
+                    <button
+                      key={course.id}
+                      type="button"
+                      onClick={() => setSelectedCourseId(course.id)}
+                      className={`group rounded-xl border p-3 text-left transition-colors ${
+                        selectedCourseId === course.id
+                          ? "border-sky-300 bg-sky-50 shadow-sm"
+                          : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">
+                            {course.name}
+                          </p>
+                          <p className="truncate text-xs text-slate-500">
+                            {course.code} • Group {course.group}
+                          </p>
+                        </div>
+                        {selectedCourseId === course.id ? (
+                          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+                            Active
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-2 flex items-end justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <HeartPulse className={`h-4 w-4 ${course.tone.text}`} />
+                          <p className={`text-2xl font-extrabold ${course.tone.text}`}>
+                            {course.healthScore}
+                            <span className="ml-0.5 text-xs font-semibold text-slate-500">
+                              /100
+                            </span>
+                          </p>
+                        </div>
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${course.tone.bg} ${course.tone.border} ${course.tone.text}`}
+                        >
+                          {course.materialsCount} materials
+                        </span>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-3 gap-1.5">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                            Students
+                          </p>
+                          <p className="text-sm font-bold text-slate-900">
+                            {course.studentsCount}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                            Approval
+                          </p>
+                          <p className="text-sm font-bold text-slate-900">
+                            {course.approvalRate}%
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                            Pending
+                          </p>
+                          <p className="text-sm font-bold text-slate-900">
+                            {course.pendingCount}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm sm:p-4 lg:col-span-2">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">General Cards</p>
+                <p className="text-xs text-slate-500">
+                  Swipe or use arrows. Infinite loop with live course context.
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={goToPreviousSnapshot}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
+                  aria-label="Previous metrics card"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={goToNextSnapshot}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
+                  aria-label="Next metrics card"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div
+              className="overflow-hidden"
+              onTouchStart={(event) => {
+                touchStartXRef.current = event.changedTouches[0]?.clientX ?? null;
+              }}
+              onTouchEnd={(event) => {
+                if (touchStartXRef.current === null) return;
+                const endX = event.changedTouches[0]?.clientX ?? touchStartXRef.current;
+                const delta = endX - touchStartXRef.current;
+                touchStartXRef.current = null;
+                if (Math.abs(delta) < 45) return;
+                if (delta < 0) {
+                  goToNextSnapshot();
+                  return;
+                }
+                goToPreviousSnapshot();
+              }}
+            >
+              {activeSnapshotCard ? (
+                <article className="w-full">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5">
+                          {ActiveSnapshotIcon ? (
+                            <ActiveSnapshotIcon
+                              className={`h-3.5 w-3.5 ${activeSnapshotCard.iconClassName}`}
+                            />
+                          ) : null}
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                            {activeSnapshotCard.title}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">{activeSnapshotCard.subtitle}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 flex items-end gap-1">
+                      <p className={`text-4xl font-extrabold leading-none ${activeSnapshotCard.iconClassName}`}>
+                        {activeSnapshotCard.value}
+                      </p>
+                      <span className="pb-1 text-sm font-semibold text-slate-500">
+                        {activeSnapshotCard.suffix}
+                      </span>
+                    </div>
+
+                    <p className="mt-2 text-xs text-slate-500">{activeSnapshotCard.hint}</p>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      {activeSnapshotCard.metrics.map((metric) => {
+                        const MetricIcon = metric.icon;
+                        return (
+                          <div
+                            key={`${activeSnapshotCard.key}-${metric.label}`}
+                            className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-center"
+                          >
+                            <div className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white">
+                              <MetricIcon className={`h-3.5 w-3.5 ${metric.iconClassName}`} />
+                            </div>
+                            <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                              {metric.label}
+                            </p>
+                            <p className={`text-sm font-bold ${metric.iconClassName}`}>
+                              {metric.value}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </article>
+              ) : null}
+            </div>
+
+            <div className="mt-3 flex items-center justify-center gap-1.5">
+              {snapshotCards.map((card, index) => (
+                <button
+                  key={card.key}
+                  type="button"
+                  onClick={() => setActiveSnapshotIndex(index)}
+                  className={`h-2 w-2 rounded-full transition-all ${
+                    index === activeSnapshotIndex
+                      ? "w-6 bg-sky-600"
+                      : "bg-slate-300 hover:bg-slate-400"
+                  }`}
+                  aria-label={`Go to ${card.title}`}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100">
+                  <Clock className="h-4 w-4 text-teal-700" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Today's Classes</h2>
+                  <p className="text-xs text-slate-500">Live schedule across your courses</p>
+                </div>
+              </div>
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-teal-700">
+                {todayClassesAllCourses.length}
+              </span>
+            </div>
+
+            {todayClassesAllCourses.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                <Clock className="mx-auto h-9 w-9 text-slate-400" />
+                <p className="mt-2 text-sm font-medium text-slate-700">No classes today</p>
+                <p className="text-xs text-slate-500">
+                  No schedule blocks match today in your active courses.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {todayClassesAllCourses.map((classItem) => (
+                  <Link
+                    key={classItem.id}
+                    to={classItem.courseCode ? `/courses/view/${classItem.courseCode}` : "/courses"}
+                    className="block"
+                  >
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5 transition-colors hover:border-slate-300 hover:bg-slate-50">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100">
+                            <Clock className="h-3.5 w-3.5 text-teal-700" />
+                          </div>
+                          <p className="truncate text-sm font-semibold text-slate-900">
+                            {classItem.timeLabel}
+                          </p>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-600">{classItem.courseLabel}</p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 flex-shrink-0 text-slate-500" />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </section>
+
+        <section className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100">
+                    <CalendarClock className="h-4 w-4 text-sky-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900">Upcoming Activities</h2>
+                    <p className="text-xs text-slate-500">Next 7 days • all courses</p>
+                  </div>
+                </div>
+                <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">
+                  {upcomingActivitiesAllCourses.length}
+                </span>
+              </div>
+
+              {upcomingActivitiesAllCourses.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                  <CalendarClock className="mx-auto h-9 w-9 text-slate-400" />
+                  <p className="mt-2 text-sm font-medium text-slate-700">
+                    No upcoming activities
                   </p>
-                  <p className="text-sm text-gray-500">
-                    Great! All assessments are completed
+                  <p className="text-xs text-slate-500">
+                    You are clear for the next seven days.
                   </p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {upcomingAssessments.map((assessment) => {
-                    const dueDateText = formatDueDate(assessment.dueDate);
-                    const fullDateText = formatFullDate(assessment.dueDate);
-                    const isToday = dueDateText === "today";
-                    const isTomorrow = dueDateText === "tomorrow";
-                    const isUpcoming = dueDateText.startsWith("in");
-                    const descriptionPreview = stripHtmlPreview(
-                      assessment.description,
-                    );
+                  {upcomingActivitiesAllCourses.map((activity) => {
+                    const tag = resolveUpcomingTag(activity);
+                    const tagToneClasses =
+                      tag.tone === "forum"
+                        ? "border-green-200 bg-green-50 text-green-800"
+                        : tag.tone === "announcement"
+                          ? "border-amber-200 bg-amber-50 text-amber-800"
+                          : "border-sky-200 bg-cyan-50 text-sky-800";
+                    const activityLink = activity.courseCode
+                      ? `/courses/${activity.courseCode}/assessments/${activity.id}`
+                      : "/courses";
 
                     return (
-                      <Link
-                        key={assessment.id}
-                        to={`/courses/${selectedCourse?.code}/assessments/${assessment.id}`}
-                        className="block group"
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 hover:bg-blue-50/50 hover:border-blue-200 rounded-xl transition-all duration-300 border border-gray-200 group-hover:shadow-sm">
-                          <div className="flex items-center gap-4 mb-2 sm:mb-0">
-                            <div>
-                              <div className="flex items-center gap-2 mb-1">
-                                <p className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-                                  {assessment.name}
-                                </p>
-                                <span
-                                  className={`px-2 py-1 rounded-full text-xs font-bold ${
-                                    isToday
-                                      ? "bg-gray-100 text-gray-700"
-                                      : isTomorrow
-                                        ? "bg-gray-100 text-gray-700"
-                                        : isUpcoming
-                                          ? "bg-blue-100 text-blue-700"
-                                          : dueDateText === "overdue"
-                                            ? "bg-gray-100 text-gray-700"
-                                            : "bg-blue-100 text-blue-700"
-                                  }`}
-                                >
-                                  {dueDateText}
-                                </span>
+                      <Link key={activity.id} to={activityLink} className="block">
+                        <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition-colors hover:border-sky-300 hover:bg-sky-50/50">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-100">
+                                <AlertCircle className="h-3.5 w-3.5 text-sky-700" />
                               </div>
-
-                              <p></p>
-                              {descriptionPreview && (
-                                <p className="text-sm text-gray-600 mt-2 line-clamp-2">
-                                  {descriptionPreview} | Due: {fullDateText}
-                                </p>
-                              )}
+                              <p className="truncate text-sm font-semibold text-slate-900">
+                                {activity.name}
+                              </p>
+                              <span
+                                className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tagToneClasses}`}
+                              >
+                                {tag.label}
+                              </span>
                             </div>
+                            <p className="mt-1 text-xs text-slate-600">
+                              {formatDueDateTime(activity.dueDate)}
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500">
+                              {activity.courseCode || "Course"} • {activity.courseName}
+                            </p>
                           </div>
+                          <ChevronRight className="h-4 w-4 flex-shrink-0 text-slate-500" />
                         </div>
                       </Link>
                     );
                   })}
-
-                  {courseAssessments.length > 3 && selectedCourse && (
-                    <Link
-                      to={`/courses/${selectedCourse.code}/assessments`}
-                      className="mt-4 flex items-center justify-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700 hover:gap-3 transition-all duration-300"
-                    >
-                      View all assessments ({courseAssessments.length})
-                      <ChevronRight className="h-4 w-4" />
-                    </Link>
-                  )}
                 </div>
               )}
             </div>
-            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm transition-all duration-300">
-              <div className="flex items-center justify-between mb-2">
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <Clock className="h-4 w-4 text-blue-600" />
+                  <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-violet-100">
+                    <Zap className="h-4 w-4 text-violet-700" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold text-gray-900">
-                      Pending Work
-                    </h2>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Submissions to grade and missing work
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {pendingGrading.length} to grade •{" "}
-                      {missingSubmissions.length} missing
-                    </p>
-                  </div>
-                </div>
-                {selectedCourse && pendingGrading.length > 0 && (
-                  <Link
-                    to={`/courses/${selectedCourse.code}/assessments/pending`}
-                    className="text-sm font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                  >
-                    Grade
-                    <ChevronRight className="h-4 w-4" />
-                  </Link>
-                )}
-              </div>
-
-              {!selectedCourse ? (
-                <div className="text-center py-8">
-                  <Clock className="h-16 w-16 mx-auto text-blue-300 mb-2" />
-                  <p className="text-gray-500 font-medium">
-                    Select a course to view pending work
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {missingSubmissions.length > 0 && (
-                    <div>
-                      <div className="space-y-2">
-                        {missingSubmissions
-                          .slice(0, 10)
-                          .map((missing, index) => (
-                            <div
-                              key={index}
-                              className="flex items-center justify-between p-2 bg-gray-50 rounded-lg border border-gray-200"
-                            >
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900 truncate">
-                                  {missing.studentName
-                                    .split(" ")
-                                    .slice(0, 2)
-                                    .join(" ")}
-                                </p>
-
-                                <p className="text-xs text-gray-500 truncate mt-0.5">
-                                  {missing.assessmentName} |{" "}
-                                  {missing.gradeSheetName}
-                                </p>
-                              </div>
-                              <div className="ml-2 text-right flex-shrink-0">
-                                <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">
-                                  {missing.daysLate}{" "}
-                                  {missing.daysLate === 1 ? "day" : "days"} late
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        {missingSubmissions.length > 10 && (
-                          <p className="text-xs text-gray-500 text-center pt-1">
-                            +{missingSubmissions.length - 10} more missing
-                            submissions
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {pendingGrading.length === 0 &&
-                    missingSubmissions.length === 0 && (
-                      <div className="text-center py-6">
-                        <CheckCircle2 className="h-12 w-12 mx-auto text-blue-300 mb-2" />
-                        <p className="text-sm text-gray-500">
-                          All caught up! No pending work.
-                        </p>
-                      </div>
-                    )}
-                </div>
-              )}
-            </div>
-            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm transition-all duration-300">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <Presentation className="h-4 w-4 text-blue-500" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900">
-                      Course Materials
-                    </h2>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Slides and learning resources
-                    </p>
-                  </div>
-                </div>
-                {selectedCourse && (
-                  <Link
-                    to={`/slides`}
-                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium text-sm"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span className="hidden sm:flex">New</span>
-                  </Link>
-                )}
-              </div>
-
-              {!selectedCourse ? (
-                <div className="text-center py-8">
-                  <Presentation className="h-16 w-16 mx-auto text-blue-300 mb-2" />
-                  <p className="text-gray-500 mb-2 font-medium">
-                    Select a course to view materials
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Choose a course from the dropdown above
-                  </p>
-                </div>
-              ) : courseSlides.length === 0 ? (
-                <div className="text-center py-8">
-                  <Presentation className="h-16 w-16 mx-auto text-blue-300 mb-2" />
-                  <p className="text-gray-500 mb-2 font-medium">
-                    No materials for this course
-                  </p>
-                  <p className="text-sm text-gray-500 max-w-md mx-auto">
-                    Share your slides and resources with students for{" "}
-                    {selectedCourse.name}
-                  </p>
-                  <Link
-                    to={`/slides`}
-                    className="inline-flex items-center gap-2 px-4 py-2 mt-4 bg-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium text-sm"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Create First Material
-                  </Link>
-                </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {courseSlides.map((slide) => (
-                      <a
-                        key={slide.id}
-                        href={slide.canvaUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="group block"
-                      >
-                        <div className="border border-gray-200 rounded-xl p-4 hover:bg-blue-50/50 hover:border-blue-200 transition-all duration-300 group-hover:shadow-sm">
-                          <div className="flex items-center gap-3">
-                            <div className="flex-1">
-                              <p className="font-semibold text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors">
-                                {slide.title}
-                              </p>
-                              <p className="text-sm text-gray-500 line-clamp-2 mt-1">
-                                {slide.description}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </a>
-                    ))}
-                  </div>
-
-                  {selectedCourse && courseSlides.length > 0 && (
-                    <Link
-                      to={`/slides`}
-                      className="mt-4 flex items-center justify-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700 hover:gap-3 transition-all duration-300"
-                    >
-                      View all materials
-                      <ChevronRight className="h-4 w-4" />
-                    </Link>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm transition-all duration-300">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <UserCheck className="h-5 w-5 text-blue-600" />
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900">
-                      Student Status
-                    </h2>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Passing, at risk, and failing distribution
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {!selectedCourse ? (
-                <div className="text-center py-8">
-                  <Users className="h-16 w-16 mx-auto text-blue-300 mb-2" />
-                  <p className="text-gray-500 font-medium">
-                    Select a course to view student status
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-2">
-                    <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <CheckCircle2 className="h-5 w-5 text-blue-600" />
-                          <div>
-                            <p className="font-medium text-gray-900">Passing</p>
-                            <p className="text-xs text-blue-600">≥ 3.5</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-bold text-blue-600">
-                            {courseStats.totalPassing}
-                          </p>
-                          <p className="text-sm text-blue-600">
-                            {courseStats.totalStudents > 0
-                              ? Math.round(
-                                  (courseStats.totalPassing /
-                                    courseStats.totalStudents) *
-                                    100,
-                                )
-                              : 0}
-                            %
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <AlertTriangle className="h-5 w-5 text-blue-600" />
-                          <div>
-                            <p className="font-medium text-gray-900">At Risk</p>
-                            <p className="text-xs text-gray-600">2.5 - 3.4</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-bold text-gray-700">
-                            {courseStats.totalAtRisk}
-                          </p>
-                          <p className="text-sm text-gray-600">
-                            {courseStats.totalStudents > 0
-                              ? Math.round(
-                                  (courseStats.totalAtRisk /
-                                    courseStats.totalStudents) *
-                                    100,
-                                )
-                              : 0}
-                            %
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-gray-100 border border-gray-300 rounded-xl p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <AlertTriangle className="h-5 w-5 text-blue-600" />
-                          <div>
-                            <p className="font-medium text-gray-900">Failing</p>
-                            <p className="text-xs text-gray-700">≤ 2.4</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-bold text-gray-800">
-                            {courseStats.totalFailing}
-                          </p>
-                          <p className="text-sm text-gray-700">
-                            {courseStats.totalStudents > 0
-                              ? Math.round(
-                                  (courseStats.totalFailing /
-                                    courseStats.totalStudents) *
-                                    100,
-                                )
-                              : 0}
-                            %
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm transition-all duration-300">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <Zap className="h-5 w-5 text-blue-600" />
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900">
-                      Quick Actions
-                    </h2>
-                    <p className="text-sm text-gray-600 mt-1">
+                    <h2 className="text-lg font-bold text-slate-900">Quick Actions</h2>
+                    <p className="text-xs text-slate-600 mt-1">
                       Shortcuts for daily teaching tasks
                     </p>
                   </div>
@@ -1853,50 +2387,73 @@ export default function TeacherDashboard() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <Link
-                  to="/grades"
-                  className="group flex flex-col items-center justify-center p-4 border border-gray-200 rounded-xl hover:border-blue-200 hover:bg-blue-50/50 transition-all duration-300"
+                  to="/courses/create"
+                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
                 >
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform duration-300">
-                    <FileSpreadsheet className="h-4 w-4 text-blue-600" />
+                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100">
+                    <Plus className="h-4 w-4 text-sky-700" />
                   </div>
-                  <p className="font-semibold text-sm text-gray-900">Grades</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {courseGradeSheets.length} sheets
-                  </p>
+                  <p className="text-sm font-semibold text-slate-900">Course</p>
+                  <p className="mt-1 text-xs text-slate-500">Create new</p>
                 </Link>
 
                 <Link
-                  to="/students/list"
-                  className="group flex flex-col items-center justify-center p-4 border border-gray-200 rounded-xl hover:border-blue-200 hover:bg-blue-50/50 transition-all duration-300"
+                  to="/grades"
+                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
                 >
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform duration-300">
-                    <Users className="h-4 w-4 text-blue-600" />
+                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-violet-100">
+                    <FileSpreadsheet className="h-4 w-4 text-violet-700" />
                   </div>
-                  <p className="font-semibold text-sm text-gray-900">
-                    Students
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {courseStudents.length} enrolled
-                  </p>
+                  <p className="text-sm font-semibold text-slate-900">Grade</p>
+                  <p className="mt-1 text-xs text-slate-500">{courseGradeSheets.length} sheets</p>
+                </Link>
+
+                <Link
+                  to="/slides"
+                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                >
+                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100">
+                    <Presentation className="h-4 w-4 text-indigo-700" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900">Slides</p>
+                  <p className="mt-1 text-xs text-slate-500">{courseSlides.length} ready</p>
                 </Link>
 
                 <Link
                   to={
                     selectedCourse
-                      ? `/courses/${selectedCourse.code}/assessments`
-                      : "/assessments"
+                      ? `/courses/${selectedCourse.code}/files`
+                      : "/courses"
                   }
-                  className="group flex flex-col items-center justify-center p-4 border border-gray-200 rounded-xl hover:border-blue-200 hover:bg-blue-50/50 transition-all duration-300"
+                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
                 >
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform duration-300">
-                    <FileText className="h-4 w-4 text-blue-600" />
+                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-teal-100">
+                    <FolderOpen className="h-4 w-4 text-teal-700" />
                   </div>
-                  <p className="font-semibold text-sm text-gray-900">
-                    Assessments
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {courseAssessments.length} active
-                  </p>
+                  <p className="text-sm font-semibold text-slate-900">Materials</p>
+                  <p className="mt-1 text-xs text-slate-500">{contentCoverage.filesCount} files</p>
+                </Link>
+
+                <Link
+                  to="/students/list"
+                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                >
+                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100">
+                    <Users className="h-4 w-4 text-emerald-700" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900">Students</p>
+                  <p className="mt-1 text-xs text-slate-500">{courseStudents.length} enrolled</p>
+                </Link>
+
+                <Link
+                  to="/calendar"
+                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                >
+                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100">
+                    <CalendarClock className="h-4 w-4 text-amber-700" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900">Calendar</p>
+                  <p className="mt-1 text-xs text-slate-500">Today + upcoming</p>
                 </Link>
 
                 <Link
@@ -1905,56 +2462,32 @@ export default function TeacherDashboard() {
                       ? `/courses/${selectedCourse.code}/exercise-bank`
                       : "/courses"
                   }
-                  className="group flex flex-col items-center justify-center p-4 border border-gray-200 rounded-xl hover:border-blue-200 hover:bg-blue-50/50 transition-all duration-300"
+                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
                 >
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform duration-300">
-                    <ListChecks className="h-4 w-4 text-blue-600" />
+                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100">
+                    <ListChecks className="h-4 w-4 text-rose-700" />
                   </div>
-                  <p className="font-semibold text-sm text-gray-900">
-                    Quiz Bank
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {courseQuizCount} quizzes
-                  </p>
+                  <p className="text-sm font-semibold text-slate-900">Quiz</p>
+                  <p className="mt-1 text-xs text-slate-500">{courseQuizCount} quizzes</p>
                 </Link>
-
-                <Link
-                  to="/statistics"
-                  className="group flex flex-col items-center justify-center p-4 border border-gray-200 rounded-xl hover:border-blue-200 hover:bg-blue-50 transition-all duration-300"
-                >
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform duration-300">
-                    <BarChart3 className="h-4 w-4 text-blue-600" />
-                  </div>
-                  <p className="font-semibold text-sm text-gray-900">Reports</p>
-                  <p className="text-xs text-gray-500 mt-1">View statistics</p>
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={openBackupCenter}
-                  className="group flex flex-col items-center justify-center p-4 border border-gray-200 rounded-xl hover:border-blue-200 hover:bg-blue-50/50 transition-all duration-300"
-                >
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform duration-300">
-                    <FolderOpen className="h-4 w-4 text-blue-600" />
-                  </div>
-                  <p className="font-semibold text-sm text-gray-900">Backups</p>
-                  <p className="text-xs text-gray-500 mt-1">Recovery center</p>
-                </button>
               </div>
             </div>
           </div>
+
+        </section>
         </div>
+      </div>
       </div>
 
       {showBackupCenter && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-4xl max-h-[85vh] overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-4xl max-h-[85vh] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
               <div>
-                <h3 className="text-lg font-bold text-gray-900">
+                <h3 className="text-lg font-bold text-slate-900">
                   Backup & Recovery Center
                 </h3>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-slate-600">
                   Restore deleted courses or manage snapshots from all your
                   courses
                 </p>
@@ -1962,7 +2495,7 @@ export default function TeacherDashboard() {
               <button
                 type="button"
                 onClick={() => setShowBackupCenter(false)}
-                className="p-2 rounded-lg hover:bg-blue-50 text-blue-600"
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-white/80 hover:text-slate-700"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -2015,9 +2548,9 @@ export default function TeacherDashboard() {
                 </button>
               </div>
 
-              <div className="text-xs text-gray-500">
+              <div className="text-xs text-slate-500">
                 Selected course for save/export:{" "}
-                <span className="font-semibold text-gray-700">
+                <span className="font-semibold text-slate-700">
                   {selectedCourse
                     ? `${selectedCourse.name} (${selectedCourse.code})`
                     : "None"}
@@ -2029,7 +2562,7 @@ export default function TeacherDashboard() {
                   <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
                 </div>
               ) : backupSnapshots.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-10">
+                <p className="text-sm text-slate-500 text-center py-10">
                   No snapshots found yet.
                 </p>
               ) : (
@@ -2037,13 +2570,13 @@ export default function TeacherDashboard() {
                   {backupSnapshots.map((snapshot) => (
                     <div
                       key={snapshot.id}
-                      className="border border-gray-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+                      className="border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
                     >
                       <div>
-                        <p className="text-sm font-semibold text-gray-900">
+                        <p className="text-sm font-semibold text-slate-900">
                           {snapshot.courseName} ({snapshot.courseCode})
                         </p>
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p className="text-xs text-slate-500 mt-1">
                           Saved on {snapshot.createdAt.toLocaleString("en-US")}
                         </p>
                       </div>
@@ -2052,14 +2585,14 @@ export default function TeacherDashboard() {
                           type="button"
                           onClick={() => handleRestoreSnapshot(snapshot.id)}
                           disabled={isRestoringBackup}
-                          className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:shadow-md disabled:opacity-50"
+                          className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-sky-700 hover:shadow-md disabled:opacity-50"
                         >
                           Restore
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteSnapshot(snapshot.id)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-100"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-100"
                         >
                           <Trash2 className="h-3.5 w-3.5 text-red-600" />
                           Delete
@@ -2076,3 +2609,4 @@ export default function TeacherDashboard() {
     </DashboardLayout>
   );
 }
+ 

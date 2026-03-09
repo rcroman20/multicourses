@@ -11,7 +11,8 @@ import {
   where,  
   orderBy, 
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  writeBatch,
 } from 'firebase/firestore';
 import { firebaseDB } from '@/lib/firebase';
 import type { Unit, Week, Slide } from '@/types/academic';
@@ -237,6 +238,90 @@ export const unitService = {
     } catch (error) {
       throw error;
     }
+  },
+
+  // Backfill legacy content so weeks/slides always carry courseId.
+  backfillCourseContentCourseIds: async (
+    courseId: string,
+  ): Promise<{ weeksUpdated: number; slidesUpdated: number }> => {
+    const normalizedCourseId = typeof courseId === 'string' ? courseId.trim() : '';
+    if (!normalizedCourseId) return { weeksUpdated: 0, slidesUpdated: 0 };
+
+    let weeksUpdated = 0;
+    let slidesUpdated = 0;
+    const updates: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = [];
+
+    const unitsSnapshot = await getDocs(
+      query(unitsCollection, where('courseId', '==', normalizedCourseId)),
+    );
+
+    for (const unitDocSnap of unitsSnapshot.docs) {
+      const weeksSnapshot = await getDocs(
+        query(weeksCollection, where('unitId', '==', unitDocSnap.id)),
+      );
+
+      for (const weekDocSnap of weeksSnapshot.docs) {
+        const weekData = weekDocSnap.data() as Record<string, unknown>;
+        const weekCourseId =
+          typeof weekData.courseId === 'string' ? weekData.courseId.trim() : '';
+
+        if (weekCourseId !== normalizedCourseId) {
+          updates.push({
+            ref: doc(weeksCollection, weekDocSnap.id),
+            data: {
+              courseId: normalizedCourseId,
+              updatedAt: serverTimestamp(),
+            },
+          });
+          weeksUpdated += 1;
+        }
+
+        const slidesSnapshot = await getDocs(
+          query(slidesCollection, where('weekId', '==', weekDocSnap.id)),
+        );
+
+        for (const slideDocSnap of slidesSnapshot.docs) {
+          const slideData = slideDocSnap.data() as Record<string, unknown>;
+          const slideCourseId =
+            typeof slideData.courseId === 'string' ? slideData.courseId.trim() : '';
+
+          if (slideCourseId !== normalizedCourseId) {
+            updates.push({
+              ref: doc(slidesCollection, slideDocSnap.id),
+              data: {
+                courseId: normalizedCourseId,
+                updatedAt: serverTimestamp(),
+              },
+            });
+            slidesUpdated += 1;
+          }
+        }
+      }
+    }
+
+    if (updates.length === 0) {
+      return { weeksUpdated: 0, slidesUpdated: 0 };
+    }
+
+    let batch = writeBatch(firebaseDB);
+    let count = 0;
+    const batchLimit = 450;
+
+    for (const update of updates) {
+      batch.update(update.ref, update.data);
+      count += 1;
+      if (count >= batchLimit) {
+        await batch.commit();
+        batch = writeBatch(firebaseDB);
+        count = 0;
+      }
+    }
+
+    if (count > 0) {
+      await batch.commit();
+    }
+
+    return { weeksUpdated, slidesUpdated };
   }
 };
 
@@ -244,8 +329,18 @@ export const weekService = {
   // Crear semana
   create: async (weekData: Omit<Week, 'id' | 'slides' | 'createdAt'>): Promise<string> => {
     try {
+      let courseId = '';
+      if (weekData.unitId) {
+        const unitSnap = await getDoc(doc(unitsCollection, weekData.unitId));
+        if (unitSnap.exists()) {
+          const unitData = unitSnap.data() as Record<string, unknown>;
+          courseId = typeof unitData.courseId === 'string' ? unitData.courseId : '';
+        }
+      }
+
       const docRef = await addDoc(weeksCollection, {
         ...weekData,
+        ...(courseId ? { courseId } : {}),
         createdAt: serverTimestamp()
       });
       return docRef.id;
@@ -287,8 +382,26 @@ export const slideService = {
   // Crear diapositiva
   create: async (slideData: Omit<Slide, 'id' | 'createdAt'>): Promise<string> => {
     try {
+      let courseId = '';
+      if (slideData.weekId) {
+        const weekSnap = await getDoc(doc(weeksCollection, slideData.weekId));
+        if (weekSnap.exists()) {
+          const weekData = weekSnap.data() as Record<string, unknown>;
+          if (typeof weekData.courseId === 'string' && weekData.courseId.trim()) {
+            courseId = weekData.courseId;
+          } else if (typeof weekData.unitId === 'string' && weekData.unitId.trim()) {
+            const unitSnap = await getDoc(doc(unitsCollection, weekData.unitId));
+            if (unitSnap.exists()) {
+              const unitData = unitSnap.data() as Record<string, unknown>;
+              courseId = typeof unitData.courseId === 'string' ? unitData.courseId : '';
+            }
+          }
+        }
+      }
+
       const docRef = await addDoc(slidesCollection, {
         ...slideData,
+        ...(courseId ? { courseId } : {}),
         createdAt: serverTimestamp(),
         order: slideData.order || 0
       });
@@ -345,4 +458,3 @@ export const slideService = {
     }
   }
 };
-

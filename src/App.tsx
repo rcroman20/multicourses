@@ -10,13 +10,20 @@ import { AcademicProvider } from "@/contexts/AcademicContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { AdminRoute } from "@/components/auth/AdminRoute";
 import { CookieConsentBanner } from "@/components/common/CookieConsentBanner";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
+
+
 
 // Importar páginas en orden lógico
 // 1. Páginas públicas
 const Index = lazy(() => import("./pages/Index"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
+const ContactPage = lazy(() => import("./pages/ContactPage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const AuthPage = lazy(() => import("./pages/shared/AuthPage"));
+const TeacherPlanDetailPage = lazy(() => import("./pages/shared/TeacherPlanDetailPage"));
 
 // 2. Dashboards principales
 const StudentDashboard = lazy(() => import("./pages/students/StudentDashboard"));
@@ -34,6 +41,15 @@ const FileManager = lazy(() => import("./pages/shared/FileManager"));
 const ExerciseBankPage = lazy(() => import("./pages/shared/ExerciseBankPage"));
 const ExerciseQuizStatsPage = lazy(() => import("./pages/teacher/ExerciseQuizStatsPage"));
 const ProfileSettingsPage = lazy(() => import("./pages/shared/ProfileSettingsPage"));
+const AdminDashboardPage = lazy(() => import("./pages/admin/AdminDashboardPage"));
+const AdminAccessAdminsPage = lazy(() => import("./pages/admin/AdminAccessAdminsPage"));
+const AdminAccessTeacherApprovalsPage = lazy(
+  () => import("./pages/admin/AdminAccessTeacherApprovalsPage"),
+);
+const AdminAccessTeacherOpsPage = lazy(() => import("./pages/admin/AdminAccessTeacherOpsPage"));
+const AdminAccessDeletionsPage = lazy(() => import("./pages/admin/AdminAccessDeletionsPage"));
+const AdminAccessInboxPage = lazy(() => import("./pages/admin/AdminAccessInboxPage"));
+const TeacherApprovalWaitingPage = lazy(() => import("./pages/shared/TeacherApprovalWaitingPage"));
 
 // 4. Páginas exclusivas de profesores (organizadas por categoría)
 // 4.1 Gestión de cursos
@@ -48,7 +64,6 @@ const EnrollStudentPage = lazy(() => import("./pages/teacher/EnrollStudentPage")
 // 4.3 Gestión de calificaciones
 const GradeSheetsPage = lazy(() => import("./pages/teacher/GradeSheetsPage"));
 const GradeSheetEditPage = lazy(() => import("./pages/teacher/GradeSheetEditPage"));
-const GradeAssessmentPage = lazy(() => import("./pages/teacher/GradeAssessmentPage"));
 
 // 4.4 Estadísticas
 const StatsPage = lazy(() => import("./pages/teacher/StatsPage"));
@@ -62,13 +77,24 @@ type TitleRule = {
   title: string | ((params: Record<string, string | undefined>) => string);
 };
 
+
+
 const titleRules: TitleRule[] = [
   { path: "/", title: "Home" },
+  { path: "/about", title: "About" },
+  { path: "/acerca-de", title: "Acerca de" },
+  { path: "/contact", title: "Contact" },
+  { path: "/plans/:planId", title: "Teacher Plan Detail" },
   { path: "/auth", title: "Authentication" },
+  { path: "/teacher-approval-waiting", title: "Teacher Approval Pending" },
+  { path: "/teacher-approval-rejected", title: "Teacher Approval Rejected" },
   { path: "/student", title: "Students Dashboard" },
   { path: "/teacher", title: "Teacher Dashboard" },
   { path: "/courses", title: "Courses" },
-  { path: "/courses/view/:courseCode", title: ({ courseCode }) => `Course Detail ${courseCode ? `(${courseCode})` : ""}`.trim() },
+  {
+    path: "/courses/view/:courseCode",
+    title: ({ courseCode }) => `Course Detail ${courseCode ? `(${courseCode})` : ""}`.trim(),
+  },
   { path: "/courses/create", title: "Create Course" },
   { path: "/courses/:courseCode/edit", title: "Edit Course" },
   {
@@ -84,8 +110,8 @@ const titleRules: TitleRule[] = [
     title: ({ courseCode }) => `Exercise Bank ${courseCode ? `(${courseCode})` : ""}`.trim(),
   },
   {
-    path: "/courses/:courseCode/assessments/:assessmentId/grade",
-    title: "Grade Assessment",
+    path: "/courses/:courseCode/assessments/:assessmentId/:tab",
+    title: "Assessment Detail",
   },
   {
     path: "/courses/:courseCode/assessments/:assessmentId",
@@ -118,6 +144,13 @@ const titleRules: TitleRule[] = [
   },
   { path: "/statistics", title: "Academic Statistics" },
   { path: "/teacher/notifications", title: "Notifications Center" },
+  { path: "/admin", title: "Admin Access" },
+  { path: "/admin/dashboard", title: "Admin Dashboard" },
+  { path: "/admin/admins", title: "Admin Emails" },
+  { path: "/admin/teacher-approvals", title: "Teacher Approvals" },
+  { path: "/admin/teacher-ops", title: "Teacher Operations" },
+  { path: "/admin/deletions", title: "Account Deletions" },
+  { path: "/admin/inbox", title: "Inbound Requests" },
   { path: "*", title: "Page Not Found" },
 ];
 
@@ -167,12 +200,7 @@ function HomeworkAssessmentsRedirect() {
 
 function HomeworkAssessmentDetailRedirect() {
   const { courseCode, assessmentId } = useParams<{ courseCode: string; assessmentId: string }>();
-  return <Navigate to={`/courses/${courseCode || ""}/assessments/${assessmentId || ""}`} replace />;
-}
-
-function HomeworkAssessmentGradeRedirect() {
-  const { courseCode, assessmentId } = useParams<{ courseCode: string; assessmentId: string }>();
-  return <Navigate to={`/courses/${courseCode || ""}/assessments/${assessmentId || ""}/grade`} replace />;
+  return <Navigate to={`/courses/${courseCode || ""}/assessments/${assessmentId || ""}/overview`} replace />;
 }
 
 const App = () => (
@@ -188,8 +216,46 @@ const App = () => (
               <Suspense fallback={<div className="min-h-screen bg-background" />}>
                 <Routes>
               {/* ========== RUTAS PÚBLICAS ========== */}
-              <Route path="/" element={<Index />} />
-              <Route path="/auth" element={<AuthPage />} />
+              <Route
+                path="/"
+                element={<Index />}
+              />
+              <Route
+                path="/auth"
+                element={<AuthPage />}
+              />
+              <Route
+                path="/about"
+                element={<AboutPage />}
+              />
+              <Route
+                path="/acerca-de"
+                element={<AboutPage />}
+              />
+              <Route
+                path="/contact"
+                element={<ContactPage />}
+              />
+              <Route
+                path="/plans/:planId"
+                element={<TeacherPlanDetailPage />}
+              />
+              <Route
+                path="/teacher-approval-waiting"
+                element={
+                  <ProtectedRoute>
+                    <TeacherApprovalWaitingPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/teacher-approval-rejected"
+                element={
+                  <ProtectedRoute>
+                    <TeacherApprovalWaitingPage />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* ========== RUTAS DE DASHBOARD PRINCIPAL ========== */}
               <Route
@@ -271,6 +337,14 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/courses/:courseCode/assessments/:assessmentId/:tab"
+                element={
+                  <ProtectedRoute>
+                    <AssessmentDetailPage />
+                  </ProtectedRoute>
+                }
+              />
  
               {/* Calificaciones */}
               <Route
@@ -305,6 +379,62 @@ const App = () => (
                   <ProtectedRoute>
                     <ProfileSettingsPage />
                   </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <AdminRoute>
+                    <Navigate to="/admin/dashboard" replace />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/dashboard"
+                element={
+                  <AdminRoute>
+                    <AdminDashboardPage />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/admins"
+                element={
+                  <AdminRoute>
+                    <AdminAccessAdminsPage />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/teacher-approvals"
+                element={
+                  <AdminRoute>
+                    <AdminAccessTeacherApprovalsPage />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/teacher-ops"
+                element={
+                  <AdminRoute>
+                    <AdminAccessTeacherOpsPage />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/deletions"
+                element={
+                  <AdminRoute>
+                    <AdminAccessDeletionsPage />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/inbox"
+                element={
+                  <AdminRoute>
+                    <AdminAccessInboxPage />
+                  </AdminRoute>
                 }
               />
               <Route
@@ -394,15 +524,6 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="/courses/:courseCode/assessments/:assessmentId/grade"
-                element={
-                  <ProtectedRoute requiredRole="docente">
-                    <GradeAssessmentPage />
-                  </ProtectedRoute>
-                }
-              />
-
               {/* Estadísticas */}
               <Route
                 path="/statistics"
@@ -441,13 +562,15 @@ const App = () => (
                 path="/cursos/:courseCode/homework/:assessmentId" 
                 element={<HomeworkAssessmentDetailRedirect />} 
               />
-              <Route 
-                path="/cursos/:courseCode/homework/:assessmentId/calificar" 
-                element={<HomeworkAssessmentGradeRedirect />} 
-              />
-
               {/* ========== 404 ========== */}
-              <Route path="*" element={<NotFound />} />
+              <Route
+                path="*"
+                element={(
+                  <DashboardLayout title="Page Not Found">
+                    <NotFound />
+                  </DashboardLayout>
+                )}
+              />
                 </Routes>
               </Suspense>
               <CookieConsentBanner />

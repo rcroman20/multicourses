@@ -1,5 +1,5 @@
 // src/pages/AuthPage.tsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -17,13 +17,19 @@ import {
   Sparkles,
   Zap,
   Target,
+  GraduationCap,
+  BriefcaseBusiness,
 } from "lucide-react";
 import { z } from "zod";
 import { firebaseAuth, firebaseDB } from "@/lib/firebase";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { isTeacherPlanExpired } from "@/lib/services/teacherPlanAccessService";
+import { isAccountMarkedDeleted } from "@/lib/services/accountDeletionService";
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   signInWithEmailAndPassword,
+  signOut,
   sendPasswordResetEmail,
 } from "firebase/auth";
 
@@ -38,7 +44,17 @@ const registerSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   idNumber: z.string().min(5, "ID must be at least 5 characters"),
   whatsApp: z.string().min(10, "Please enter a valid WhatsApp number"),
+  selectedRole: z.enum(["estudiante", "docente"]),
 });
+
+const parseAuthError = (error: unknown): { code?: string; message?: string } => {
+  if (!error || typeof error !== "object") return {};
+  const maybeError = error as { code?: unknown; message?: unknown };
+  return {
+    code: typeof maybeError.code === "string" ? maybeError.code : undefined,
+    message: typeof maybeError.message === "string" ? maybeError.message : undefined,
+  };
+};
 
 // Componente separado para el Modal
 const ForgotPasswordModal = ({
@@ -56,6 +72,13 @@ const ForgotPasswordModal = ({
   const [isLoading, setIsLoading] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleClose = useCallback(() => {
+    setResetEmail("");
+    setError("");
+    setSuccessMessage("");
+    onClose();
+  }, [onClose]);
 
   // Enfocar el input cuando se abre el modal
   useEffect(() => {
@@ -76,7 +99,7 @@ const ForgotPasswordModal = ({
 
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [isOpen]);
+  }, [isOpen, handleClose]);
 
   // Prevenir scroll del body cuando el modal está abierto
   useEffect(() => {
@@ -120,26 +143,20 @@ const ForgotPasswordModal = ({
       setTimeout(() => {
         handleClose();
       }, 3000);
-    } catch (err: any) {
-      if (err.code === "auth/user-not-found") {
+    } catch (err: unknown) {
+      const authError = parseAuthError(err);
+      if (authError.code === "auth/user-not-found") {
         setError("No account found with this email address");
-      } else if (err.code === "auth/invalid-email") {
+      } else if (authError.code === "auth/invalid-email") {
         setError("Invalid email address");
-      } else if (err.code === "auth/too-many-requests") {
+      } else if (authError.code === "auth/too-many-requests") {
         setError("Too many attempts. Please try again later.");
       } else {
-        setError(err.message || "Error sending reset email. Please try again.");
+        setError(authError.message || "Error sending reset email. Please try again.");
       }
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleClose = () => {
-    setResetEmail("");
-    setError("");
-    setSuccessMessage("");
-    onClose();
   };
 
   const handleOverlayClick = (e: React.MouseEvent) => {
@@ -152,67 +169,60 @@ const ForgotPasswordModal = ({
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
       onClick={handleOverlayClick}
     >
       <div
         ref={modalRef}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in-95 border border-gray-200"
-        onClick={(e) => e.stopPropagation()} // Prevenir clics dentro del modal
+        className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_28px_70px_-35px_rgba(15,23,42,0.55)]"
+        onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-2">
-            <div className="flex items-center gap-3">
-              <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
-                <Target className="h-4 w-4 text-blue-600" />
+        <div>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 text-sky-700">
+                <Target className="h-4 w-4" />
               </div>
               <div>
-                <h3 className="font-bold text-lg text-gray-900">
-                  Reset Password
-                </h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  Enter your email to reset
-                </p>
+                <h3 className="text-base font-bold text-slate-900">Reset password</h3>
+                <p className="text-xs text-slate-500">Enter your email to continue</p>
               </div>
             </div>
             <button
               onClick={handleClose}
-              className="p-1 hover:bg-gray-100 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
               aria-label="Close modal"
             >
-              <X className="h-5 w-5 text-gray-400" />
+              <X className="h-4 w-4" />
             </button>
           </div>
 
-          <p className="text-gray-600 mb-2 text-sm">
+          <p className="mt-3 text-sm text-slate-600">
             Enter your email address and we'll send you instructions to reset
             your password.
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-2">
+          <form onSubmit={handleSubmit} className="mt-4 space-y-3">
             {error && (
-              <div className="flex items-center gap-2 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm animate-in fade-in">
-                <AlertCircle className="h-4 w-4 shrink-0" />
+              <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <p>{error}</p>
               </div>
             )}
 
             {successMessage && (
-              <div className="flex items-center gap-2 p-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-sm animate-in fade-in">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <p>{successMessage}</p> 
+              <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>{successMessage}</p>
               </div>
             )}
 
-            <div className="space-y-2">
-              <label
-                htmlFor="resetEmail"
-                className="block text-sm font-medium text-gray-700"
-              >
+            <div className="space-y-1.5">
+              <label htmlFor="resetEmail" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Email Address
               </label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   ref={inputRef}
                   id="resetEmail"
@@ -220,18 +230,18 @@ const ForgotPasswordModal = ({
                   value={resetEmail}
                   onChange={(e) => setResetEmail(e.target.value)}
                   placeholder="your-email@example.com"
-                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                  className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                   required
                   autoComplete="off"
                 />
               </div>
             </div>
 
-            <div className="flex gap-3 pt-2">
+            <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={handleClose}
-                className="flex-1 px-4 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-all duration-300"
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                 disabled={isLoading}
               >
                 Cancel
@@ -239,7 +249,7 @@ const ForgotPasswordModal = ({
               <button
                 type="submit"
                 disabled={isLoading}
-                className="flex-1 px-4 py-3 rounded-xl bg-blue-600 text-white hover:bg-blue-700 font-medium transition-colors duration-200 flex items-center justify-center gap-2"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-sky-500 bg-gradient-to-b from-sky-500 to-sky-600 px-4 text-sm font-semibold text-white shadow-[0_14px_26px_-16px_rgba(2,132,199,0.9)] transition hover:from-sky-600 hover:to-sky-700 disabled:opacity-70"
               >
                 {isLoading ? (
                   <>
@@ -253,12 +263,12 @@ const ForgotPasswordModal = ({
             </div>
           </form>
 
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-sm text-gray-500 text-center">
+          <div className="mt-4 border-t border-slate-200 pt-3">
+            <p className="text-xs text-slate-500">
               Remember your password?{" "}
               <button
                 onClick={handleClose}
-                className="text-blue-600 hover:underline font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+                className="font-semibold text-sky-700 transition hover:text-sky-800"
               >
                 Sign in
               </button>
@@ -280,18 +290,57 @@ export default function AuthPage() {
   const [name, setName] = useState("");
   const [idNumber, setIdNumber] = useState("");
   const [whatsApp, setWhatsApp] = useState("");
+  const [selectedRole, setSelectedRole] = useState<"estudiante" | "docente">("estudiante");
   const [isLogin, setIsLogin] = useState(true);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
+  const resolveHomePath = (role?: string) => {
+    if (role === "docente") return "/teacher";
+    if (role === "admin") return "/admin/dashboard";
+    return "/student";
+  };
 
-  // Simple redirection: teacher goes to /teacher, student to /student
   useEffect(() => {
     if (isAuthenticated && user) {
-      navigate(user.role === "docente" ? "/docente" : "/estudiante");
+      if (user.role === "admin") {
+        navigate("/admin/dashboard");
+        return;
+      }
+      const teacherPlanStatus = String(user.teacherPlanStatus || "").trim().toLowerCase();
+      if (
+        user.requestedRole === "docente" &&
+        teacherPlanStatus === "pending_payment"
+      ) {
+        navigate("/teacher-approval-waiting?reason=payment-pending");
+        return;
+      }
+      if (
+        isTeacherPlanExpired({
+          role: user.role,
+          teacherPlanStatus: user.teacherPlanStatus,
+          teacherPlanExpiresAt: user.teacherPlanExpiresAt,
+        })
+      ) {
+        navigate("/teacher-approval-waiting?reason=plan-expired");
+        return;
+      }
+      if (user.requestedRole === "docente" && user.teacherApprovalStatus === "pending") {
+        navigate("/teacher-approval-waiting");
+        return;
+      }
+      if (
+        user.requestedRole === "docente" &&
+        user.teacherApprovalStatus === "rejected" &&
+        user.role !== "docente"
+      ) {
+        navigate("/teacher-approval-rejected");
+        return;
+      }
+      navigate(resolveHomePath(user.role));
     }
-  }, [isAuthenticated, user, navigate]);
+  }, [isAuthenticated, navigate, user]);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -307,16 +356,40 @@ export default function AuthPage() {
     setIsLoading(true);
 
     try {
-      await signInWithEmailAndPassword(firebaseAuth, email, password);
-    } catch (err: any) {
-      if (err.code === "auth/invalid-credential") {
+      const credential = await signInWithEmailAndPassword(firebaseAuth, email, password);
+      const uid = credential.user.uid;
+
+      // Guard against orphan Auth accounts (Auth exists, but profile docs were deleted).
+      const [deletedMarker, userSnap, studentSnap] = await Promise.all([
+        isAccountMarkedDeleted(uid),
+        getDoc(doc(firebaseDB, "usuarios", uid)),
+        getDoc(doc(firebaseDB, "estudiantes", uid)),
+      ]);
+
+      const profileMissing = !userSnap.exists() && !studentSnap.exists();
+      if (deletedMarker || profileMissing) {
+        // Best effort cleanup so the same credentials stop logging in as "ghost" user.
+        await deleteUser(credential.user).catch(() => undefined);
+        await signOut(firebaseAuth).catch(() => undefined);
+        setError("Email not registered. Please create a new account.");
+        return;
+      }
+    } catch (err: unknown) {
+      const authError = parseAuthError(err);
+      if (authError.code === "auth/invalid-credential") {
         setError("Incorrect email or password");
-      } else if (err.code === "auth/user-not-found") {
-        setError("User not found");
-      } else if (err.code === "auth/wrong-password") {
+      } else if (authError.code === "auth/invalid-login-credentials") {
+        setError("Incorrect email or password");
+      } else if (authError.code === "auth/user-not-found") {
+        setError("Email not registered");
+      } else if (authError.code === "auth/wrong-password") {
         setError("Incorrect password");
+      } else if (authError.code === "auth/too-many-requests") {
+        setError("Too many attempts. Please try again later.");
+      } else if (authError.code === "auth/network-request-failed") {
+        setError("Network error. Check your connection and try again.");
       } else {
-        setError(err.message || "Error signing in");
+        setError(authError.message || "Error signing in");
       }
     } finally {
       setIsLoading(false);
@@ -328,10 +401,10 @@ export default function AuthPage() {
     setError("");
     setSuccessMessage("");
 
-    // First check if email is rcroman20@gmail.com
-    if (email === "rcroman20@gmail.com") {
+    // Protect owner admin account from being re-registered.
+    if (email.trim().toLowerCase() === "rcroman20@gmail.com") {
       setError(
-        "This email is already registered as a teacher. Please sign in instead of registering.",
+        "This email is reserved as owner admin. Please sign in instead of registering.",
       );
       return;
     }
@@ -342,6 +415,7 @@ export default function AuthPage() {
       name,
       idNumber,
       whatsApp,
+      selectedRole,
     });
 
     if (!result.success) {
@@ -352,15 +426,76 @@ export default function AuthPage() {
     setIsLoading(true);
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(
-        firebaseAuth,
-        email,
-        password,
-      );
-      const user = userCredential.user;
+      let userCredential;
+      try {
+        userCredential = await createUserWithEmailAndPassword(
+          firebaseAuth,
+          email,
+          password,
+        );
+      } catch (createError: unknown) {
+        const createAuthError = parseAuthError(createError);
+        if (createAuthError.code !== "auth/email-already-in-use") {
+          throw createError;
+        }
 
-      // All new registrations will be students
+        // Spark-compatible recovery:
+        // if an Auth account remains after admin data deletion, allow the same
+        // person to sign in once, detect deleted state, remove Auth user and retry sign-up.
+        try {
+          const existingCredential = await signInWithEmailAndPassword(
+            firebaseAuth,
+            email,
+            password,
+          );
+          const existingUid = existingCredential.user.uid;
+          const [deletedMarker, userSnap, studentSnap] = await Promise.all([
+            isAccountMarkedDeleted(existingUid),
+            getDoc(doc(firebaseDB, "usuarios", existingUid)),
+            getDoc(doc(firebaseDB, "estudiantes", existingUid)),
+          ]);
+
+          const accountLooksDeleted =
+            deletedMarker || (!userSnap.exists() && !studentSnap.exists());
+
+          if (!accountLooksDeleted) {
+            await signOut(firebaseAuth).catch(() => undefined);
+            throw createError;
+          }
+
+          await deleteUser(existingCredential.user);
+          await signOut(firebaseAuth).catch(() => undefined);
+
+          userCredential = await createUserWithEmailAndPassword(
+            firebaseAuth,
+            email,
+            password,
+          );
+        } catch (recoveryError: unknown) {
+          const recoveryAuthError = parseAuthError(recoveryError);
+          if (
+            recoveryAuthError.code === "auth/invalid-credential" ||
+            recoveryAuthError.code === "auth/wrong-password" ||
+            recoveryAuthError.code === "auth/invalid-login-credentials"
+          ) {
+            setError(
+              "This email is already in use. If this was a deleted account, sign in with the previous password (or reset it) once to complete cleanup, then register again.",
+            );
+            return;
+          }
+          throw createError;
+        }
+      }
+
+      if (!userCredential) {
+        throw new Error("Could not create user account.");
+      }
+
+      const user = userCredential.user;
+      const wantsTeacherRole = selectedRole === "docente";
       const role = "estudiante";
+      const teacherApprovalStatus = wantsTeacherRole ? "pending" : "approved";
+      const now = new Date();
 
       // 1. Save to /users
       await setDoc(doc(firebaseDB, "usuarios", user.uid), {
@@ -370,7 +505,11 @@ export default function AuthPage() {
         idNumber,
         role,
         whatsApp,
-        createdAt: new Date(),
+        createdAt: now,
+        requestedRole: selectedRole,
+        teacherApprovalStatus,
+        ...(wantsTeacherRole ? { teacherRequestedAt: now } : {}),
+        ...(wantsTeacherRole ? { teacherRequestCount: 1 } : {}),
       });
 
       // 2. Also save to /students
@@ -381,17 +520,32 @@ export default function AuthPage() {
         name,
         role,
         whatsApp,
-        createdAt: new Date(),
+        createdAt: now,
+        requestedRole: selectedRole,
+        teacherApprovalStatus,
+        ...(wantsTeacherRole ? { teacherRequestedAt: now } : {}),
+        ...(wantsTeacherRole ? { teacherRequestCount: 1 } : {}),
       });
 
-      setSuccessMessage("Account created successfully! You can now sign in.");
-    } catch (err: any) {
-      if (err.code === "auth/email-already-in-use") {
+      setSuccessMessage(
+        wantsTeacherRole
+          ? "Teacher account request created. An admin must approve it before teacher features are enabled."
+          : "Student account created successfully! You can now sign in.",
+      );
+    } catch (err: unknown) {
+      const authError = parseAuthError(err);
+      if (authError.code === "auth/email-already-in-use") {
         setError("This email is already registered. Please sign in instead.");
-      } else if (err.code === "auth/weak-password") {
+      } else if (authError.code === "auth/weak-password") {
         setError("Password is too weak. Use at least 6 characters.");
+      } else if (authError.code === "auth/operation-not-allowed") {
+        setError("Email/password sign up is not enabled in Firebase Auth.");
+      } else if (authError.code === "auth/network-request-failed") {
+        setError("Network error. Check your connection and try again.");
+      } else if (authError.code === "auth/too-many-requests") {
+        setError("Too many attempts. Please try again later.");
       } else {
-        setError(err.message || "Error registering user");
+        setError(authError.message || "Error registering user");
       }
     } finally {
       setIsLoading(false);
@@ -404,302 +558,363 @@ export default function AuthPage() {
 
   return (
     <>
-      <div className="min-h-screen bg-white flex">
-        {/* Left side - Branding - SOLO AZUL */}
-        <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
-          <div className="absolute inset-0 bg-blue-600" />
-        
+      <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <div className="pointer-events-none absolute -left-16 top-6 h-44 w-44 rounded-full bg-white/80 blur-[40px]" />
+        <div className="pointer-events-none absolute -right-14 bottom-8 h-52 w-52 rounded-full bg-slate-300/60 blur-[44px]" />
 
-          <div className="relative z-10 flex flex-col justify-center p-12 text-white">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="h-16 w-16 rounded-xl bg-white backdrop-blur-sm flex items-center justify-center overflow-hidden">
-                <img src="/logo.png" alt="MultiCourses logo" className="h-10 w-10 object-contain" />
-              </div>
-              <div>
-                <h1 className="text-4xl font-bold tracking-tight">
-                  MultiCourses
-                </h1>
-                <p className="text-white/80">
-                  Designed by Roberto Román
-                </p>
-              </div>
-            </div>
+        <div className="relative mx-auto w-full max-w-[1320px]">
+          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="grid grid-cols-1 gap-4 xl:items-start xl:grid-cols-[minmax(0,1.05fr)_460px]">
+              <section className="relative self-start overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-5 shadow-sm lg:p-6">
+                <div className="pointer-events-none absolute -left-[70px] -top-[90px] h-[180px] w-[180px] rounded-full bg-sky-300/25" />
+                <div className="pointer-events-none absolute -right-[90px] -bottom-[90px] h-[200px] w-[200px] rounded-full bg-indigo-300/20" />
 
-            <h2 className="text-4xl font-bold tracking-tight mb-4">
-              Digital Academic Platform
-              <span className="block text-2xl font-semibold mt-2 text-white/90">
-                Modern • Vibrant • Professional
-              </span>
-            </h2>
+                <div className="relative z-10 flex h-full flex-col justify-between">
+                  <div className="space-y-5">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Academic Workspace
+                    </div>
 
-            <p className="text-lg text-white/90 mb-4 max-w-md">
-              Manage your courses, track your progress, and access learning
-              materials all in one place.
-            </p>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-3 text-white/90">
-                <div className="h-10 w-10 rounded-lg bg-white/10 flex items-center justify-center">
-                  <BookOpen className="h-5 w-5" />
-                </div>
-                <span>Access to class materials</span>
-              </div>
-              <div className="flex items-center gap-3 text-white/90">
-                <div className="h-10 w-10 rounded-lg bg-white/10 flex items-center justify-center">
-                  <Sparkles className="h-5 w-5" />
-                </div>
-                <span>Real-time grade tracking</span>
-              </div>
-              <div className="flex items-center gap-3 text-white/90">
-                <div className="h-10 w-10 rounded-lg bg-white/10 flex items-center justify-center">
-                  <Zap className="h-5 w-5" />
-                </div>
-                <span>Modern interface experience</span>
-              </div>
-            </div>
-          
-          </div>
-
-      
-        </div>
-
-        {/* Right side - Login form */}
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="w-full max-w-md">
-            {/* Mobile branding */}
-            <div className="lg:hidden text-center mb-2">
-              <div className="inline-flex items-center justify-center h-16 w-16 rounded-xl bg-blue-600 text-white mb-2 overflow-hidden">
-                <img src="/logo.png" alt="MultiCourses logo" className="h-10 w-10 object-contain" />
-              </div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                MultiCourses
-              </h1>
-              <p className="text-gray-500 text-sm">
-                Designed by Roberto Román
-              </p>
-            </div>
-
-            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-lg">
-              <div className="text-center mb-2">
-                <h2 className="text-2xl font-bold text-gray-900 mb-0">
-                  {isLogin ? "Welcome Back!" : "Create Account"}
-                </h2>
-                <p className="text-gray-500">
-                  {isLogin ? "Sign in to continue" : "Join our academic community"}
-                </p>
-              </div>
-
-              <form
-                onSubmit={isLogin ? handleLoginSubmit : handleRegisterSubmit}
-                className="space-y-2"
-              >
-                {error && (
-                  <div className="flex items-center gap-2 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <p>{error}</p>
-                  </div>
-                )}
-
-                {successMessage && (
-                  <div className="flex items-center gap-2 p-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-sm">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <p>{successMessage}</p>
-                  </div>
-                )}
-
-                {!isLogin && (
-                  <>
-                    <div className="space-y-2">
-                      <label
-                        htmlFor="name"
-                        className="block text-sm font-medium text-gray-700"
-                      >
-                        Full Name
-                      </label>
-                      <div className="relative">
-                        <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                        <input
-                          id="name"
-                          type="text"
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                          placeholder="Juan Pérez"
-                          className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
-                          required
-                        />
+                    <div className="flex items-center gap-3">
+                      <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+                        <img src="/logo.png" alt="MultiCourses logo" className="h-full w-full object-contain" />
+                      </div>
+                      <div>
+                        <h1 className="text-2xl font-bold text-slate-900">MultiCourses</h1>
+                        <p className="mt-0.5 text-xs text-slate-500">Designed by Roberto Román</p>
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label
-                        htmlFor="idNumber"
-                        className="block text-sm font-medium text-gray-700"
-                      >
-                        ID Number / Document
-                      </label>
-                      <div className="relative">
-                        <Hash className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                        <input
-                          id="idNumber"
-                          type="text"
-                          value={idNumber}
-                          onChange={(e) => setIdNumber(e.target.value)}
-                          placeholder="Ej: 1234567890"
-                          className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
-                          required
-                        />
-                      </div>
-                    
+                    <div>
+                      <h2 className="max-w-2xl text-3xl font-bold leading-tight text-slate-900">
+                        Learn, track, and manage your courses in one platform.
+                      </h2>
+                      <p className="mt-2.5 max-w-2xl text-sm text-slate-600">
+                        Access materials, monitor grades, and keep your academic workflow organized for students and teachers.
+                      </p>
                     </div>
-                  </>
-                )}
 
-                <div className="space-y-2">
-                  <label
-                    htmlFor="email"
-                    className="block text-sm font-medium text-gray-700"
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                      <div className="rounded-xl border border-slate-200 bg-white/90 p-3 backdrop-blur">
+                        <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                          <BookOpen className="h-4 w-4" />
+                        </div>
+                        <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Learning</p>
+                        <p className="text-sm font-semibold text-slate-900">Always available content</p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white/90 p-3 backdrop-blur">
+                        <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
+                          <Target className="h-4 w-4" />
+                        </div>
+                        <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Progress</p>
+                        <p className="text-sm font-semibold text-slate-900">Real-time grade visibility</p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white/90 p-3 backdrop-blur">
+                        <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+                          <Zap className="h-4 w-4" />
+                        </div>
+                        <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Experience</p>
+                        <p className="text-sm font-semibold text-slate-900">Fast and professional workflow</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid grid-cols-1 gap-2.5 rounded-2xl border border-slate-200 bg-white/85 p-3 shadow-sm sm:grid-cols-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Step 1</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">Create account</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Step 2</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">Choose your role</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Step 3</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">Start your workspace</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <div className="mb-4 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isLogin) {
+                        setIsLogin(true);
+                        setError("");
+                        setSuccessMessage("");
+                      }
+                    }}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      isLogin
+                        ? "bg-sky-100 text-sky-800"
+                        : "text-slate-600 hover:text-slate-800"
+                    }`}
                   >
-                    Email
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                    <input
-                      id="email"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="correo@universidad.edu.co"
-                      className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
-                      required
-                    />
-                  </div>
+                    Sign in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isLogin) {
+                        setIsLogin(false);
+                        setError("");
+                        setSuccessMessage("");
+                      }
+                    }}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      !isLogin
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "text-slate-600 hover:text-slate-800"
+                    }`}
+                  >
+                    Create account
+                  </button>
                 </div>
 
-                {!isLogin && (
-                  <div className="space-y-2">
-                    <label
-                      htmlFor="whatsApp"
-                      className="block text-sm font-medium text-gray-700"
-                    >
-                      WhatsApp Number
-                    </label>
-                    <div className="relative">
-                      <Smartphone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                      <input
-                        id="whatsApp"
-                        type="text"
-                        value={whatsApp}
-                        onChange={(e) => setWhatsApp(e.target.value)}
-                        placeholder="Ej: 1234567890"
-                        className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
-                        required
-                      />
-                    </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+                  <div className="mb-4 space-y-1">
+                    <h2 className="text-2xl font-bold text-slate-900">
+                      {isLogin ? "Welcome Back" : "Create Your Account"}
+                    </h2>
+                    <p className="text-sm text-slate-600">
+                      {isLogin
+                        ? "Sign in to securely access your academic workspace."
+                        : "Select your role and complete your registration details."}
+                    </p>
                   </div>
-                )}
 
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <label
-                      htmlFor="password"
-                      className="block text-sm font-medium text-gray-700"
-                    >
-                      Password
-                    </label>
-                    {isLogin && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowForgotPassword(true);
-                        }}
-                        className="text-sm text-blue-600 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
-                      >
-                        Forgot password?
-                      </button>
+                  <form
+                    onSubmit={isLogin ? handleLoginSubmit : handleRegisterSubmit}
+                    className="space-y-3"
+                  >
+                    {error && (
+                      <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <p>{error}</p>
+                      </div>
                     )}
-                  </div>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                    <input
-                      id="password"
-                      type={showPassword ? "text" : "password"}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full pl-10 pr-11 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
-                      required
-                    />
+
+                    {successMessage && (
+                      <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <p>{successMessage}</p>
+                      </div>
+                    )}
+
+                    {!isLogin && (
+                      <>
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Register as
+                          </p>
+                          <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedRole("estudiante")}
+                              className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border text-xs font-semibold transition ${
+                                selectedRole === "estudiante"
+                                  ? "border-sky-200 bg-sky-50 text-sky-800"
+                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              <GraduationCap className="h-4 w-4" />
+                              Student
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedRole("docente")}
+                              className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border text-xs font-semibold transition ${
+                                selectedRole === "docente"
+                                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              <BriefcaseBusiness className="h-4 w-4" />
+                              Teacher
+                            </button>
+                          </div>
+                          {selectedRole === "docente" && (
+                            <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                              Teacher access requires administrator approval before teacher features are enabled.
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label htmlFor="name" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Full Name
+                          </label>
+                          <div className="relative">
+                            <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                            <input
+                              id="name"
+                              type="text"
+                              value={name}
+                              onChange={(e) => setName(e.target.value)}
+                              placeholder="Juan Pérez"
+                              className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label htmlFor="idNumber" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            ID Number / Document
+                          </label>
+                          <div className="relative">
+                            <Hash className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                            <input
+                              id="idNumber"
+                              type="text"
+                              value={idNumber}
+                              onChange={(e) => setIdNumber(e.target.value)}
+                              placeholder="1234567890"
+                              className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                              required
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    <div className="space-y-1.5">
+                      <label htmlFor="email" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Email
+                      </label>
+                      <div className="relative">
+                        <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                          id="email"
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="correo@universidad.edu.co"
+                          className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    {!isLogin && (
+                      <div className="space-y-1.5">
+                        <label htmlFor="whatsApp" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          WhatsApp Number
+                        </label>
+                        <div className="relative">
+                          <Smartphone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input
+                            id="whatsApp"
+                            type="text"
+                            value={whatsApp}
+                            onChange={(e) => setWhatsApp(e.target.value)}
+                            placeholder="3001234567"
+                            className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                            required
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="password" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Password
+                        </label>
+                        {isLogin && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowForgotPassword(true);
+                            }}
+                            className="text-xs font-semibold text-sky-700 transition hover:text-sky-800"
+                          >
+                            Forgot password?
+                          </button>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                          id="password"
+                          type={showPassword ? "text" : "password"}
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-11 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((prev) => !prev)}
+                          className="absolute right-1.5 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                        >
+                          {showPassword ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500">Minimum 6 characters</p>
+                    </div>
+
                     <button
-                      type="button"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-blue-600 transition-colors"
-                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      type="submit"
+                      disabled={isLoading}
+                      className="mt-1 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-sky-500 bg-gradient-to-b from-sky-500 to-sky-600 px-4 text-sm font-semibold text-white shadow-[0_18px_30px_-18px_rgba(2,132,199,0.95)] transition hover:from-sky-600 hover:to-sky-700 disabled:cursor-not-allowed disabled:opacity-70"
                     >
-                      {showPassword ? (
-                        <EyeOff className="h-5 w-5" />
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          {isLogin ? "Signing in..." : "Creating account..."}
+                        </>
+                      ) : isLogin ? (
+                        <>
+                          <Zap className="h-4 w-4" />
+                          Sign In
+                        </>
                       ) : (
-                        <Eye className="h-5 w-5" />
+                        <>
+                          <Sparkles className="h-4 w-4" />
+                          Create Account
+                        </>
                       )}
                     </button>
+                  </form>
+
+                  <div className="mt-4 border-t border-slate-200 pt-3">
+                    <button
+                      onClick={() => {
+                        setIsLogin(!isLogin);
+                        setError("");
+                        setSuccessMessage("");
+                        if (isLogin) {
+                          setName("");
+                          setIdNumber("");
+                          setWhatsApp("");
+                          setSelectedRole("estudiante");
+                        }
+                      }}
+                      className="w-full rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                    >
+                      {isLogin
+                        ? "Need access? Create an account"
+                        : "Already registered? Sign in"}
+                    </button>
                   </div>
-                  <p className="text-xs text-gray-500">
-                    Minimum 6 characters
-                  </p>
                 </div>
-
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full mt-4 inline-flex items-center justify-center gap-3 px-6 py-3.5 rounded-xl bg-blue-600 text-white font-semibold tracking-wide hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      {isLogin ? "Signing in..." : "Creating account..."}
-                    </>
-                  ) : isLogin ? (
-                    <>
-                      <Zap className="h-4 w-4" />
-                      Sign In
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4" />
-                      Create Account
-                    </>
-                  )}
-                </button>
-              </form>
-
-              {/* Switch between login and register */}
-              <div className="text-center mt-2 pt-2 border-t border-gray-200">
-                <button
-                  onClick={() => {
-                    setIsLogin(!isLogin);
-                    setError("");
-                    setSuccessMessage("");
-                    // Clear fields when switching between login/register
-                    if (isLogin) {
-                      setName("");
-                      setIdNumber("");
-                      setWhatsApp("");
-                    }
-                  }}
-                  className="text-sm text-blue-600 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
-                >
-                  {isLogin
-                    ? "Don't have an account? Create one"
-                    : "Already have an account? Sign in"}
-                </button>
-              </div>
+              </section>
             </div>
-
-            
           </div>
         </div>
       </div>
 
-      {/* Forgot Password Modal como componente separado */}
       <ForgotPasswordModal
         isOpen={showForgotPassword}
         onClose={() => setShowForgotPassword(false)}

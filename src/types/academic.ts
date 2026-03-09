@@ -9,6 +9,13 @@ export interface User {
   createdAt: Date;
 }
 
+export interface CourseClassSchedule {
+  dayOfWeek: number; // 0 = Sunday, 6 = Saturday
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  location?: string;
+}
+
 
 export interface Course {
   id: string;
@@ -20,6 +27,8 @@ export interface Course {
   teacherId: string;
   teacherName: string;
   description?: string;
+  coverUrl?: string;
+  classSchedule?: CourseClassSchedule[];
   enrolledStudents: string[];
   createdAt: Date;
 }

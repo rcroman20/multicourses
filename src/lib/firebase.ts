@@ -2,6 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { initializeFirestore } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
@@ -25,6 +26,7 @@ export const firebaseDB = initializeFirestore(firebaseApp, {
   useFetchStreams: false,
 });
 export const firebaseStorage = getStorage(firebaseApp); // <-- AÑADIR ESTO
+export const firebaseFunctions = getFunctions(firebaseApp);
 
 // Alias para compatibilidad
 export const auth = firebaseAuth;

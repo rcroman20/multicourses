@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { firebaseDB } from '@/lib/firebase';
@@ -9,36 +9,28 @@ import {
   collection, 
   query, 
   where, 
-  getDocs,
-  updateDoc,
-  arrayUnion,
-  arrayRemove
+  getDocs
 } from 'firebase/firestore';
 import {
   ArrowLeft,
   Users,
+  IdCard,
   Mail,
   Phone,
   BookOpen,
-  GraduationCap,
-  Calendar,
   CheckCircle,
-  XCircle,
   Loader2,
   AlertCircle,
-  Save,
   Plus,
   Trash2,
   Search,
   Filter,
-  ChevronRight,
-  Shield,
-  Hash,
-  Bookmark,
+  ChevronDown,
   Target,
   Zap
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { changeCourseEnrollmentWithPlan } from '@/lib/services/teacherPlanEnforcementService';
 
 interface Student {
   id: string;
@@ -47,6 +39,8 @@ interface Student {
   name: string;
   role: 'estudiante' | 'docente';
   whatsApp: string;
+  avatarUrl?: string;
+  avatarEmoji?: string;
   courses: string[]; // Cambiado de enrolledCourses a courses
 }
 
@@ -82,6 +76,17 @@ export default function EnrollStudentPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
   const isTeacher = user?.role === 'docente';
+  const teacherPlanName = (user?.teacherPlanName || "No assigned plan").trim();
+  const teacherPlanStudentLimit =
+    typeof user?.teacherPlanStudentLimit === "number" && user.teacherPlanStudentLimit > 0
+      ? user.teacherPlanStudentLimit
+      : null;
+  const teacherPlanExpiresAt =
+    user?.teacherPlanExpiresAt instanceof Date
+      ? user.teacherPlanExpiresAt
+      : user?.teacherPlanExpiresAt
+        ? new Date(user.teacherPlanExpiresAt)
+        : null;
 
   useEffect(() => {
     if (studentId) {
@@ -96,23 +101,29 @@ export default function EnrollStudentPage() {
   const fetchStudentData = async () => {
     setIsLoading(true);
     try {
-      // Fetch student
       const studentRef = doc(firebaseDB, 'estudiantes', studentId!);
-      const studentSnap = await getDoc(studentRef);
+      const userRef = doc(firebaseDB, 'usuarios', studentId!);
+      const [studentSnap, userSnap] = await Promise.all([
+        getDoc(studentRef),
+        getDoc(userRef),
+      ]);
       
       if (!studentSnap.exists()) {
         navigate('/students/list');
         return;
       }
 
-      const studentData = studentSnap.data();
+      const studentData = studentSnap.data() as Record<string, any>;
+      const userData = userSnap.exists() ? (userSnap.data() as Record<string, any>) : {};
       const studentObj: Student = {
         id: studentSnap.id,
-        idNumber: studentData.idNumber || '',
-        email: studentData.email,
-        name: studentData.name,
-        role: studentData.role,
-        whatsApp: studentData.whatsApp,
+        idNumber: studentData.idNumber || userData.idNumber || userData.identification || '',
+        email: studentData.email || userData.email || '',
+        name: studentData.name || userData.name || 'Student',
+        role: (studentData.role || userData.role || 'estudiante') as 'estudiante' | 'docente',
+        whatsApp: studentData.whatsApp || userData.whatsApp || userData.whatsapp || userData.phone || '',
+        avatarUrl: studentData.avatarUrl || userData.avatarUrl || '',
+        avatarEmoji: studentData.avatarEmoji || userData.avatarEmoji || '',
         courses: studentData.courses || [], // Cambiado a courses
       };
 
@@ -185,22 +196,62 @@ export default function EnrollStudentPage() {
   const enrollStudentInCourse = async (courseId: string) => {
     if (!student || !isTeacher) return;
 
+    if (
+      teacherPlanExpiresAt &&
+      !Number.isNaN(teacherPlanExpiresAt.getTime()) &&
+      teacherPlanExpiresAt.getTime() < Date.now()
+    ) {
+      setError(
+        `Your ${teacherPlanName} plan has expired. Renew your plan to enroll students.`,
+      );
+      return;
+    }
+
+    if (teacherPlanStudentLimit) {
+      const uniqueStudentIds = new Set<string>();
+      for (const course of courses) {
+        for (const enrolledId of course.enrolledStudents || []) {
+          if (typeof enrolledId === "string" && enrolledId.trim().length > 0) {
+            uniqueStudentIds.add(enrolledId);
+          }
+        }
+      }
+
+      const alreadyManaged = uniqueStudentIds.has(student.id);
+      const projectedTotal = alreadyManaged
+        ? uniqueStudentIds.size
+        : uniqueStudentIds.size + 1;
+
+      if (projectedTotal > teacherPlanStudentLimit) {
+        setError(
+          `Plan limit reached: ${teacherPlanName} allows up to ${teacherPlanStudentLimit} unique students.`,
+        );
+        return;
+      }
+    }
+
     setIsUpdating(true);
     try {
-      // Update course's enrolled students
-      const courseRef = doc(firebaseDB, 'cursos', courseId);
-      await updateDoc(courseRef, {
-        enrolledStudents: arrayUnion(student.id)
-      });
-
-      // Update student's courses array (cambiar a courses en lugar de enrolledCourses)
-      const studentRef = doc(firebaseDB, 'estudiantes', student.id);
-      await updateDoc(studentRef, {
-        courses: arrayUnion(courseId) // Cambiado a courses
+      await changeCourseEnrollmentWithPlan({
+        courseId,
+        studentId: student.id,
+        action: "enroll",
       });
 
       // Update local state
       setStudentCourses(prev => [...prev, courseId]);
+      setCourses((prev) =>
+        prev.map((course) =>
+          course.id === courseId
+            ? {
+                ...course,
+                enrolledStudents: course.enrolledStudents.includes(student.id)
+                  ? course.enrolledStudents
+                  : [...course.enrolledStudents, student.id],
+              }
+            : course,
+        ),
+      );
       
       const course = courses.find(c => c.id === courseId);
       if (course) {
@@ -208,8 +259,12 @@ export default function EnrollStudentPage() {
         setTimeout(() => setSuccess(''), 3000);
       }
 
-    } catch (err) {
-      setError('Error enrolling student in course');
+    } catch (error: any) {
+      setError(
+        typeof error?.message === "string" && error.message.trim().length > 0
+          ? error.message
+          : 'Error enrolling student in course',
+      );
     } finally {
       setIsUpdating(false);
     }
@@ -224,20 +279,26 @@ export default function EnrollStudentPage() {
 
     setIsUpdating(true);
     try {
-      // Update course's enrolled students
-      const courseRef = doc(firebaseDB, 'cursos', courseId);
-      await updateDoc(courseRef, {
-        enrolledStudents: arrayRemove(student.id)
-      });
-
-      // Update student's courses array (cambiar a courses en lugar de enrolledCourses)
-      const studentRef = doc(firebaseDB, 'estudiantes', student.id);
-      await updateDoc(studentRef, {
-        courses: arrayRemove(courseId) // Cambiado a courses
+      await changeCourseEnrollmentWithPlan({
+        courseId,
+        studentId: student.id,
+        action: "unenroll",
       });
 
       // Update local state
       setStudentCourses(prev => prev.filter(id => id !== courseId));
+      setCourses((prev) =>
+        prev.map((course) =>
+          course.id === courseId
+            ? {
+                ...course,
+                enrolledStudents: course.enrolledStudents.filter(
+                  (enrolledId) => enrolledId !== student.id,
+                ),
+              }
+            : course,
+        ),
+      );
       
       const course = courses.find(c => c.id === courseId);
       if (course) {
@@ -245,8 +306,12 @@ export default function EnrollStudentPage() {
         setTimeout(() => setSuccess(''), 3000);
       }
 
-    } catch (err) {
-      setError('Error unenrolling student from course');
+    } catch (error: any) {
+      setError(
+        typeof error?.message === "string" && error.message.trim().length > 0
+          ? error.message
+          : 'Error unenrolling student from course',
+      );
     } finally {
       setIsUpdating(false);
     }
@@ -265,20 +330,49 @@ export default function EnrollStudentPage() {
     return Array.from(semesters).sort();
   };
 
+  const availableCoursesCount = Math.max(0, courses.length - studentCourses.length);
+  const activeFilteredCourses = filteredCourses.filter((course) => course.status === 'active').length;
+  const hasActiveFilters = Boolean(searchTerm || semesterFilter !== 'all' || statusFilter !== 'all');
+  const managedStudentSet = new Set<string>();
+  for (const course of courses) {
+    for (const enrolledId of course.enrolledStudents || []) {
+      if (typeof enrolledId === "string" && enrolledId.trim().length > 0) {
+        managedStudentSet.add(enrolledId);
+      }
+    }
+  }
+  const managedStudentCount = managedStudentSet.size;
+  const remainingStudentSlots = teacherPlanStudentLimit
+    ? Math.max(0, teacherPlanStudentLimit - managedStudentCount)
+    : null;
+  const teacherPlanPriceText =
+    typeof user?.teacherPlanPriceCop === "number" && user.teacherPlanPriceCop > 0
+      ? `$${user.teacherPlanPriceCop.toLocaleString("en-US")} COP`
+      : "Custom";
+  const teacherPlanExpiresText =
+    teacherPlanExpiresAt && !Number.isNaN(teacherPlanExpiresAt.getTime())
+      ? teacherPlanExpiresAt.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "No expiration date";
+
   if (isLoading) {
     return (
-      <DashboardLayout
-        title="Enroll Student"
-        subtitle="Loading student information..."
-      >
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-2">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto" />
-            <div className="space-y-2">
-              <p className="text-lg font-semibold text-gray-900">Loading student data</p>
-              <p className="text-sm text-gray-600">
-                Please wait while we load the student information
-              </p>
+      <DashboardLayout contentClassName="pt-0 lg:pt-1">
+        <div className="relative overflow-x-clip">
+          <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+          <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="flex min-h-[320px] items-center justify-center">
+              <div className="space-y-2 text-center">
+                <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
+                <p className="text-lg font-semibold text-slate-900">Loading student data</p>
+                <p className="text-sm text-slate-600">
+                  Please wait while we load the student information.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -288,22 +382,25 @@ export default function EnrollStudentPage() {
 
   if (!student) {
     return (
-      <DashboardLayout
-        title="Student Not Found"
-        subtitle="The requested student could not be found"
-      >
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="font-semibold text-lg mb-2">Student not found</h3>
-            <p className="text-gray-500 mb-6">The student you're looking for doesn't exist.</p>
-            <button
-              onClick={() => navigate('/students/list')}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to Students List
-            </button>
+      <DashboardLayout contentClassName="pt-0 lg:pt-1">
+        <div className="relative overflow-x-clip">
+          <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+          <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="flex min-h-[320px] items-center justify-center">
+              <div className="text-center">
+                <AlertCircle className="mx-auto mb-3 h-10 w-10 text-slate-400" />
+                <h3 className="mb-2 text-base font-semibold text-slate-900">Student not found</h3>
+                <p className="mb-5 text-xs text-slate-500">The student you are looking for does not exist.</p>
+                <button
+                  onClick={() => navigate('/students/list')}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  Back to Students List
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </DashboardLayout>
@@ -311,321 +408,385 @@ export default function EnrollStudentPage() {
   }
 
   return (
-    <DashboardLayout
-      title="Enroll Student in Courses"
-      subtitle={`Manage course enrollment for ${student.name}`}
-    >
-      <div className="space-y-2">
-        {/* Back button and Student Info */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <button
-            onClick={() => navigate('/students/list')}
-            className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 font-medium"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Students List
-          </button>
+    <DashboardLayout contentClassName="pt-0 lg:pt-1">
+      <div className="relative overflow-x-clip">
+        <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+        <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-          <div className="flex items-center gap-4">
-            <div className="h-12 w-12 rounded-full bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center">
-              <span className="text-xl font-bold text-blue-600">
-                {student.name.charAt(0)}
-              </span>
-            </div>
-            <div>
-              <h2 className="font-bold text-gray-900">{student.name}</h2>
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <span>{student.idNumber}</span>
-                <span>•</span>
-                <span>{student.email}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Success/Error Messages */}
-        {success && (
-          <div className="modern-card bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 p-4 rounded-xl">
-            <div className="flex items-center gap-3">
-              <CheckCircle className="h-5 w-5 text-green-600" />
-              <div>
-                <p className="font-medium text-green-800">{success}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <div className="modern-card bg-gradient-to-r from-red-50 to-pink-50 border border-red-200 p-4 rounded-xl">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="h-5 w-5 text-red-600" />
-              <div>
-                <p className="font-medium text-red-800">{error}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Summary Card */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-100 rounded-2xl p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-blue-600 mb-1">Total Courses</p>
-                <p className="text-2xl font-bold text-gray-900">{courses.length}</p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center">
-                <BookOpen className="h-5 w-5 text-blue-500" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-100 rounded-2xl p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-green-600 mb-1">Enrolled In</p>
-                <p className="text-2xl font-bold text-gray-900">{studentCourses.length}</p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-green-100 to-emerald-100 flex items-center justify-center">
-                <CheckCircle className="h-5 w-5 text-green-500" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100 rounded-2xl p-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-amber-600 mb-1">Available</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {courses.length - studentCourses.length}
-                </p>
-              </div>
-              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 flex items-center justify-center">
-                <Target className="h-5 w-5 text-amber-500" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Search and Filter Bar */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search courses by name, code or description..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
-                />
-              </div>
-            </div>
-            
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="relative">
-                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <select
-                  value={semesterFilter}
-                  onChange={(e) => setSemesterFilter(e.target.value)}
-                  className="pl-10 pr-4 py-2.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all appearance-none text-sm font-medium"
-                >
-                  <option value="all">All Semesters</option>
-                  {getSemesterOptions().map(semester => (
-                    <option key={semester} value={semester}>Semester {semester}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="relative">
-                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="pl-10 pr-4 py-2.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all appearance-none text-sm font-medium"
-                >
-                  <option value="all">All Status</option>
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Courses List */}
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center">
-                    <BookOpen className="h-5 w-5 text-blue-500" />
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="flex flex-col gap-3">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-cyan-50 p-3 shadow-sm">
+              <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
+              <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-cyan-200/35" />
+              <div className="relative z-10 grid gap-3 lg:grid-cols-[minmax(0,1fr)_330px] lg:items-start">
+                <div>
+                  <div className="flex flex-col items-start gap-2">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                      <Users className="h-3.5 w-3.5" />
+                      Enrollment Workspace
+                    </div>
+                    <button
+                      onClick={() => navigate('/students/list')}
+                      className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 transition hover:text-sky-700"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      Back to Students List
+                    </button>
                   </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-900">Available Courses</h3>
-                    <p className="text-sm text-gray-500 mt-1">
-                      {filteredCourses.length} courses found
-                      {searchTerm && ` for "${searchTerm}"`}
-                    </p>
+                  <h2 className="mt-2 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
+                    Enroll Student
+                  </h2>
+                  <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                    Assign and manage this student across your active courses from one place.
+                  </p>
+                </div>
+
+                <aside className="rounded-xl border border-slate-200 bg-white/95 p-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Student Scope</p>
+
+                  <div className="mt-1.5 flex min-w-0 items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-sky-200 bg-sky-100 text-base font-bold text-sky-700">
+                      {student.avatarUrl ? (
+                        <img
+                          src={student.avatarUrl}
+                          alt={student.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <span>{student.avatarEmoji || student.name.charAt(0)}</span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-semibold leading-tight text-slate-900">{student.name}</h3>
+                      <div className="mt-0.5 flex flex-col gap-0.5 text-xs leading-none text-slate-600">
+                        <div className="inline-flex items-center gap-1.5">
+                          <IdCard className="h-3.5 w-3.5 text-slate-400" />
+                          <span>{student.idNumber || 'N/A'}</span>
+                        </div>
+                        <div className="inline-flex items-center gap-1.5">
+                          <Mail className="h-3.5 w-3.5 text-slate-400" />
+                          <span className="truncate" title={student.email}>{student.email}</span>
+                        </div>
+                        <div className="inline-flex items-center gap-1.5">
+                          <Phone className="h-3.5 w-3.5 text-slate-400" />
+                          <span>{student.whatsApp || 'No phone number'}</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
+
+                </aside>
+              </div>
+            </section>
+
+            {success && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-emerald-700" />
+                  <p className="text-sm font-medium text-emerald-800">{success}</p>
                 </div>
               </div>
-            </div>
-          </div>
+            )}
 
-          {filteredCourses.length === 0 ? (
-            <div className="text-center py-12 px-4">
-              <div className="h-20 w-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center">
-                <BookOpen className="h-10 w-10 text-gray-400" />
+            {error && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-rose-700" />
+                  <p className="text-sm font-medium text-rose-800">{error}</p>
+                </div>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">No courses found</h3>
-              <p className="text-gray-600 max-w-md mx-auto mb-6">
-                {searchTerm || semesterFilter !== 'all' || statusFilter !== 'all'
-                  ? 'Try different search terms or filters'
-                  : 'No courses available for enrollment'}
-              </p>
-              {searchTerm && (
-                <button
-                  onClick={() => {
-                    setSearchTerm('');
-                    setSemesterFilter('all');
-                    setStatusFilter('all');
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
-                >
-                  Clear filters
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-gradient-to-r from-blue-50/50 to-cyan-50/50 border-b border-gray-200">
-                    <th className="text-left px-6 py-4 font-bold text-gray-900 min-w-[200px]">Course</th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[100px]">Semester</th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[80px]">Group</th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[100px]">Credits</th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[120px]">Students</th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[100px]">Status</th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[140px]">Enrollment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCourses.map((course, index) => {
-                    const isEnrolled = studentCourses.includes(course.id);
-                    
-                    return (
-                      <tr key={course.id} className={cn(
-                        "border-b border-gray-200 hover:bg-gradient-to-r hover:from-blue-50/30 hover:to-cyan-50/30 transition-all duration-300",
-                        index % 2 === 0 ? "bg-white" : "bg-gray-50/30"
-                      )}>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center">
-                              <BookOpen className="h-5 w-5 text-blue-500" />
-                            </div>
-                            <div>
-                              <h4 className="font-semibold text-gray-900">{course.name}</h4>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="text-sm font-mono text-blue-600">{course.code}</span>
-                              </div>
-                              {course.description && (
-                                <p className="text-xs text-gray-500 mt-1 line-clamp-2" title={course.description}>
-                                  {course.description}
-                                </p>
-                              )} 
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-gray-900">{course.semester || 'N/A'}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className="font-medium text-gray-900">{course.group || 'N/A'}</span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className="font-medium text-gray-900">{course.credits || 0}</span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2">
-                            <Users className="h-4 w-4 text-gray-400" />
-                            <span className="font-medium text-gray-900">
-                              {course.enrolledStudents.length}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          <span className={cn(
-                            "inline-flex items-center px-3 py-1 rounded-full text-xs font-bold",
-                            course.status === 'active'
-                              ? 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-700'
-                              : 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700'
-                          )}>
-                            {course.status === 'active' ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <button
-                            onClick={() => toggleEnrollment(course.id, isEnrolled)}
-                            disabled={isUpdating}
-                            className={cn(
-                              "inline-flex items-center gap-2 px-4 py-2 rounded-xl font-medium transition-all duration-300",
-                              isEnrolled
-                                ? "text-red-600 hover:text-red-700 hover:bg-gradient-to-r hover:from-red-50 hover:to-pink-50 border border-red-200"
-                                : "text-green-600 hover:text-green-700 hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 border border-green-200"
-                            )}
-                          >
-                            {isEnrolled ? (
-                              <>
-                                <Trash2 className="h-4 w-4" />
-                                
-                              </>
-                            ) : (
-                              <>
-                                <Plus className="h-4 w-4" />
-                                
-                              </>
-                            )}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+            )}
 
-        {/* Instructions */}
-        <div className="bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-100 rounded-2xl p-6">
-          <div className="flex items-start gap-3">
-            <Zap className="h-6 w-6 text-blue-500 mt-0.5 flex-shrink-0" />
-            <div>
-              <h4 className="font-bold text-gray-900 mb-2">How to use this page</h4>
-              <ul className="space-y-2 text-sm text-gray-700">
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong>Enroll</strong>: Click the "Enroll" button to add the student to a course</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong>Unenroll</strong>: Click the "Unenroll" button to remove the student from a course</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong>Search</strong>: Use the search bar to find specific courses by name, code, or description</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
-                  <span><strong>Filter</strong>: Use the semester and status filters to narrow down the course list</span>
-                </li>
-              </ul>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+                <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                  <BookOpen className="h-4 w-4" />
+                </div>
+                <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Total Courses</p>
+                <p className="text-lg font-extrabold leading-5 text-slate-900">{courses.length}</p>
+              </div>
+
+              <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+                <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+                  <CheckCircle className="h-4 w-4" />
+                </div>
+                <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Enrolled In</p>
+                <p className="text-lg font-extrabold leading-5 text-slate-900">{studentCourses.length}</p>
+              </div>
+
+              <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+                <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+                  <Target className="h-4 w-4" />
+                </div>
+                <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Available</p>
+                <p className="text-lg font-extrabold leading-5 text-slate-900">{availableCoursesCount}</p>
+              </div>
+
+              <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+                <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+                  <Filter className="h-4 w-4" />
+                </div>
+                <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Active in Filter</p>
+                <p className="text-lg font-extrabold leading-5 text-slate-900">{activeFilteredCourses}</p>
+              </div>
+            </div>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_220px_200px_auto]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search courses by name, code or description..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-3 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  />
+                </div>
+
+                <div className="relative">
+                  <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <select
+                    value={semesterFilter}
+                    onChange={(e) => setSemesterFilter(e.target.value)}
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-9 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  >
+                    <option value="all">All Semesters</option>
+                    {getSemesterOptions().map((semester) => (
+                      <option key={semester} value={semester}>
+                        Semester {semester}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
+
+                <div className="relative">
+                  <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-9 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
+
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setSemesterFilter('all');
+                      setStatusFilter('all');
+                    }}
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            </section>
+
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
+              <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 bg-slate-50/60 px-4 py-4 sm:px-6">
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                      <Users className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">Course Enrollment List</h3>
+                      <p className="mt-0.5 text-sm text-slate-500">
+                        {filteredCourses.length} courses found{searchTerm ? ` for "${searchTerm}"` : ''}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {filteredCourses.length === 0 ? (
+                  <div className="px-4 py-12 text-center">
+                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100">
+                      <BookOpen className="h-8 w-8 text-slate-400" />
+                    </div>
+                    <h3 className="mb-2 text-lg font-bold text-slate-900">No courses found</h3>
+                    <p className="mx-auto max-w-md text-sm text-slate-600">
+                      {hasActiveFilters
+                        ? 'Try different search terms or filters.'
+                        : 'No courses are currently available for enrollment.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-[920px] w-full border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50">
+                          <th className="min-w-[240px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Course
+                          </th>
+                          <th className="min-w-[95px] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Semester
+                          </th>
+                          <th className="min-w-[90px] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Group
+                          </th>
+                          <th className="min-w-[80px] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Credits
+                          </th>
+                          <th className="min-w-[85px] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Students
+                          </th>
+                          <th className="min-w-[95px] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Status
+                          </th>
+                          <th className="min-w-[140px] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Action
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredCourses.map((course, index) => {
+                          const isEnrolled = studentCourses.includes(course.id);
+
+                          return (
+                            <tr
+                              key={course.id}
+                              className={cn(
+                                'border-b border-slate-200 transition hover:bg-sky-50/30',
+                                index % 2 === 0 ? 'bg-white' : 'bg-slate-50/30',
+                              )}
+                            >
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                                    <BookOpen className="h-4 w-4" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="truncate font-semibold text-slate-900" title={course.name}>
+                                      {course.name}
+                                    </p>
+                                    <p className="text-xs font-medium text-sky-700">{course.code}</p>
+                                    {course.description && (
+                                      <p className="mt-0.5 line-clamp-2 text-xs text-slate-500" title={course.description}>
+                                        {course.description}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-3 py-3 font-medium text-slate-700">{course.semester || 'N/A'}</td>
+                              <td className="px-3 py-3 font-medium text-slate-700">{course.group || 'N/A'}</td>
+                              <td className="px-3 py-3 font-medium text-slate-700">{course.credits || 0}</td>
+                              <td className="px-3 py-3">
+                                <div className="inline-flex items-center gap-1.5 text-slate-700">
+                                  <Users className="h-3.5 w-3.5 text-slate-400" />
+                                  <span className="font-medium">{course.enrolledStudents.length}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-3">
+                                <span
+                                  className={cn(
+                                    'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold',
+                                    course.status === 'active'
+                                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                      : 'border-slate-200 bg-slate-100 text-slate-600',
+                                  )}
+                                >
+                                  {course.status === 'active' ? 'Active' : 'Inactive'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3">
+                                <button
+                                  onClick={() => toggleEnrollment(course.id, isEnrolled)}
+                                  disabled={isUpdating}
+                                  className={cn(
+                                    'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
+                                    isEnrolled
+                                      ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
+                                      : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+                                  )}
+                                >
+                                  {isUpdating ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : isEnrolled ? (
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <Plus className="h-3.5 w-3.5" />
+                                  )}
+                                  <span>{isEnrolled ? 'Unenroll' : 'Enroll'}</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              <aside className="space-y-3 xl:sticky xl:top-24 xl:self-start">
+                <section className="rounded-2xl border border-sky-200 bg-sky-50 p-3 shadow-sm">
+                  <h4 className="text-sm font-semibold text-slate-900">Active Teacher Plan</h4>
+                  <p className="mt-1 text-xs text-slate-700">
+                    {teacherPlanName} · {teacherPlanPriceText}
+                  </p>
+                  <div className="mt-2 space-y-1 text-xs text-slate-600">
+                    <p>
+                      Student limit: {teacherPlanStudentLimit ?? "Unlimited"} (remaining{" "}
+                      {remainingStudentSlots ?? "Unlimited"})
+                    </p>
+                    <p>Managed students: {managedStudentCount}</p>
+                    <p>Expires: {teacherPlanExpiresText}</p>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                  <h4 className="mb-2 text-sm font-semibold text-slate-900">Enrollment Summary</h4>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Filtered courses</span>
+                      <span className="font-semibold text-slate-900">{filteredCourses.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Active in filter</span>
+                      <span className="font-semibold text-slate-900">{activeFilteredCourses}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Already enrolled</span>
+                      <span className="font-semibold text-emerald-700">{studentCourses.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Pending assignment</span>
+                      <span className="font-semibold text-amber-700">{availableCoursesCount}</span>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-sky-50/60 p-3 shadow-sm">
+                  <div className="mb-2 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                    <Zap className="h-4 w-4" />
+                  </div>
+                  <h4 className="text-sm font-semibold text-slate-900">Quick Guide</h4>
+                  <ul className="mt-2 space-y-1.5 text-xs text-slate-600">
+                    <li className="flex items-start gap-1.5">
+                      <CheckCircle className="mt-0.5 h-3.5 w-3.5 text-emerald-600" />
+                      <span>Use <strong>Enroll</strong> to add the student to a course.</span>
+                    </li>
+                    <li className="flex items-start gap-1.5">
+                      <CheckCircle className="mt-0.5 h-3.5 w-3.5 text-emerald-600" />
+                      <span>Use <strong>Unenroll</strong> to remove current assignment.</span>
+                    </li>
+                    <li className="flex items-start gap-1.5">
+                      <CheckCircle className="mt-0.5 h-3.5 w-3.5 text-emerald-600" />
+                      <span>Apply filters to focus by semester and status.</span>
+                    </li>
+                  </ul>
+                </section>
+              </aside>
             </div>
           </div>
         </div>

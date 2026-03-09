@@ -1,2 +1,353 @@
-/* Global app-level overrides.
-   Prefer Tailwind utility classes for component styling. */
+/* Global app-level styles entry point.
+   Keep shared/reusable page styles imported here. */
+
+@import "./styles/global-ui.css";
+
+:root {
+  --color-primary-900: #1e3a8a;
+  --color-primary-800: #1d4ed8;
+  --color-primary-700: #2563eb;
+  --color-primary-600: #3b82f6;
+  --color-primary-200: #bfdbfe;
+  --color-primary-100: #dbeafe;
+  --color-primary-50: #eff6ff;
+
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-border: #e5e7eb;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-info: #2563eb;
+
+  --color-sidebar-bg: #111827;
+  --color-sidebar-bg-elevated: #1f2937;
+  --color-sidebar-text: #f3f4f6;
+  --color-sidebar-muted: #d1d5db;
+  --color-sidebar-border: rgba(148, 163, 184, 0.24);
+
+  /* Compatibility aliases */
+  --app-violet-950: #0f172a;
+  --app-violet-900: var(--color-primary-900);
+  --app-violet-800: var(--color-primary-800);
+  --app-violet-700: var(--color-primary-700);
+  --app-violet-200: var(--color-primary-200);
+  --app-violet-100: var(--color-primary-100);
+  --app-violet-50: var(--color-primary-50);
+}
+
+.dark {
+  --color-primary-900: #0f172a;
+  --color-primary-800: #1e40af;
+  --color-primary-700: #2563eb;
+  --color-primary-600: #3b82f6;
+  --color-primary-200: #1d4ed8;
+  --color-primary-100: #1e3a8a;
+  --color-primary-50: #172554;
+
+  --color-bg: #0b1220;
+  --color-surface: #111827;
+  --color-border: #2b3548;
+  --color-text: #e5e7eb;
+  --color-text-muted: #94a3b8;
+
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #60a5fa;
+
+  --color-sidebar-bg: #020617;
+  --color-sidebar-bg-elevated: #0f172a;
+  --color-sidebar-text: #e2e8f0;
+  --color-sidebar-muted: #94a3b8;
+  --color-sidebar-border: rgba(148, 163, 184, 0.2);
+}
+
+/* Dark mode compatibility layer for pages still using fixed light utility classes */
+.dark .bg-white {
+  background-color: #111827 !important;
+}
+
+.dark .bg-gray-50,
+.dark .bg-slate-50 {
+  background-color: #0f172a !important;
+}
+
+.dark .bg-gray-100,
+.dark .bg-slate-100 {
+  background-color: #172133 !important;
+}
+
+.dark .bg-gray-200,
+.dark .bg-slate-200 {
+  background-color: #243145 !important;
+}
+
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-slate-900,
+.dark .text-slate-800 {
+  color: #e5e7eb !important;
+}
+
+.dark .text-gray-700,
+.dark .text-gray-600,
+.dark .text-slate-700,
+.dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+.dark .text-gray-500,
+.dark .text-gray-400,
+.dark .text-slate-500,
+.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300,
+.dark .border-slate-100,
+.dark .border-slate-200,
+.dark .border-slate-300 {
+  border-color: #2b3548 !important;
+}
+
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-slate-50:hover {
+  background-color: #172133 !important;
+}
+
+.dark .hover\:bg-gray-100:hover,
+.dark .hover\:bg-slate-100:hover {
+  background-color: #243145 !important;
+}
+
+.dark .hover\:text-gray-700:hover,
+.dark .hover\:text-slate-700:hover {
+  color: #e2e8f0 !important;
+}
+
+.dark .placeholder\:text-gray-400::placeholder,
+.dark .placeholder\:text-slate-400::placeholder {
+  color: #94a3b8 !important;
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  color-scheme: dark;
+}
+
+.app-sidebar {
+  background: var(--color-sidebar-bg);
+  border-right: 1px solid var(--color-sidebar-border);
+  box-shadow: 14px 0 32px -24px rgba(15, 23, 42, 0.45);
+  overflow: hidden;
+}
+
+.app-sidebar-mobile-toggle {
+  background: var(--color-sidebar-bg-elevated);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 10px 24px -14px rgba(15, 23, 42, 0.85);
+}
+
+.app-sidebar-overlay {
+  background: rgba(17, 24, 39, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.app-sidebar-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.app-sidebar-header-collapsed {
+  padding: 0.6rem 0.5rem;
+}
+
+.app-sidebar-brand-icon {
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+.app-sidebar-brand-title {
+  color: #fff;
+}
+
+.app-sidebar-brand-subtitle {
+  color: var(--color-sidebar-muted);
+}
+
+.app-sidebar-toggle-btn {
+  position: absolute;
+  right: 0.65rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.13);
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.app-sidebar-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.app-sidebar-toggle-btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  outline-offset: 1px;
+}
+
+.app-sidebar-toggle-btn-collapsed {
+  position: static;
+  transform: none;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 0.65rem;
+  border-color: var(--color-border);
+  background: #fff;
+  color: var(--color-text);
+  box-shadow: 0 10px 18px -14px rgba(15, 23, 42, 0.55);
+}
+
+.app-sidebar-nav {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.app-sidebar-nav::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.app-sidebar-nav-collapsed {
+  overflow-y: auto !important;
+  padding: 0.6rem 0.45rem;
+}
+
+.app-sidebar.w-20 .app-sidebar-nav {
+  overflow-y: auto !important;
+}
+
+.app-sidebar-nav-collapsed > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.45rem !important;
+}
+
+.app-sidebar-link {
+  color: var(--color-sidebar-text);
+}
+
+.app-sidebar-link-collapsed {
+  padding: 0.4rem;
+  border-radius: 0.65rem;
+}
+
+.app-sidebar-link:hover {
+  background: rgba(255, 255, 255, 0.13);
+  color: #fff;
+}
+
+.app-sidebar-link-active {
+  background: #fff;
+  color: var(--color-text);
+  box-shadow: 0 12px 24px -20px rgba(15, 23, 42, 0.45);
+}
+
+.dark .app-sidebar-link-active {
+  background: rgba(59, 130, 246, 0.22);
+  color: #e2e8f0;
+}
+
+.app-sidebar-icon-wrap {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--color-sidebar-text);
+}
+
+.app-sidebar-icon-wrap-collapsed {
+  width: 2.05rem;
+  height: 2.05rem;
+  border-radius: 0.6rem;
+}
+
+.app-sidebar-link-collapsed .app-sidebar-icon-wrap svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.app-sidebar-link:hover .app-sidebar-icon-wrap {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.app-sidebar-link-active .app-sidebar-icon-wrap {
+  background: var(--color-primary-50);
+  color: var(--color-primary-700);
+}
+
+.dark .app-sidebar-link-active .app-sidebar-icon-wrap {
+  background: rgba(147, 197, 253, 0.16);
+  color: #bfdbfe;
+}
+
+.app-sidebar-active-arrow {
+  color: var(--color-primary-700);
+}
+
+.app-sidebar-tooltip {
+  background: #fff;
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 10px 24px -20px rgba(15, 23, 42, 0.4);
+}
+
+.dark .app-sidebar-tooltip {
+  background: #0f172a;
+}
+
+.app-sidebar-user {
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.app-sidebar-user-collapsed {
+  padding: 0.45rem 0.5rem;
+}
+
+.app-sidebar-avatar {
+  background: #fff;
+  color: var(--color-primary-700);
+  border: 1px solid rgba(148, 163, 184, 0.5);
+}
+
+.app-sidebar-user-name {
+  color: #fff;
+}
+
+.app-sidebar-user-role {
+  color: var(--color-sidebar-muted);
+}
+
+.app-sidebar-logout {
+  color: var(--color-sidebar-text);
+}
+
+.app-sidebar-logout:hover {
+  color: #fff;
+  background: rgba(185, 28, 28, 0.2);
+}
+
+.app-sidebar-logout-collapsed { 
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+.app-sidebar-logout-icon {
+  background: rgba(239, 68, 68, 0.2);
+}

@@ -25,13 +25,13 @@ import {
   ChevronDown,
   Link as LinkIcon,
   Copy,
-  School,
   AlertTriangle,
-  Zap,
   AlertCircle,
   Save,
   Edit,
-  Layers
+  Layers,
+  Sparkles,
+  Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { type CourseFile } from '@/lib/services/fileService';
@@ -68,6 +68,16 @@ interface Week {
   order: number;
   createdAt: Date;
 }
+
+const modalInputClass =
+  'w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100';
+const modalLabelClass = 'mb-2 block text-sm font-semibold text-slate-700';
+const modalSecondaryButtonClass =
+  'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50';
+const modalPrimaryButtonClass =
+  'inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60';
+const modalDangerButtonClass =
+  'inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60';
 
 export default function FileManagerPage() {
   const { courseCode } = useParams<{ courseCode?: string }>();
@@ -519,12 +529,12 @@ const getWeeksByPeriod = (periodId: string) => {
   return weeks.filter((week) => String(week.periodId) === String(periodId));
 };
 
-const getFilesByWeek = (weekId: string) => {
-  return files.filter((file) => file.weekId === weekId);
+  const getFilesByWeek = (weekId: string) => {
+  return filteredFiles.filter((file) => file.weekId === weekId);
 };
 
 const getUnassignedFiles = () => {
-  return files.filter(file => !file.weekId);
+  return filteredFiles.filter(file => !file.weekId);
 };
 
   const togglePeriod = (periodId: string) => {
@@ -637,17 +647,58 @@ const getUnassignedFiles = () => {
     return formatDate(date);
   };
 
+  const closePeriodModal = () => {
+    setShowPeriodModal(false);
+    setPeriodForm({ number: 1, name: '' });
+  };
+
+  const closeWeekModal = () => {
+    setShowWeekModal(false);
+    setWeekForm({ number: 1, topic: '', periodId: '' });
+  };
+
+  const closeFileModal = () => {
+    setShowFileModal(false);
+    setFileForm({
+      name: '',
+      url: '',
+      type: 'application/pdf',
+      description: '',
+      size: 0,
+      periodId: '',
+      weekId: ''
+    });
+    setEditingFile(null);
+  };
+
+  const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+  const filteredFiles = useMemo(() => {
+    if (!normalizedSearchTerm) return files;
+    return files.filter((file) =>
+      [file.name, file.description, file.uploadedBy]
+        .filter((value): value is string => typeof value === 'string')
+        .some((value) => value.toLowerCase().includes(normalizedSearchTerm))
+    );
+  }, [files, normalizedSearchTerm]);
+
+  const unassignedTotal = useMemo(
+    () => files.filter((file) => !file.weekId).length,
+    [files]
+  );
+  const latestFile = files[0] ?? null;
   if (loading && selectedCourseId) {
     return (
-      <DashboardLayout title="Files" subtitle="Course materials and resources">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-4">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto" />
-            <div className="space-y-2">
-              <p className="text-lg font-semibold text-gray-900">Loading files</p>
-              <p className="text-sm text-gray-500">
-                Preparing your course materials
-              </p>
+      <DashboardLayout contentClassName="pt-0 lg:pt-1">
+        <div className="relative overflow-x-hidden">
+          <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+          <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="flex min-h-[320px] items-center justify-center">
+              <div className="space-y-2 text-center">
+                <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
+                <p className="text-lg font-semibold text-slate-900">Loading files</p>
+                <p className="text-sm text-slate-600">Preparing your course library.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -656,125 +707,230 @@ const getUnassignedFiles = () => {
   }
 
   return (
-    <DashboardLayout 
-      title="File Manager"
-      subtitle="Course materials organized by periods and weeks"
-       contentClassName="pt-0 lg:pt-1"
-    >
-      <div className="space-y-2">
-        <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div className="flex-1 flex flex-col sm:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search files, descriptions..."
-                    className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                  {searchTerm && (
+    <DashboardLayout contentClassName="pt-0 lg:pt-1">
+      <div className="relative overflow-x-hidden">
+        <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+        <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="space-y-4">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+              <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
+              <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
+              <div className="relative z-10">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Files Workspace
+                    </div>
+                    <h2 className="mt-3 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
+                      Resource management center
+                    </h2>
+                    <p className="mt-1.5 max-w-3xl text-sm text-slate-600">
+                      Organize files by period and week, and keep course resources ready for class.
+                    </p>
+                    {latestFile && (
+                      <p className="mt-2 text-xs font-medium text-slate-500">
+                        Last update: {latestFile.name} ({formatTimeAgo(latestFile.uploadedAt)})
+                      </p>
+                    )}
+                  </div>
+                  {isTeacher && selectedCourseId && (
                     <button
-                      onClick={() => setSearchTerm('')}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      type="button"
+                      onClick={() => {
+                        setFileForm((prev) => ({ ...prev, periodId: '', weekId: '' }));
+                        setEditingFile(null);
+                        setShowFileModal(true);
+                      }}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
                     >
-                      <X className="h-4 w-4" />
+                      <Plus className="h-4 w-4" />
+                      New file link
                     </button>
                   )}
                 </div>
-              </div>
-              <div className="relative min-w-[180px]">
-                <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
-                  <School className="h-5 w-5 text-gray-400" />
+
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                        <FileText className="h-4 w-4" />
+                      </div>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{files.length}</p>
+                    </div>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Files</p>
+                  </div>
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+                        <Layers className="h-4 w-4" />
+                      </div>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{periods.length}</p>
+                    </div>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Periods</p>
+                  </div>
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+                        <Calendar className="h-4 w-4" />
+                      </div>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{weeks.length}</p>
+                    </div>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Weeks</p>
+                  </div>
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+                        <Clock className="h-4 w-4" />
+                      </div>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{unassignedTotal}</p>
+                    </div>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Unassigned</p>
+                  </div>
                 </div>
-                <select
-                  value={selectedCourseId}
-                  onChange={(e) => handleCourseChange(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium appearance-none cursor-pointer"
-                >
-                  {userCourses.length === 0 ? (
-                    <option value="">No courses available</option>
-                  ) : (
-                    <>
-                      <option value="">Select a course...</option>
-                      {userCourses
-                        .sort((a, b) => a.name.localeCompare(b.name))
-                        .map(course => (
-                          <option key={course.id} value={course.id}>
-                            {course.code}
-                          </option>
-                        ))
-                      }
-                    </>
-                  )}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               </div>
-            </div>
-            {isTeacher && selectedCourseId && (
-              <div className="flex flex-col sm:flex-row gap-3">
-                <button
-                  onClick={() => setShowPeriodModal(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add Period
-                </button>
-                <button
-                  onClick={() => {
-                    setEditingFile(null);
-                    setFileForm({
-                      name: '',
-                      url: '',
-                      type: 'application/pdf',
-                      description: '',
-                      size: 0,
-                      periodId: '',
-                      weekId: ''
-                    });
-                    setShowFileModal(true);
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add File Link
-                </button>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-1 flex-col gap-4 sm:flex-row">
+                  <div className="flex-1">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search files, descriptions, authors..."
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium text-slate-700 transition-all focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                      />
+                      {searchTerm && (
+                        <button
+                          onClick={() => setSearchTerm('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-slate-600"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="relative min-w-[180px]">
+                    <select
+                      value={selectedCourseId}
+                      onChange={(e) => handleCourseChange(e.target.value)}
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    >
+                      {userCourses.length === 0 ? (
+                        <option value="">No courses available</option>
+                      ) : (
+                        <>
+                          <option value="">Select a course...</option>
+                          {userCourses
+                            .sort((a, b) => a.name.localeCompare(b.name))
+                            .map(course => (
+                              <option key={course.id} value={course.id}>
+                                {course.code}
+                              </option>
+                            ))}
+                        </>
+                      )}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  </div>
+                </div>
+                {isTeacher && selectedCourseId && (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowPeriodModal(true)}
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                    >
+                      <Layers className="h-4 w-4" />
+                      New period
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFileForm((prev) => ({ ...prev, periodId: '', weekId: '' }));
+                        setEditingFile(null);
+                        setShowFileModal(true);
+                      }}
+                      className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
+                    >
+                      <Plus className="h-4 w-4" />
+                      New file
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
+
+              {searchTerm && (
+                <div className="mt-4 border-t border-slate-200 pt-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-sky-600">
+                      Found {filteredFiles.length} file{filteredFiles.length !== 1 ? 's' : ''}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSearchTerm('')}
+                      className="text-sm font-medium text-slate-600 transition hover:text-slate-800"
+                    >
+                      Clear search
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {searchTerm && filteredFiles.length === 0 && files.length > 0 && (
+                <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-slate-700">No matching files</p>
+                  <p className="text-xs text-slate-500">Try another term or clear the search.</p>
+                </div>
+              )}
+            </section>
 
         {!selectedCourseId && userCourses.length === 0 && (
-          <div className="bg-white border border-gray-100 rounded-2xl p-8 text-center shadow-sm">
-            <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gray-100 flex items-center justify-center">
-              <FolderOpen className="h-10 w-10 text-gray-400" />
+          <div className="rounded-2xl border border-slate-100 bg-white p-8 text-center shadow-sm">
+            <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-slate-100">
+              <FolderOpen className="h-10 w-10 text-slate-400" />
             </div>
-            <h3 className="font-bold text-xl mb-3 text-gray-900">No courses available</h3>
-            <p className="text-gray-500 max-w-md mx-auto mb-6">
+            <h3 className="mb-3 text-xl font-bold text-slate-900">No courses available</h3>
+            <p className="mx-auto mb-6 max-w-md text-slate-500">
               {isTeacher 
                 ? 'You have no courses assigned as a teacher. Contact the administrator.' 
                 : 'You are not enrolled in any course. Contact your teacher.'}
             </p>
+            {isTeacher && (
+              <button
+                type="button"
+                onClick={() => navigate('/courses/create')}
+                className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-5 py-2.5 font-medium text-white transition-all duration-300 hover:shadow-lg"
+              >
+                <Plus className="h-4 w-4" />
+                Request Course Assignment
+              </button>
+            )}
           </div>
         )}
 
         {selectedCourseId && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1">
-              <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-5">
+              <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                <div className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                      <Layers className="h-4 w-4 text-blue-600" />
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100">
+                      <Layers className="h-3.5 w-3.5 text-sky-600" />
                     </div>
                     <div>
-                      <h3 className="text-sm text-gray-500 mt-1">{selectedCourse?.name}</h3>
+                      <h3 className="text-base font-bold text-slate-900">Course Library</h3>
+                      <p className="mt-0.5 text-xs text-slate-500">{selectedCourse?.name}</p>
                     </div>
                   </div>
                 </div>
-                <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+                <div className="max-h-[560px] space-y-2 overflow-y-auto pr-1">
                   {periods.length === 0 ? (
                     <div className="text-center py-6">
                       <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-gray-100 flex items-center justify-center">
@@ -793,20 +949,20 @@ const getUnassignedFiles = () => {
                     </div>
                   ) : (
                     periods.map(period => (
-                      <div key={period.id} className="border border-gray-200 rounded-xl overflow-hidden">
-                       <div className="flex items-center justify-between p-3 bg-blue-50">
+                      <div key={period.id} className="overflow-hidden rounded-xl border border-gray-200">
+                       <div className="flex items-center justify-between bg-blue-50 px-2.5 py-2">
   <button
     onClick={() => togglePeriod(period.id)}
     className="flex-1 flex items-center justify-between text-left group"
   >
-    <div className="flex items-center gap-3">
-      <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
-        <Layers className="h-4 w-4 text-blue-600" />
+    <div className="flex items-center gap-2.5">
+      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100">
+        <Layers className="h-3.5 w-3.5 text-blue-600" />
       </div>
       <div>
-        <span className="font-semibold text-sm text-gray-900">{period.name}</span>
-        <div className="flex items-center gap-2 mt-1">
-          <span className="text-xs px-1.5 py-0.5 bg-white/50 text-blue-700 rounded">
+        <span className="text-[13px] font-semibold text-gray-900">{period.name}</span>
+        <div className="mt-0.5 flex items-center gap-1.5">
+          <span className="rounded bg-white/50 px-1.5 py-0 text-[11px] text-blue-700">
             {getWeeksByPeriod(period.id).length} weeks
           </span>
         </div>
@@ -814,14 +970,14 @@ const getUnassignedFiles = () => {
     </div>
     <ChevronRight
       className={cn(
-        'h-4 w-4 text-gray-400 transition-transform duration-300',
+        'h-3.5 w-3.5 text-gray-400 transition-transform duration-300',
         expandedPeriods.includes(period.id) && 'rotate-90'
       )}
     />
   </button>
   
   {isTeacher && (
-    <div className="flex gap-1 ml-2">
+    <div className="ml-2 flex gap-0.5">
       <button
         onClick={() => {
           setWeekForm({ 
@@ -831,26 +987,26 @@ const getUnassignedFiles = () => {
           });
           setShowWeekModal(true);
         }}
-        className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+        className="rounded-md p-1 text-blue-600 transition-colors hover:bg-blue-50"
         title="Add week"
       >
-        <Plus className="h-4 w-4" />
+        <Plus className="h-3.5 w-3.5" />
       </button>
       <button
         onClick={() => setShowDeletePeriodConfirm(period.id)}
-        className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+        className="rounded-md p-1 text-red-600 transition-colors hover:bg-red-50"
         title="Delete period"
       >
-        <Trash2 className="h-4 w-4" />
+        <Trash2 className="h-3.5 w-3.5" />
       </button>
     </div>
   )}
 </div>
                         {expandedPeriods.includes(period.id) && (
-                          <div className="border-t border-gray-200 bg-gray-50/30 p-3 space-y-2">
+                          <div className="space-y-1.5 border-t border-gray-200 bg-gray-50/30 p-2">
                             {getWeeksByPeriod(period.id).length === 0 ? (
-                              <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-gray-100">
-                                <Calendar className="h-4 w-4 text-gray-400" />
+                              <div className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white px-2.5 py-1.5">
+                                <Calendar className="h-3.5 w-3.5 text-gray-400" />
                                 <p className="text-xs text-gray-500">No weeks available</p>
                                 {isTeacher && (
                                   <button
@@ -862,53 +1018,53 @@ const getUnassignedFiles = () => {
                                       });
                                       setShowWeekModal(true);
                                     }}
-                                    className="ml-auto p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                    className="ml-auto rounded p-1 text-blue-600 transition-colors hover:bg-blue-50"
                                     title="Add week"
                                   >
-                                    <Plus className="h-4 w-4" />
+                                    <Plus className="h-3.5 w-3.5" />
                                   </button>
                                 )}
                               </div>
                             ) : (
                               getWeeksByPeriod(period.id).map(week => (
-                                <div key={week.id} className="space-y-2">
-                                 <div className="flex items-center justify-between px-3 py-2 bg-white rounded-lg border border-gray-100">
+                                <div key={week.id} className="space-y-1.5">
+                                 <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-2.5 py-1.5">
   <div className="flex items-center gap-2">
     <button
       onClick={() => toggleWeek(week.id)}
-      className="flex items-center gap-2 text-sm text-gray-900 hover:text-blue-600 transition-colors"
+      className="flex items-center gap-1.5 text-xs text-gray-900 transition-colors hover:text-blue-600"
     >
       <ChevronRight
         className={cn(
-          'h-4 w-4 text-gray-400 transition-transform duration-300',
+          'h-3.5 w-3.5 text-gray-400 transition-transform duration-300',
           expandedWeeks.includes(week.id) && 'rotate-90'
         )}
       />
-      <Calendar className="h-4 w-4 text-gray-400" />
+      <Calendar className="h-3.5 w-3.5 text-gray-400" />
       <span className="font-medium">Week {week.number}</span>
-      <span className="text-gray-500 ml-1 truncate max-w-[100px]">
+      <span className="ml-1 max-w-[90px] truncate text-gray-500">
         {week.topic}
       </span>
     </button>
   </div>
   
   {isTeacher && (
-    <div className="flex gap-1">
+    <div className="flex gap-0.5">
       <button
         onClick={() => setShowDeleteWeekConfirm(week.id)}
-        className="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+        className="rounded p-1 text-red-600 transition-colors hover:bg-red-50"
         title="Delete week"
       >
-        <Trash2 className="h-4 w-4" />
+        <Trash2 className="h-3.5 w-3.5" />
       </button>
     </div>
   )}
 </div>
                                   {expandedWeeks.includes(week.id) && (
-                                    <div className="pl-6 border-l border-gray-200 space-y-1.5">
+                                    <div className="space-y-1 border-l border-gray-200 pl-5">
                                       {getFilesByWeek(week.id).length === 0 ? (
-                                        <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg">
-                                          <FileText className="h-4 w-4 text-gray-400" />
+                                        <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-2.5 py-1">
+                                          <FileText className="h-3.5 w-3.5 text-gray-400" />
                                           <p className="text-xs text-gray-500">No files</p>
                                           {isTeacher && (
                                             <button
@@ -920,26 +1076,26 @@ const getUnassignedFiles = () => {
                                                 }));
                                                 setShowFileModal(true);
                                               }}
-                                              className="ml-auto p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                              className="ml-auto rounded p-1 text-blue-600 transition-colors hover:bg-blue-50"
                                               title="Add file"
                                             >
-                                              <Plus className="h-4 w-4" />
+                                              <Plus className="h-3.5 w-3.5" />
                                             </button>
                                           )}
                                         </div>
                                       ) : (
                                         getFilesByWeek(week.id).map(file => (
-                                          <div key={file.id} className="flex items-center gap-2 bg-white rounded-lg border border-gray-100 hover:border-blue-200 transition-all">
+                                          <div key={file.id} className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white transition-all hover:border-blue-200">
                                             <button
                                               onClick={() => setSelectedFile(file)}
                                               className={cn(
-                                                'flex-1 flex items-center gap-2 px-3 py-2 rounded-l-lg text-left transition-all',
+                                                'flex-1 flex items-center gap-2 rounded-l-lg px-2.5 py-1.5 text-left transition-all',
                                                 selectedFile?.id === file.id
                                                   ? 'bg-blue-50 border-r-2 border-blue-500'
                                                   : 'hover:bg-blue-50/50'
                                               )}
                                             >
-                                              <div className={`h-8 w-8 rounded ${getFileColor(file.type)} flex items-center justify-center text-white`}>
+                                              <div className={`flex h-7 w-7 items-center justify-center rounded ${getFileColor(file.type)} text-white`}>
                                                 {getFileIcon(file.type)}
                                               </div>
                                               <span className="text-xs font-medium text-gray-900 truncate">{file.name}</span>
@@ -958,11 +1114,11 @@ const getUnassignedFiles = () => {
                     ))
                   )}
                   {files.length > 0 && getUnassignedFiles().length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-gray-200">
-                      <h4 className="text-sm font-semibold text-gray-700 mb-3">Unassigned Files</h4>
-                      <div className="space-y-2">
+                    <div className="mt-3 border-t border-gray-200 pt-3">
+                      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-700">Unassigned Files</h4>
+                      <div className="space-y-1.5">
                         {getUnassignedFiles().map(file => (
-                          <div key={file.id} className="flex items-center gap-2 bg-gray-100 rounded-lg border border-gray-200 p-2">
+                          <div key={file.id} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-100 p-1.5">
                             <button
                               onClick={() => setSelectedFile(file)}
                               className={cn(
@@ -970,7 +1126,7 @@ const getUnassignedFiles = () => {
                                 selectedFile?.id === file.id && 'text-blue-600'
                               )}
                             >
-                              <div className={`h-8 w-8 rounded ${getFileColor(file.type)} flex items-center justify-center text-white`}>
+                              <div className={`flex h-7 w-7 items-center justify-center rounded ${getFileColor(file.type)} text-white`}>
                                 {getFileIcon(file.type)}
                               </div>
                               <span className="text-xs font-medium text-gray-900 truncate">{file.name}</span>
@@ -978,10 +1134,10 @@ const getUnassignedFiles = () => {
                             {isTeacher && (
                               <button
                                 onClick={() => handleEditFile(file.id)}
-                                className="p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                className="rounded p-1 text-blue-600 transition-colors hover:bg-blue-50"
                                 title="Assign to week"
                               >
-                                <Edit className="h-4 w-4" />
+                                <Edit className="h-3.5 w-3.5" />
                               </button>
                             )}
                           </div>
@@ -1165,21 +1321,18 @@ const getUnassignedFiles = () => {
                           <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
                             <LinkIcon className="h-4 w-4 text-gray-700" />
                           </div>
-                        <div className="flex items-center gap-3">
-
-  <div>
-    <p className="text-xs font-medium text-gray-500">Direct Link</p>
-    <a
-      href={selectedFile.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline truncate block"
-      title={`Open: ${selectedFile.url}`}
-    >
-      {selectedFile.name}
-    </a>
-  </div>
-</div>
+                          <div>
+                            <p className="text-xs font-medium text-gray-500">Direct Link</p>
+                            <a
+                              href={selectedFile.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline truncate block"
+                              title={`Open: ${selectedFile.url}`}
+                            >
+                              {selectedFile.name}
+                            </a>
+                          </div>
                         </div>
                       </div>
                       
@@ -1193,20 +1346,21 @@ const getUnassignedFiles = () => {
                     <FileText className="h-8 w-8 text-gray-400" />
                   </div>
                   <h3 className="font-bold text-2xl mb-3 text-gray-900">
-                    {files.length > 0 ? 'Select a File' : 'No Files Yet'}
+                    {filteredFiles.length > 0 ? 'Select a File' : 'No Files Yet'}
                   </h3>
                   <p className="text-gray-500 max-w-md mx-auto mb-8">
-                    {files.length > 0
+                    {filteredFiles.length > 0
                       ? 'Choose a file'
-                      : 'No files have been added yet for this course.'
-                    }
+                      : searchTerm
+                        ? 'No files match your search.'
+                        : 'No files have been added yet for this course.'}
                   </p>
                   
-                  {files.length > 0 && (
+                  {filteredFiles.length > 0 && (
                     <div className="max-w-2xl mx-auto">
                         
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {files.slice(0, 4).map(file => (
+                        {filteredFiles.slice(0, 4).map(file => (
                           <button
                             key={file.id}
                             onClick={() => setSelectedFile(file)}
@@ -1238,494 +1392,459 @@ const getUnassignedFiles = () => {
             </div>
           </div>
         )}
-        {showPeriodModal && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200">
-              <div className="p-6 border-b bg-white">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                      <Layers className="h-4 w-4 text-blue-600" />
+            {showPeriodModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+                <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
+                        <Layers className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">Create Period</h3>
+                        <p className="text-sm text-slate-600">Add a new period to organize content.</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-bold text-lg text-gray-900">Create Period</h3>
-                      <p className="text-sm text-gray-500">Add a new period to organize content</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setShowPeriodModal(false)}
-                    className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-6">
-                <div className="space-y-5">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Period Number *</label>
-                    <select
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      value={periodForm.number}
-                      onChange={(e) => setPeriodForm({ ...periodForm, number: parseInt(e.target.value) })}
-                    >
-                      {[1, 2, 3, 4].map(num => (
-                        <option key={num} value={num}>{num} Term</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Period Name *</label>
-                    <input
-                      type="text"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                      value={periodForm.name}
-                      onChange={(e) => setPeriodForm({ ...periodForm, name: e.target.value })}
-                      placeholder="e.g., First Period, Quarter 1"
-                    />
-                  </div>
-
-                  <div className="flex gap-3 pt-4">
                     <button
-                      onClick={() => setShowPeriodModal(false)}
-                      className="flex-1 px-4 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-all duration-300"
+                      type="button"
+                      onClick={closePeriodModal}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                     >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleCreatePeriod}
-                      disabled={!periodForm.name.trim()}
-                      className="flex-1 px-4 py-3 rounded-xl bg-blue-600 text-white hover:shadow-lg disabled:opacity-50 font-medium transition-all duration-300 flex items-center justify-center gap-2"
-                    >
-                      <Save className="h-4 w-4" />
-                      Create Period
+                      <X className="h-4 w-4" />
                     </button>
                   </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-{showDeletePeriodConfirm && (
-  <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200">
-      <div className="p-6 border-b bg-white">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-xl bg-gray-100 flex items-center justify-center">
-              <AlertTriangle className="h-4 w-4 text-gray-700" />
-            </div>
-            <div>
-              <h3 className="font-bold text-lg text-gray-900">Delete Period</h3>
-              <p className="text-sm text-gray-500">This action cannot be undone</p>
-            </div>
-          </div>
-          <button
-            onClick={() => setShowDeletePeriodConfirm(null)}
-            className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
 
-      <div className="p-6">
-        <div className="space-y-4">
-          <div className="bg-gray-100 border border-gray-200 rounded-xl p-4">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-4 w-4 text-gray-700 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-gray-700">
-                <p className="font-medium mb-1">Deleting this period will:</p>
-                <ul className="list-disc list-inside space-y-1">
-                  <li>Remove all {weeks.filter(w => w.periodId === showDeletePeriodConfirm).length} weeks in this period</li>
-                  <li>Unassign {files.filter(f => f.periodId === showDeletePeriodConfirm).length} files from this period</li>
-                  <li>Files will remain in the course but without period assignment</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-          
-          <div className="flex gap-3">
-            <button
-              onClick={() => setShowDeletePeriodConfirm(null)}
-              className="flex-1 px-4 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-all duration-300"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => handleDeletePeriod(showDeletePeriodConfirm)}
-              className="flex-1 px-4 py-3 rounded-xl bg-gray-900 text-white hover:shadow-lg font-medium transition-all duration-300"
-            >
-              Delete Period
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
-{showDeleteWeekConfirm && (
-  <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200">
-      <div className="p-6 border-b bg-white">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-xl bg-gray-100 flex items-center justify-center">
-              <AlertTriangle className="h-4 w-4 text-gray-700" />
-            </div>
-            <div>
-              <h3 className="font-bold text-lg text-gray-900">Delete Week</h3>
-              <p className="text-sm text-gray-500">This action cannot be undone</p>
-            </div>
-          </div>
-          <button
-            onClick={() => setShowDeleteWeekConfirm(null)}
-            className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="p-6">
-        <div className="space-y-4">
-          <div className="bg-gray-100 border border-gray-200 rounded-xl p-4">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-4 w-4 text-gray-700 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-gray-700">
-                <p className="font-medium mb-1">Deleting this week will:</p>
-                <ul className="list-disc list-inside space-y-1">
-                  <li>Unassign {files.filter(f => f.weekId === showDeleteWeekConfirm).length} files from this week</li>
-                  <li>Files will remain in the course but without week assignment</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-          
-          <div className="flex gap-3">
-            <button
-              onClick={() => setShowDeleteWeekConfirm(null)}
-              className="flex-1 px-4 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-all duration-300"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => handleDeleteWeek(showDeleteWeekConfirm)}
-              className="flex-1 px-4 py-3 rounded-xl bg-gray-900 text-white hover:shadow-lg font-medium transition-all duration-300"
-            >
-              Delete Week
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
-        {showWeekModal && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200">
-              <div className="p-6 border-b bg-white">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                      <Calendar className="h-4 w-4 text-blue-600" />
-                    </div>
+                  <div className="space-y-4 p-6">
                     <div>
-                      <h3 className="font-bold text-lg text-gray-900">Add Week</h3>
-                      <p className="text-sm text-gray-500">Add a week to organize files</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setShowWeekModal(false)}
-                    className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-6">
-                <div className="space-y-5">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Week Number *</label>
-                    <input
-                      type="number"
-                      min="1"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                      value={weekForm.number}
-                      onChange={(e) => setWeekForm({ ...weekForm, number: parseInt(e.target.value) })}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Week Topic *</label>
-                    <input
-                      type="text"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                      value={weekForm.topic}
-                      onChange={(e) => setWeekForm({ ...weekForm, topic: e.target.value })}
-                      placeholder="e.g., Introduction to Grammar"
-                    />
-                  </div>
-
-                  <div className="flex gap-3 pt-4">
-                    <button
-                      onClick={() => setShowWeekModal(false)}
-                      className="flex-1 px-4 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-all duration-300"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleCreateWeek}
-                      disabled={!weekForm.topic.trim() || !weekForm.periodId}
-                      className="flex-1 px-4 py-3 rounded-xl bg-blue-600 text-white hover:shadow-lg disabled:opacity-50 font-medium transition-all duration-300 flex items-center justify-center gap-2"
-                    >
-                      <Save className="h-4 w-4" />
-                      Add Week
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        {showFileModal && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-2">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200">
-              <div className="p-6 border-b bg-white">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                      <LinkIcon className="h-4 w-4 text-blue-600" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-lg text-gray-900">
-                        {editingFile ? 'Edit File Link' : 'Add File Link'}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        {editingFile ? 'Update the file information' : 'Share external resources with students'}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowFileModal(false);
-                      setFileForm({
-                        name: '',
-                        url: '',
-                        type: 'application/pdf',
-                        description: '',
-                        size: 0,
-                        periodId: '',
-                        weekId: ''
-                      });
-                      setEditingFile(null);
-                    }}
-                    className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-2">
-                <div className="space-y-2">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">File Name *</label>
-                    <input
-                      type="text"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                      value={fileForm.name}
-                      onChange={(e) => setFileForm({ ...fileForm, name: e.target.value })}
-                      placeholder="e.g., English Grammar Guide"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">File URL *</label>
-                    <input
-                      type="url"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                      value={fileForm.url}
-                      onChange={(e) => setFileForm({ ...fileForm, url: e.target.value })}
-                      placeholder="https://example.com/file.pdf"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">File Type</label>
+                      <label className={modalLabelClass}>Period Number *</label>
                       <select
-                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        value={fileForm.type}
-                        onChange={(e) => setFileForm({ ...fileForm, type: e.target.value })}
+                        className={modalInputClass}
+                        value={periodForm.number}
+                        onChange={(e) => setPeriodForm({ ...periodForm, number: Number(e.target.value) })}
                       >
-                        <option value="application/pdf">PDF Document</option>
-                        <option value="image/jpeg">Image (JPEG)</option>
-                        <option value="image/png">Image (PNG)</option>
-                        <option value="video/mp4">Video (MP4)</option>
-                        <option value="audio/mp3">Audio (MP3)</option>
-                        <option value="application/msword">Word Document</option>
-                        <option value="application/vnd.ms-excel">Excel Spreadsheet</option>
-                        <option value="text/plain">Text File</option>
-                        <option value="application/zip">ZIP Archive</option>
-                        <option value="other">Other</option>
+                        {[1, 2, 3, 4].map((num) => (
+                          <option key={num} value={num}>{num} Term</option>
+                        ))}
                       </select>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">File Size (Optional)</label>
+                      <label className={modalLabelClass}>Period Name *</label>
                       <input
-                        type="number"
-                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        value={fileForm.size}
-                        onChange={(e) => setFileForm({ ...fileForm, size: parseInt(e.target.value) || 0 })}
-                        placeholder="Size in bytes"
+                        type="text"
+                        className={modalInputClass}
+                        value={periodForm.name}
+                        onChange={(e) => setPeriodForm({ ...periodForm, name: e.target.value })}
+                        placeholder="e.g., First Period, Quarter 1"
                       />
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Period (Optional)</label>
-                      <select
-                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        value={fileForm.periodId}
-                        onChange={(e) => {
-                          setFileForm({ ...fileForm, periodId: e.target.value, weekId: '' });
-                        }}
-                      >
-                        <option value="">No period</option>
-                        {periods.map(period => (
-                          <option key={period.id} value={period.id}>
-                            {period.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
 
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Week (Optional)</label>
-                      <select
-                        className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        value={fileForm.weekId}
-                        onChange={(e) => setFileForm({ ...fileForm, weekId: e.target.value })}
-                        disabled={!fileForm.periodId}
+                    <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                      <button type="button" onClick={closePeriodModal} className={modalSecondaryButtonClass}>
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCreatePeriod}
+                        disabled={!periodForm.name.trim()}
+                        className={modalPrimaryButtonClass}
                       >
-                        <option value="">No week</option>
-                        {fileForm.periodId && getWeeksByPeriod(fileForm.periodId).map(week => (
-                          <option key={week.id} value={week.id}>
-                            Week {week.number}: {week.topic}
-                          </option>
-                        ))}
-                      </select>
+                        <Save className="h-4 w-4" />
+                        <span>Create Period</span>
+                      </button>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
-                    <textarea
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      value={fileForm.description}
-                      onChange={(e) => setFileForm({ ...fileForm, description: e.target.value })}
-                      rows={3}
-                      placeholder="Describe what this file contains..."
-                    />
-                  </div>
-
-                  <div className="flex gap-3 pt-2">
+            {showDeletePeriodConfirm && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+                <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
+                        <AlertTriangle className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">Delete Period</h3>
+                        <p className="text-sm text-slate-600">This action cannot be undone.</p>
+                      </div>
+                    </div>
                     <button
-                      onClick={() => {
-                        setShowFileModal(false);
-                        setFileForm({
-                          name: '',
-                          url: '',
-                          type: 'application/pdf',
-                          description: '',
-                          size: 0,
-                          periodId: '',
-                          weekId: ''
-                        });
-                        setEditingFile(null);
-                      }}
-                      className="flex-1 px-4 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-all duration-300"
+                      type="button"
+                      onClick={() => setShowDeletePeriodConfirm(null)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                     >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={editingFile ? handleSaveEdit : handleCreateFile}
-                      disabled={!fileForm.name.trim() || !fileForm.url.trim()}
-                      className="flex-1 px-4 py-2 rounded-xl bg-blue-600 text-white hover:shadow-lg disabled:opacity-50 font-medium transition-all duration-300 flex items-center justify-center gap-2"
-                    >
-                      {editingFile ? (
-                        <>
-                          <Save className="h-4 w-4" />
-                          Save Changes
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="h-4 w-4" />
-                          Add File Link
-                        </>
-                      )}
+                      <X className="h-4 w-4" />
                     </button>
                   </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        {showDeleteConfirm && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200">
-              <div className="p-6 border-b bg-white">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-xl bg-gray-100 flex items-center justify-center">
-                      <AlertTriangle className="h-4 w-4 text-gray-700" />
+
+                  <div className="space-y-4 p-6">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-slate-700">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />
+                        <div>
+                          <p className="font-semibold">Deleting this period will:</p>
+                          <ul className="mt-1 list-disc space-y-1 pl-5">
+                            <li>Remove all {weeks.filter((w) => w.periodId === showDeletePeriodConfirm).length} weeks in this period</li>
+                            <li>Unassign {files.filter((f) => f.periodId === showDeletePeriodConfirm).length} files from this period</li>
+                            <li>Keep files in the course without period assignment</li>
+                          </ul>
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-bold text-lg text-gray-900">Delete File</h3>
-                      <p className="text-sm text-gray-500">This action cannot be undone</p>
+
+                    <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setShowDeletePeriodConfirm(null)}
+                        className={modalSecondaryButtonClass}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => showDeletePeriodConfirm && handleDeletePeriod(showDeletePeriodConfirm)}
+                        className={modalDangerButtonClass}
+                      >
+                        Delete Period
+                      </button>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setShowDeleteConfirm(null)}
-                    className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
                 </div>
               </div>
+            )}
 
-              <div className="p-6">
-                <p className="text-gray-700 mb-6">
-                  Are you sure you want to delete this file link? This will remove it from the course.
-                  <br />
-                  <span className="text-sm text-gray-500 mt-2 block">
-                    Note: The actual file will remain at its external location.
-                  </span>
-                </p>
-                
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setShowDeleteConfirm(null)}
-                    className="flex-1 px-4 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-all duration-300"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => handleDeleteFile(showDeleteConfirm)}
-                    className="flex-1 px-4 py-3 rounded-xl bg-gray-900 text-white hover:shadow-lg font-medium transition-all duration-300"
-                  >
-                    Delete File Link
-                  </button>
+            {showDeleteWeekConfirm && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+                <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
+                        <AlertTriangle className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">Delete Week</h3>
+                        <p className="text-sm text-slate-600">This action cannot be undone.</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteWeekConfirm(null)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 p-6">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-slate-700">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />
+                        <div>
+                          <p className="font-semibold">Deleting this week will:</p>
+                          <ul className="mt-1 list-disc space-y-1 pl-5">
+                            <li>Unassign {files.filter((f) => f.weekId === showDeleteWeekConfirm).length} files from this week</li>
+                            <li>Keep files in the course without week assignment</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteWeekConfirm(null)}
+                        className={modalSecondaryButtonClass}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => showDeleteWeekConfirm && handleDeleteWeek(showDeleteWeekConfirm)}
+                        className={modalDangerButtonClass}
+                      >
+                        Delete Week
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+            )}
+
+            {showWeekModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+                <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
+                        <Calendar className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">Add Week</h3>
+                        <p className="text-sm text-slate-600">Add a week to organize files.</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeWeekModal}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 p-6">
+                    <div>
+                      <label className={modalLabelClass}>Week Number *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        className={modalInputClass}
+                        value={weekForm.number}
+                        onChange={(e) => setWeekForm({ ...weekForm, number: Number(e.target.value) })}
+                      />
+                    </div>
+
+                    <div>
+                      <label className={modalLabelClass}>Week Topic *</label>
+                      <input
+                        type="text"
+                        className={modalInputClass}
+                        value={weekForm.topic}
+                        onChange={(e) => setWeekForm({ ...weekForm, topic: e.target.value })}
+                        placeholder="e.g., Introduction to Grammar"
+                      />
+                    </div>
+
+                    <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                      <button type="button" onClick={closeWeekModal} className={modalSecondaryButtonClass}>
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCreateWeek}
+                        disabled={!weekForm.topic.trim() || !weekForm.periodId}
+                        className={modalPrimaryButtonClass}
+                      >
+                        <Save className="h-4 w-4" />
+                        <span>Add Week</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showFileModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+                <div className="w-full max-w-3xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                        <LinkIcon className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">
+                          {editingFile ? 'Edit File Link' : 'Add File Link'}
+                        </h3>
+                        <p className="text-sm text-slate-600">
+                          {editingFile ? 'Update file information.' : 'Share external resources with students.'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeFileModal}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 p-6">
+                    <div>
+                      <label className={modalLabelClass}>File Name *</label>
+                      <input
+                        type="text"
+                        className={modalInputClass}
+                        value={fileForm.name}
+                        onChange={(e) => setFileForm({ ...fileForm, name: e.target.value })}
+                        placeholder="e.g., English Grammar Guide"
+                      />
+                    </div>
+
+                    <div>
+                      <label className={modalLabelClass}>File URL *</label>
+                      <input
+                        type="url"
+                        className={modalInputClass}
+                        value={fileForm.url}
+                        onChange={(e) => setFileForm({ ...fileForm, url: e.target.value })}
+                        placeholder="https://example.com/file.pdf"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className={modalLabelClass}>File Type</label>
+                        <select
+                          className={modalInputClass}
+                          value={fileForm.type}
+                          onChange={(e) => setFileForm({ ...fileForm, type: e.target.value })}
+                        >
+                          <option value="application/pdf">PDF Document</option>
+                          <option value="image/jpeg">Image (JPEG)</option>
+                          <option value="image/png">Image (PNG)</option>
+                          <option value="video/mp4">Video (MP4)</option>
+                          <option value="audio/mp3">Audio (MP3)</option>
+                          <option value="application/msword">Word Document</option>
+                          <option value="application/vnd.ms-excel">Excel Spreadsheet</option>
+                          <option value="text/plain">Text File</option>
+                          <option value="application/zip">ZIP Archive</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className={modalLabelClass}>File Size (Optional)</label>
+                        <input
+                          type="number"
+                          className={modalInputClass}
+                          value={fileForm.size}
+                          onChange={(e) => setFileForm({ ...fileForm, size: Number(e.target.value) || 0 })}
+                          placeholder="Size in bytes"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className={modalLabelClass}>Period (Optional)</label>
+                        <select
+                          className={modalInputClass}
+                          value={fileForm.periodId}
+                          onChange={(e) => setFileForm({ ...fileForm, periodId: e.target.value, weekId: '' })}
+                        >
+                          <option value="">No period</option>
+                          {periods.map((period) => (
+                            <option key={period.id} value={period.id}>
+                              {period.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className={modalLabelClass}>Week (Optional)</label>
+                        <select
+                          className={modalInputClass}
+                          value={fileForm.weekId}
+                          onChange={(e) => setFileForm({ ...fileForm, weekId: e.target.value })}
+                          disabled={!fileForm.periodId}
+                        >
+                          <option value="">No week</option>
+                          {fileForm.periodId && getWeeksByPeriod(fileForm.periodId).map((week) => (
+                            <option key={week.id} value={week.id}>
+                              Week {week.number}: {week.topic}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className={modalLabelClass}>Description (Optional)</label>
+                      <textarea
+                        className={cn(modalInputClass, 'min-h-[96px] resize-y')}
+                        value={fileForm.description}
+                        onChange={(e) => setFileForm({ ...fileForm, description: e.target.value })}
+                        rows={3}
+                        placeholder="Describe what this file contains..."
+                      />
+                    </div>
+
+                    <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                      <button type="button" onClick={closeFileModal} className={modalSecondaryButtonClass}>
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={editingFile ? handleSaveEdit : handleCreateFile}
+                        disabled={!fileForm.name.trim() || !fileForm.url.trim()}
+                        className={modalPrimaryButtonClass}
+                      >
+                        {editingFile ? (
+                          <>
+                            <Save className="h-4 w-4" />
+                            <span>Save Changes</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="h-4 w-4" />
+                            <span>Add File Link</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showDeleteConfirm && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+                <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
+                        <AlertTriangle className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">Delete File</h3>
+                        <p className="text-sm text-slate-600">This action cannot be undone.</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteConfirm(null)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 p-6">
+                    <p className="text-sm text-slate-700">
+                      Are you sure you want to delete this file link? This will remove it from the course.
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Note: the original file remains at its external location.
+                    </p>
+
+                    <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteConfirm(null)}
+                        className={modalSecondaryButtonClass}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => showDeleteConfirm && handleDeleteFile(showDeleteConfirm)}
+                        className={modalDangerButtonClass}
+                      >
+                        Delete File Link
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+      </div>
+        </div>
       </div>
     </DashboardLayout>
   );

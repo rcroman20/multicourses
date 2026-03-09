@@ -19,6 +19,7 @@ import type {
   Slide, 
   Unit,
   Announcement,
+  CourseClassSchedule,
   Week  
 } from '@/types/academic';
 
@@ -68,6 +69,119 @@ interface AcademicContextType {
 
 const AcademicContext = createContext<AcademicContextType | undefined>(undefined);
 
+type LoadingState = {
+  courses: boolean;
+  assessments: boolean;
+  grades: boolean;
+  units: boolean;
+};
+
+const toTimestamp = (value: unknown): number => {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return value;
+  return 0;
+};
+
+const normalizeEnrollmentEntry = (entry: unknown): string => {
+  if (typeof entry === 'string') return entry;
+  if (entry && typeof entry === 'object' && 'id' in entry) {
+    const maybeId = (entry as { id?: unknown }).id;
+    return typeof maybeId === 'string' ? maybeId : '';
+  }
+  return '';
+};
+
+const normalizeClassSchedule = (value: unknown): CourseClassSchedule[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+
+      const row = entry as {
+        dayOfWeek?: unknown;
+        startTime?: unknown;
+        endTime?: unknown;
+        location?: unknown;
+      };
+      const dayOfWeek = Number(row.dayOfWeek);
+      const startTime = typeof row.startTime === 'string' ? row.startTime.trim() : '';
+      const endTime = typeof row.endTime === 'string' ? row.endTime.trim() : '';
+      const location = typeof row.location === 'string' ? row.location.trim() : '';
+
+      if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) return null;
+      if (!startTime || !endTime) return null;
+
+      return {
+        dayOfWeek,
+        startTime,
+        endTime,
+        ...(location ? { location } : {}),
+      } satisfies CourseClassSchedule;
+    })
+    .filter((item): item is CourseClassSchedule => Boolean(item))
+    .sort((a, b) => {
+      if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
+      if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+      if (a.endTime !== b.endTime) return a.endTime.localeCompare(b.endTime);
+      return (a.location || '').localeCompare(b.location || '');
+    });
+};
+
+const areCoursesEqual = (prev: Course[], next: Course[]): boolean => {
+  if (prev === next) return true;
+  if (prev.length !== next.length) return false;
+
+  for (let index = 0; index < prev.length; index += 1) {
+    const prevCourse = prev[index];
+    const nextCourse = next[index];
+
+    if (
+      prevCourse.id !== nextCourse.id ||
+      prevCourse.name !== nextCourse.name ||
+      prevCourse.code !== nextCourse.code ||
+      prevCourse.semester !== nextCourse.semester ||
+      prevCourse.group !== nextCourse.group ||
+      prevCourse.credits !== nextCourse.credits ||
+      prevCourse.teacherId !== nextCourse.teacherId ||
+      prevCourse.teacherName !== nextCourse.teacherName ||
+      prevCourse.description !== nextCourse.description ||
+      (prevCourse.coverUrl || '') !== (nextCourse.coverUrl || '') ||
+      toTimestamp(prevCourse.createdAt) !== toTimestamp(nextCourse.createdAt)
+    ) {
+      return false;
+    }
+
+    const prevSchedule = normalizeClassSchedule(prevCourse.classSchedule);
+    const nextSchedule = normalizeClassSchedule(nextCourse.classSchedule);
+    if (prevSchedule.length !== nextSchedule.length) return false;
+    for (let scheduleIndex = 0; scheduleIndex < prevSchedule.length; scheduleIndex += 1) {
+      if (
+        prevSchedule[scheduleIndex].dayOfWeek !== nextSchedule[scheduleIndex].dayOfWeek ||
+        prevSchedule[scheduleIndex].startTime !== nextSchedule[scheduleIndex].startTime ||
+        prevSchedule[scheduleIndex].endTime !== nextSchedule[scheduleIndex].endTime ||
+        (prevSchedule[scheduleIndex].location || '') !== (nextSchedule[scheduleIndex].location || '')
+      ) {
+        return false;
+      }
+    }
+
+    const prevStudents = (prevCourse.enrolledStudents || [])
+      .map(normalizeEnrollmentEntry)
+      .filter(Boolean);
+    const nextStudents = (nextCourse.enrolledStudents || [])
+      .map(normalizeEnrollmentEntry)
+      .filter(Boolean);
+
+    if (prevStudents.length !== nextStudents.length) return false;
+    for (let studentIndex = 0; studentIndex < prevStudents.length; studentIndex += 1) {
+      if (prevStudents[studentIndex] !== nextStudents[studentIndex]) return false;
+    }
+  }
+
+  return true;
+};
+
 export function AcademicProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? '';
@@ -79,14 +193,14 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
   const [units, setUnits] = useState<Unit[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   
-  const [loading, setLoading] = useState({
+  const [loading, setLoading] = useState<LoadingState>({
     courses: true,
     assessments: true,
     grades: true,
     units: false,
   });
 
-  const selectedCourseStorageKey = user?.id ? `global:selectedCourse:${user.id}` : null;
+  const selectedCourseStorageKey = userId ? `global:selectedCourse:${userId}` : null;
 
   const selectedCourse = useMemo(
     () => courses.find((course) => course.id === selectedCourseId) || null,
@@ -94,25 +208,34 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
   );
 
   const setSelectedCourseId = useCallback((courseId: string) => {
-    setSelectedCourseIdState(courseId || '');
+    const next = courseId || '';
+    setSelectedCourseIdState((prev) => (prev === next ? prev : next));
+  }, []);
+
+  const setLoadingFlag = useCallback((key: keyof LoadingState, value: boolean) => {
+    setLoading((prev) => (prev[key] === value ? prev : { ...prev, [key]: value }));
+  }, []);
+
+  const setCoursesSafely = useCallback((nextCourses: Course[]) => {
+    setCourses((prevCourses) => (areCoursesEqual(prevCourses, nextCourses) ? prevCourses : nextCourses));
   }, []);
 
   // NUEVA FUNCIÓN: refreshCourses - Recargar cursos manualmente
-  const refreshCourses = async (): Promise<void> => {
-    if (!user?.id) {
+  const refreshCourses = useCallback(async (): Promise<void> => {
+    if (!userId) {
       return;
     }
 
-    setLoading(prev => ({ ...prev, courses: true }));
+    setLoadingFlag('courses', true);
 
     try {
-      let coursesData: Course[] = [];
+      const coursesData: Course[] = [];
       const coursesRef = collection(firebaseDB, 'cursos');
 
-      if (user.role === 'docente') {
+      if (userRole === 'docente') {
         const q = query(
           coursesRef, 
-          where('teacherId', '==', user.id),
+          where('teacherId', '==', userId),
           orderBy('createdAt', 'desc')
         );
         const querySnapshot = await getDocs(q);
@@ -129,15 +252,17 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             teacherId: data.teacherId || '',
             teacherName: data.teacherName || '',
             description: data.description || '',
+            coverUrl: data.coverUrl || '',
+            classSchedule: normalizeClassSchedule(data.classSchedule),
             enrolledStudents: data.enrolledStudents || [],
             createdAt: data.createdAt?.toDate() || new Date(),
           });
         });
-      } else {
+      } else if (userRole === 'estudiante') {
         // Para estudiantes
         const q = query(
           coursesRef, 
-          where('enrolledStudents', 'array-contains', user.id)
+          where('enrolledStudents', 'array-contains', userId)
         );
         const querySnapshot = await getDocs(q);
         
@@ -153,6 +278,8 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             teacherId: data.teacherId || '',
             teacherName: data.teacherName || '',
             description: data.description || '',
+            coverUrl: data.coverUrl || '',
+            classSchedule: normalizeClassSchedule(data.classSchedule),
             enrolledStudents: data.enrolledStudents || [],
             createdAt: data.createdAt?.toDate() || new Date(),
           });
@@ -160,25 +287,51 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
         
         // Ordenar manualmente
         coursesData.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      } else if (userRole === 'admin') {
+        const q = query(coursesRef, orderBy('createdAt', 'desc'));
+        const querySnapshot = await getDocs(q);
+
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          coursesData.push({
+            id: doc.id,
+            name: data.name || '',
+            code: data.code || '',
+            semester: data.semester || '',
+            group: data.group || '',
+            credits: data.credits || 0,
+            teacherId: data.teacherId || '',
+            teacherName: data.teacherName || '',
+            description: data.description || '',
+            coverUrl: data.coverUrl || '',
+            classSchedule: normalizeClassSchedule(data.classSchedule),
+            enrolledStudents: data.enrolledStudents || [],
+            createdAt: data.createdAt?.toDate() || new Date(),
+          });
+        });
+      } else {
+        setCoursesSafely([]);
+        setLoadingFlag('courses', false);
+        return;
       }
 
-      setCourses(coursesData);
+      setCoursesSafely(coursesData);
     } catch (error) {
     } finally {
-      setLoading(prev => ({ ...prev, courses: false }));
+      setLoadingFlag('courses', false);
     }
-  };
+  }, [setCoursesSafely, setLoadingFlag, userId, userRole]);
 
   // Cargar evaluaciones para todos los cursos del usuario
   useEffect(() => {
     if (!userId || courses.length === 0) {
       setAssessments([]);
-      setLoading(prev => ({ ...prev, assessments: false }));
+      setLoadingFlag('assessments', false);
       return;
     }
 
     const loadAllAssessments = async () => {
-      setLoading(prev => ({ ...prev, assessments: true }));
+      setLoadingFlag('assessments', true);
       try {
         let allAssessments: Assessment[] = [];
         
@@ -193,23 +346,23 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
         setAssessments(allAssessments);
       } catch (error) {
       } finally {
-        setLoading(prev => ({ ...prev, assessments: false }));
+        setLoadingFlag('assessments', false);
       }
     };
 
     loadAllAssessments();
-  }, [userId, courses]);
+  }, [courses, setLoadingFlag, userId]);
 
   // Cargar calificaciones para el usuario
   useEffect(() => {
     if (!userId) {
       setGrades([]);
-      setLoading(prev => ({ ...prev, grades: false }));
+      setLoadingFlag('grades', false);
       return;
     }
 
     const loadGrades = async () => {
-      setLoading(prev => ({ ...prev, grades: true }));
+      setLoadingFlag('grades', true);
       try {
         let userGrades: Grade[] = [];
         
@@ -222,7 +375,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             } catch (error) {
             }
           }
-        } else if (userRole === 'docente') {
+        } else if (userRole === 'docente' || userRole === 'admin') {
           // Para docentes, cargar todas las calificaciones de sus cursos
           for (const course of courses) {
             try {
@@ -236,7 +389,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
         setGrades(userGrades);
       } catch (error) {
       } finally {
-        setLoading(prev => ({ ...prev, grades: false }));
+        setLoadingFlag('grades', false);
       }
     };
 
@@ -245,52 +398,48 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
       loadGrades();
     } else {
       setGrades([]);
-      setLoading(prev => ({ ...prev, grades: false }));
+      setLoadingFlag('grades', false);
     }
-  }, [userId, userRole, courses]);
+  }, [courses, setLoadingFlag, userId, userRole]);
 
   // Mantener un curso global seleccionado por usuario y válido para la lista de cursos actual.
   useEffect(() => {
-    if (!selectedCourseStorageKey) {
-      setSelectedCourseIdState('');
-      return;
-    }
+    setSelectedCourseIdState((currentSelected) => {
+      if (!selectedCourseStorageKey) {
+        return currentSelected ? '' : currentSelected;
+      }
 
-    if (courses.length === 0) {
-      setSelectedCourseIdState('');
-      return;
-    }
+      if (courses.length === 0) {
+        if (loading.courses) return currentSelected;
+        return currentSelected ? '' : currentSelected;
+      }
 
-    const savedCourseId = localStorage.getItem(selectedCourseStorageKey);
-    const hasCurrent = selectedCourseId
-      ? courses.some((course) => course.id === selectedCourseId)
-      : false;
+      if (currentSelected && courses.some((course) => course.id === currentSelected)) {
+        return currentSelected;
+      }
 
-    if (hasCurrent) {
-      return;
-    }
+      const savedCourseId = localStorage.getItem(selectedCourseStorageKey);
+      if (savedCourseId && courses.some((course) => course.id === savedCourseId)) {
+        return savedCourseId;
+      }
 
-    if (savedCourseId && courses.some((course) => course.id === savedCourseId)) {
-      setSelectedCourseIdState(savedCourseId);
-      return;
-    }
-
-    setSelectedCourseIdState(courses[0].id);
-  }, [courses, selectedCourseId, selectedCourseStorageKey]);
+      const fallbackCourseId = courses[0]?.id || '';
+      return fallbackCourseId || currentSelected;
+    });
+  }, [courses, loading.courses, selectedCourseStorageKey]);
 
   useEffect(() => {
     if (!selectedCourseStorageKey) return;
+    if (loading.courses) return;
 
     if (selectedCourseId) {
       localStorage.setItem(selectedCourseStorageKey, selectedCourseId);
-    } else {
-      localStorage.removeItem(selectedCourseStorageKey);
     }
-  }, [selectedCourseId, selectedCourseStorageKey]);
+  }, [loading.courses, selectedCourseId, selectedCourseStorageKey]);
 
   // Función para recargar unidades
   const refreshUnits = async (courseId?: string) => {
-    setLoading(prev => ({ ...prev, units: true }));
+    setLoadingFlag('units', true);
     try {
       let loadedUnits: Unit[] = [];
       
@@ -303,7 +452,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
       setUnits(loadedUnits);
     } catch (error) {
     } finally {
-      setLoading(prev => ({ ...prev, units: false }));
+      setLoadingFlag('units', false);
     }
   };
 
@@ -327,13 +476,13 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!userId || courses.length === 0) {
       setUnits([]);
-      setLoading(prev => ({ ...prev, units: false }));
+      setLoadingFlag('units', false);
       return;
     }
 
     
     const loadUnitsForUserCourses = async () => {
-      setLoading(prev => ({ ...prev, units: true }));
+      setLoadingFlag('units', true);
       
       try {
         let allUserUnits: Unit[] = [];
@@ -349,7 +498,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
         setUnits(allUserUnits);
       } catch (error) {
       } finally {
-        setLoading(prev => ({ ...prev, units: false }));
+        setLoadingFlag('units', false);
       }
     };
 
@@ -369,13 +518,13 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     return () => {
       unsubscribe();
     };
-  }, [userId, courses]);
+  }, [courses, setLoadingFlag, userId]);
 
   // Cargar cursos en tiempo real
   useEffect(() => {
     if (!userId) {
-      setCourses([]);
-      setLoading(prev => ({ ...prev, courses: false }));
+      setCoursesSafely([]);
+      setLoadingFlag('courses', false);
       return;
     }
 
@@ -404,22 +553,24 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
                 teacherId: data.teacherId || '',
                 teacherName: data.teacherName || '',
                 description: data.description || '',
+                coverUrl: data.coverUrl || '',
+                classSchedule: normalizeClassSchedule(data.classSchedule),
                 enrolledStudents: data.enrolledStudents || [],
                 createdAt: data.createdAt?.toDate() || new Date(),
               });
             });
             
-            setCourses(coursesData);
-            setLoading(prev => ({ ...prev, courses: false }));
+            setCoursesSafely(coursesData);
+            setLoadingFlag('courses', false);
           },
           (error) => {
-            setLoading(prev => ({ ...prev, courses: false }));
+            setLoadingFlag('courses', false);
           }
         );
       } catch (error) {
-        setLoading(prev => ({ ...prev, courses: false }));
+        setLoadingFlag('courses', false);
       }
-    } else {
+    } else if (userRole === 'estudiante') {
       // Para estudiantes
       try {
         const q = query(
@@ -442,6 +593,8 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
                 teacherId: data.teacherId || '',
                 teacherName: data.teacherName || '',
                 description: data.description || '',
+                coverUrl: data.coverUrl || '',
+                classSchedule: normalizeClassSchedule(data.classSchedule),
                 enrolledStudents: data.enrolledStudents || [],
                 createdAt: data.createdAt?.toDate() || new Date(),
               });
@@ -450,22 +603,65 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             // Ordenar manualmente
             coursesData.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
             
-            setCourses(coursesData);
-            setLoading(prev => ({ ...prev, courses: false }));
+            setCoursesSafely(coursesData);
+            setLoadingFlag('courses', false);
           },
           (error) => {
-            setLoading(prev => ({ ...prev, courses: false }));
+            setLoadingFlag('courses', false);
           }
         );
       } catch (error) {
-        setLoading(prev => ({ ...prev, courses: false }));
+        setLoadingFlag('courses', false);
       }
+    } else if (userRole === 'admin') {
+      try {
+        const q = query(
+          collection(firebaseDB, 'cursos'),
+          orderBy('createdAt', 'desc')
+        );
+
+        unsubscribe = onSnapshot(q,
+          (snapshot) => {
+            const coursesData: Course[] = [];
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              coursesData.push({
+                id: doc.id,
+                name: data.name || '',
+                code: data.code || '',
+                semester: data.semester || '',
+                group: data.group || '',
+                credits: data.credits || 0,
+                teacherId: data.teacherId || '',
+                teacherName: data.teacherName || '',
+                description: data.description || '',
+                coverUrl: data.coverUrl || '',
+                classSchedule: normalizeClassSchedule(data.classSchedule),
+                enrolledStudents: data.enrolledStudents || [],
+                createdAt: data.createdAt?.toDate() || new Date(),
+              });
+            });
+
+            setCoursesSafely(coursesData);
+            setLoadingFlag('courses', false);
+          },
+          () => {
+            setLoadingFlag('courses', false);
+          }
+        );
+      } catch (error) {
+        setLoadingFlag('courses', false);
+      }
+    } else {
+      setCoursesSafely([]);
+      setLoadingFlag('courses', false);
+      unsubscribe = () => undefined;
     }
 
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [userId, userRole]);
+  }, [setCoursesSafely, setLoadingFlag, userId, userRole]);
 
   // FUNCIONES IMPLEMENTADAS
   const addAssessment = async (assessmentData: Omit<Assessment, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {

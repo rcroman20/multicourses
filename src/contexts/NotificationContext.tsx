@@ -26,6 +26,8 @@ interface NotificationContextType {
     message: string;
     type?: NotificationType;
     link?: string; 
+    courseCode?: string;
+    dedupeKey?: string;
   }) => Promise<void>;
   markAsRead: (notificationId: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
@@ -33,15 +35,106 @@ interface NotificationContextType {
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
+type NotificationCourse = {
+  id: string;
+  code: string;
+  teacherId: string;
+  enrolledStudents?: string[];
+  classSchedule?: Array<{
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+    location?: string;
+  }>;
+};
+
+const parseTimeToMinutes = (value?: string): number | null => {
+  if (!value) return null;
+  const match = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+};
+
+const getLocalDateKey = (date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const collectTodayClassSessions = (
+  userId: string,
+  userRole: "docente" | "estudiante",
+  courses: NotificationCourse[],
+) => {
+  const todayDayIndex = new Date().getDay();
+  const availableCourses =
+    userRole === "docente"
+      ? courses.filter((course) => course.teacherId === userId)
+      : courses.filter((course) => (course.enrolledStudents || []).includes(userId));
+
+  const sessions: Array<{
+    id: string;
+    courseCode: string;
+    startTime: string;
+    endTime: string;
+    location?: string;
+    sortOrder: number;
+  }> = [];
+
+  availableCourses.forEach((course) => {
+    const schedule = Array.isArray(course.classSchedule) ? course.classSchedule : [];
+    schedule.forEach((slot, index) => {
+      if (
+        !Number.isInteger(slot.dayOfWeek) ||
+        slot.dayOfWeek < 0 ||
+        slot.dayOfWeek > 6 ||
+        typeof slot.startTime !== "string" ||
+        typeof slot.endTime !== "string"
+      ) {
+        return;
+      }
+      if (slot.dayOfWeek !== todayDayIndex) return;
+
+      const startTime = slot.startTime.trim();
+      const endTime = slot.endTime.trim();
+      if (!startTime || !endTime) return;
+
+      const location =
+        typeof slot.location === "string" && slot.location.trim()
+          ? slot.location.trim()
+          : undefined;
+
+      sessions.push({
+        id: `${course.id}-${slot.dayOfWeek}-${startTime}-${index}`,
+        courseCode: course.code || "Course",
+        startTime,
+        endTime,
+        location,
+        sortOrder: parseTimeToMinutes(startTime) ?? 9999,
+      });
+    });
+  });
+
+  return sessions.sort(
+    (a, b) => a.sortOrder - b.sortOrder || a.courseCode.localeCompare(b.courseCode),
+  );
+};
+
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const { courses, assessments, grades } = useAcademic();
+  const { courses, assessments, grades, loading: academicLoading } = useAcademic();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const hasInitializedSoundRef = useRef(false);
   const previousUnreadCountRef = useRef(0);
   const processingDeadlineRemindersRef = useRef(false);
   const processingStudentRemindersRef = useRef(false);
+  const processingDailyClassesDigestRef = useRef(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -52,7 +145,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     if (Date.now() - lastRun < minIntervalMs) return;
 
     void notificationService
-      .cleanupExcessNotifications(user.id, 20)
+      .cleanupDuplicateNotifications(user.id, 72)
+      .then(() => notificationService.cleanupExcessNotifications(user.id, 50))
       .then(() => {
         localStorage.setItem(cleanupKey, String(Date.now()));
       })
@@ -216,11 +310,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         }
 
         const now = Date.now();
-        const reminderWindowHours = Math.max(
-          1,
-          Number(getNotificationAutomations(user.id).deadlineReminderHours || 24),
-        );
-        const reminderWindowMs = reminderWindowHours * 60 * 60 * 1000;
+        const reminderWindowMs = 60 * 60 * 1000; // 1 hour before due date
         const sentMap = loadSentMap();
         let hasChanges = false;
 
@@ -248,6 +338,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
                   message: `"${assessment.name}" is due on ${new Date(dueTs).toLocaleString("en-GB")}.`,
                   type: "warning",
                   link: `/courses/${course.code}/assessments`,
+                  dedupeKey: reminderId,
                 }),
               ),
             );
@@ -268,7 +359,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     void runDeadlineReminderJob();
     const intervalId = window.setInterval(() => {
       void runDeadlineReminderJob();
-    }, 5 * 60 * 1000);
+    }, 60 * 60 * 1000);
 
     return () => window.clearInterval(intervalId);
   }, [courses, user?.id, user?.role]);
@@ -329,8 +420,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         const sentMap = loadSentMap();
         let hasChanges = false;
 
-        // Rule 1: upcoming deadlines in the next 48h.
-        const upcomingWindowMs = 48 * 60 * 60 * 1000;
+        // Rule 1: upcoming deadlines in the next 1 hour.
+        const upcomingWindowMs = 60 * 60 * 1000;
         for (const assessment of assessments) {
           const course = courseById[assessment.courseId];
           if (!course) continue;
@@ -348,6 +439,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
               message: `"${assessment.name}" is due on ${new Date(dueTs).toLocaleString("en-GB")}.`,
               type: "warning",
               link: `/courses/${course.code}/assessments/${assessment.id}`,
+              dedupeKey: reminderId,
             });
           }
 
@@ -376,6 +468,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
                 message: `Your current average is ${average.toFixed(2)}. Review pending activities and plan recovery this week.`,
                 type: "warning",
                 link: "/grades",
+                dedupeKey: riskKey,
               });
             }
             sentMap[riskKey] = now;
@@ -394,10 +487,83 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     void runSmartReminderJob();
     const intervalId = window.setInterval(() => {
       void runSmartReminderJob();
-    }, 10 * 60 * 1000);
+    }, 60 * 60 * 1000);
 
     return () => window.clearInterval(intervalId);
   }, [assessments, courses, grades, user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (user.role !== "docente" && user.role !== "estudiante") return;
+    if (academicLoading.courses) return;
+
+    const runDailyClassesDigest = async () => {
+      if (processingDailyClassesDigestRef.current) return;
+      processingDailyClassesDigestRef.current = true;
+
+      try {
+        const hubPrefs = getNotificationHubPreferences(user.id);
+        if (isWithinQuietHours(hubPrefs)) return;
+
+        const todayKey = getLocalDateKey();
+        const todayLabel = new Date().toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        });
+        const sessions = collectTodayClassSessions(
+          user.id,
+          user.role,
+          courses as NotificationCourse[],
+        );
+
+        const title = "Today's class schedule";
+        const link = "/calendar?day=today&focus=classes&open=1";
+        const dedupeKey = `daily:classes:${todayKey}`;
+
+        if (sessions.length === 0) {
+          await notificationService.createNotification(user.id, {
+            title,
+            message: `No classes are scheduled for ${todayLabel}. Tap to open your day calendar.`,
+            type: "info",
+            link,
+            dedupeKey,
+          });
+          return;
+        }
+
+        const maxSessionsInMessage = 3;
+        const sessionPreview = sessions
+          .slice(0, maxSessionsInMessage)
+          .map((session) => {
+            const locationSuffix = session.location ? ` @ ${session.location}` : "";
+            return `${session.courseCode} ${session.startTime}-${session.endTime}${locationSuffix}`;
+          })
+          .join(" | ");
+        const remainingCount = sessions.length - maxSessionsInMessage;
+        const remainingSuffix = remainingCount > 0 ? ` (+${remainingCount} more)` : "";
+
+        await notificationService.createNotification(user.id, {
+          title,
+          message: `${todayLabel}: ${sessionPreview}${remainingSuffix}. Tap to view all classes for the day.`,
+          type: "info",
+          link,
+          dedupeKey,
+        });
+      } catch {
+        // Keep this job best-effort; notification delivery should not block app flow.
+      } finally {
+        processingDailyClassesDigestRef.current = false;
+      }
+    };
+
+    void runDailyClassesDigest();
+    const intervalId = window.setInterval(() => {
+      void runDailyClassesDigest();
+    }, 60 * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [academicLoading.courses, courses, user?.id, user?.role]);
 
   return (
     <NotificationContext.Provider

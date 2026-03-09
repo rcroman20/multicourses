@@ -16,11 +16,11 @@ import {
   Edit,
   Trash2,
   Users,
-  BarChart3,
   Search,
   Clock, 
   AlertCircle,
   FileCheck, 
+  ClipboardCheck,
   Percent,
   TrendingUp,
   Eye,
@@ -79,6 +79,15 @@ const FORUM_PRESETS: Record<Exclude<ForumPresetKey, "custom">, {
   },
 };
 
+const modalInputClass =
+  "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 shadow-sm transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100";
+const modalInputDisabledClass = `${modalInputClass} disabled:bg-slate-100 disabled:text-slate-500`;
+const modalLabelClass = "mb-2 block text-sm font-semibold text-slate-700";
+const modalSecondaryButtonClass =
+  "inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50";
+const modalPrimaryButtonClass =
+  "inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 hover:shadow-md";
+
 function detectForumPreset(requirements?: {
   mainResponseMinWords?: number;
   peerRepliesRequired?: number;
@@ -129,6 +138,68 @@ function getPlainTextFromHtml(content: string): string {
   } catch {
     return normalizeText(content);
   }
+}
+
+function parseForumRequirementNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function resolveForumRequirementsFromAssessment(assessment: any) {
+  const assessmentType = String(assessment?.assessmentType || "assessment");
+  const activityType = String(assessment?.type || "");
+  if (!(assessmentType === "assessment" && activityType === "forum")) {
+    return null;
+  }
+
+  const raw =
+    assessment?.forumRequirements && typeof assessment.forumRequirements === "object"
+      ? assessment.forumRequirements
+      : {};
+
+  const pickNumber = (candidates: unknown[], fallback: number) => {
+    for (const candidate of candidates) {
+      const parsed = parseForumRequirementNumber(candidate);
+      if (parsed !== null) return parsed;
+    }
+    return fallback;
+  };
+
+  return {
+    preset: String(raw.preset || assessment?.forumPreset || "custom") as ForumPresetKey,
+    mainResponseMinWords: Math.max(
+      0,
+      pickNumber(
+        [raw.mainResponseMinWords, assessment?.forumMainResponseMinWords],
+        FORUM_PRESETS.basic.mainResponseMinWords,
+      ),
+    ),
+    peerRepliesRequired: Math.max(
+      0,
+      pickNumber(
+        [raw.peerRepliesRequired, assessment?.forumPeerRepliesRequired],
+        FORUM_PRESETS.basic.peerRepliesRequired,
+      ),
+    ),
+    peerReplyCommentsRequired: Math.max(
+      0,
+      pickNumber(
+        [raw.peerReplyCommentsRequired, assessment?.forumPeerReplyCommentsRequired],
+        FORUM_PRESETS.basic.peerReplyCommentsRequired,
+      ),
+    ),
+    mainResponsesRequired: Math.max(
+      1,
+      pickNumber(
+        [raw.mainResponsesRequired, assessment?.forumMainResponsesRequired],
+        FORUM_PRESETS.basic.mainResponsesRequired,
+      ),
+    ),
+  };
 }
 
 export default function AssessmentsPage() {
@@ -241,6 +312,7 @@ export default function AssessmentsPage() {
     setSearchTerm('');
     setFilterType('all');
   };
+
 const categorizedAssessments = useMemo(() => {
   if (!selectedCourseId) return { today: [], upcoming: [], past: [], noDueDate: [] };
   
@@ -325,7 +397,12 @@ const categorizedAssessments = useMemo(() => {
     setLoading(true);
     try {
       const data = await assessmentService.getCourseAssessments(selectedCourseId);
-      setAssessments(data);
+      setAssessments(
+        data.map((assessment: any) => ({
+          ...assessment,
+          forumRequirements: resolveForumRequirementsFromAssessment(assessment),
+        })),
+      );
     } catch (error) {
     } finally {
       setLoading(false);
@@ -350,14 +427,130 @@ const categorizedAssessments = useMemo(() => {
     };
   };
 
+  const resolveGradeSheetActivity = (sheet: GradeSheet | null, assessmentData: any) => {
+    if (!sheet) return null;
+    const activities = Array.isArray(sheet.activities) ? sheet.activities : [];
+
+    return (
+      activities.find(
+        (activity: any) =>
+          activity?.assessmentId === assessmentData?.id ||
+          activity?.id === assessmentData?.id,
+      ) ||
+      activities.find((activity: any) => activity?.name === assessmentData?.name) ||
+      null
+    );
+  };
+
+  const syncDirectGradesToLinkedGradeSheet = async (params: {
+    assessmentId: string;
+    assessmentName: string;
+    assessmentDescription?: string;
+    assessmentType: string;
+    percentage: number;
+    maxPoints: number;
+    passingScore: number;
+    gradeSheetId: string;
+  }): Promise<number> => {
+    const linkedSheet = await gradeSheetService.getById(params.gradeSheetId);
+    if (!linkedSheet) {
+      throw new Error("Linked grade sheet not found");
+    }
+
+    const existingActivity = resolveGradeSheetActivity(linkedSheet, {
+      id: params.assessmentId,
+      name: params.assessmentName,
+    }) as any;
+
+    let targetActivityId = String(existingActivity?.id || "").trim();
+    const currentActivities = Array.isArray(linkedSheet.activities) ? linkedSheet.activities : [];
+
+    if (!targetActivityId) {
+      targetActivityId = `activity_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const newActivity = {
+        id: targetActivityId,
+        name: params.assessmentName,
+        description: params.assessmentDescription || "",
+        maxScore: Number.isFinite(params.maxPoints) && params.maxPoints > 0 ? params.maxPoints : 5,
+        type: params.assessmentType || "quiz",
+        percentage: Number.isFinite(params.percentage) ? params.percentage : 0,
+        weight: Number.isFinite(params.percentage) ? params.percentage : 0,
+        passingScore: Number.isFinite(params.passingScore) ? params.passingScore : 0,
+        status: "graded",
+        createdAt: new Date(),
+        assessmentId: params.assessmentId,
+      };
+
+      await gradeSheetService.update(params.gradeSheetId, {
+        activities: [...currentActivities, newActivity as any],
+      });
+    } else if (String(existingActivity?.assessmentId || "").trim() !== params.assessmentId) {
+      const activitiesWithAssessmentId = currentActivities.map((activity: any) =>
+        activity?.id === targetActivityId
+          ? {
+              ...activity,
+              assessmentId: params.assessmentId,
+            }
+          : activity,
+      );
+
+      await gradeSheetService.update(params.gradeSheetId, {
+        activities: activitiesWithAssessmentId as GradeSheet["activities"],
+      });
+    }
+
+    const directGrades = await assessmentService.getAssessmentGrades(params.assessmentId);
+    let transferredCount = 0;
+
+    for (const grade of directGrades) {
+      const studentId = String((grade as any)?.studentId || "").trim();
+      const numericValue = Number((grade as any)?.value);
+      if (!studentId || !Number.isFinite(numericValue)) continue;
+
+      const currentStudentEntry = (linkedSheet.students || []).find(
+        (student: any) => String(student?.studentId || "").trim() === studentId,
+      );
+      const currentValueRaw: unknown = currentStudentEntry?.grades?.[targetActivityId]?.value;
+      const currentValue =
+        typeof currentValueRaw === "string" ? currentValueRaw.trim() : currentValueRaw;
+      const alreadyHasGrade =
+        typeof currentValue === "number"
+          ? Number.isFinite(currentValue)
+          : typeof currentValue === "string"
+            ? currentValue.length > 0 && Number.isFinite(Number(currentValue))
+            : false;
+
+      // Preserve grades already captured in the sheet; backfill only missing records.
+      if (alreadyHasGrade) continue;
+
+      const comment = String(
+        (grade as any)?.comment || (grade as any)?.feedback || (grade as any)?.comments || "",
+      );
+
+      await gradeSheetService.updateStudentGrade(
+        params.gradeSheetId,
+        studentId,
+        targetActivityId,
+        numericValue,
+        comment,
+      );
+      transferredCount += 1;
+    }
+
+    return transferredCount;
+  };
+
   const handleCreateAssessment = async (data: any) => {
     try {
       if (!user) return;
 
+      const rawTargetCourseIds: unknown[] = Array.isArray(data.targetCourseIds)
+        ? data.targetCourseIds
+        : [data.courseId || selectedCourseId];
       const targetCourseIds = Array.from(
-        new Set(
-          (Array.isArray(data.targetCourseIds) ? data.targetCourseIds : [data.courseId || selectedCourseId])
-            .map((id: unknown) => String(id || ""))
+        new Set<string>(
+          rawTargetCourseIds
+            .map((id) => String(id || ""))
             .filter((id) => id.length > 0),
         ),
       );
@@ -367,7 +560,7 @@ const categorizedAssessments = useMemo(() => {
         return;
       }
 
-      let dueDateValue = data.dueDate;
+      const dueDateValue = data.dueDate;
       if (dueDateValue) {
         const date = new Date(dueDateValue);
         if (isNaN(date.getTime())) {
@@ -426,7 +619,7 @@ const categorizedAssessments = useMemo(() => {
         name: data.name,
         description: data.description,
         type: data.type,
-        percentage: parseFloat(data.percentage || 0),
+        percentage: 0,
         maxPoints: parseFloat(data.maxPoints || 0),
         passingScore: parseFloat(data.passingScore || 0),
         dueDate: dueDateValue || null,
@@ -517,7 +710,7 @@ const categorizedAssessments = useMemo(() => {
     try {
       if (!editingAssessment) return;
 
-      let dueDateValue = data.dueDate;
+      const dueDateValue = data.dueDate;
       if (dueDateValue) {
         const date = new Date(dueDateValue);
         if (isNaN(date.getTime())) {
@@ -546,6 +739,12 @@ const categorizedAssessments = useMemo(() => {
         forumCloseAtValue = date.toISOString();
       }
 
+      const normalizedGradeSheetId =
+        data.assessmentType !== "announcement" && String(data.gradeSheetId || "").trim().length > 0
+          ? String(data.gradeSheetId).trim()
+          : null;
+      const previousGradeSheetId = String(editingAssessment.gradeSheetId || "").trim() || null;
+
       const updateData: any = {
         name: data.name,
         description: data.description,
@@ -554,7 +753,7 @@ const categorizedAssessments = useMemo(() => {
         maxPoints: parseFloat(data.maxPoints || 0),
         passingScore: parseFloat(data.passingScore || 0),
         dueDate: dueDateValue || null,
-        gradeSheetId: data.gradeSheetId,
+        gradeSheetId: normalizedGradeSheetId,
         assessmentType: data.assessmentType,
         deliveryType: data.deliveryType || 'text',
         startDate: startDateValue,
@@ -570,6 +769,32 @@ const categorizedAssessments = useMemo(() => {
       }
 
       await assessmentService.updateAssessment(editingAssessment.id, updateData);
+
+      const shouldSyncDirectGrades = Boolean(normalizedGradeSheetId);
+
+      if (shouldSyncDirectGrades && normalizedGradeSheetId) {
+        try {
+          const syncedCount = await syncDirectGradesToLinkedGradeSheet({
+            assessmentId: editingAssessment.id,
+            assessmentName: updateData.name,
+            assessmentDescription: updateData.description,
+            assessmentType: updateData.type,
+            percentage: Number(updateData.percentage || 0),
+            maxPoints: Number(updateData.maxPoints || 0),
+            passingScore: Number(updateData.passingScore || 0),
+            gradeSheetId: normalizedGradeSheetId,
+          });
+
+          if (syncedCount > 0) {
+            alert(`Assessment updated. ${syncedCount} existing grades were synced to the linked grade sheet.`);
+          } else if (!previousGradeSheetId || previousGradeSheetId !== normalizedGradeSheetId) {
+            alert("Assessment updated. No existing direct grades were found to sync.");
+          }
+        } catch (syncError) {
+          console.error("Error syncing direct grades to linked grade sheet:", syncError);
+          alert("Assessment updated, but existing grades could not be synced to the linked grade sheet.");
+        }
+      }
 
       try {
         const course = availableCourses.find((item) => item.id === editingAssessment.courseId);
@@ -682,15 +907,17 @@ const categorizedAssessments = useMemo(() => {
 
   if (!user) {
     return (
-      <DashboardLayout title="Assessments" subtitle="Please log in">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-2">
-            <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gray-100 flex items-center justify-center">
-              <AlertCircle className="h-10 w-10 text-gray-400" />
-            </div>
-            <div className="space-y-2">
-              <p className="text-xl font-bold text-gray-900">Please log in</p>
-              <p className="text-gray-500">You need to be logged in to view assessments</p>
+      <DashboardLayout contentClassName="pt-0 lg:pt-1">
+        <div className="relative overflow-x-hidden">
+          <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+          <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+              <div className="space-y-2">
+                <AlertCircle className="mx-auto h-10 w-10 text-slate-400" />
+                <p className="text-xl font-bold text-slate-900">Please log in</p>
+                <p className="text-sm text-slate-600">You need to be logged in to view assessments.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -700,31 +927,31 @@ const categorizedAssessments = useMemo(() => {
 
   if (availableCourses.length === 0) {
     return (
-      <DashboardLayout title="Assessments" subtitle="No courses available">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-2">
-            <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gray-100 flex items-center justify-center">
-              <Book className="h-10 w-10 text-gray-400" />
+      <DashboardLayout contentClassName="pt-0 lg:pt-1">
+        <div className="relative overflow-x-hidden">
+          <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+          <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+              <div className="space-y-3">
+                <Book className="mx-auto h-10 w-10 text-slate-400" />
+                <p className="text-xl font-bold text-slate-900">
+                  {user.role === "docente" ? "No courses assigned" : "No enrolled courses"}
+                </p>
+                <p className="text-sm text-slate-600">
+                  {user.role === "docente"
+                    ? "You are not teaching any courses yet."
+                    : "You are not enrolled in any courses yet."}
+                </p>
+                <Link
+                  to={user.role === "docente" ? "/courses" : "/dashboard"}
+                  className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>Back to {user.role === "docente" ? "Courses" : "Dashboard"}</span>
+                </Link>
+              </div>
             </div>
-            <div className="space-y-2">
-              <p className="text-xl font-bold text-gray-900">
-                {user.role === "docente"  
-                  ? "No courses assigned" 
-                  : "No enrolled courses"}
-              </p>
-              <p className="text-gray-500">
-                {user.role === "docente" 
-                  ? "You are not teaching any courses yet" 
-                  : "You are not enrolled in any courses yet"}
-              </p>
-            </div>
-            <Link
-              to={user.role === "docente" ? "/courses" : "/dashboard"}
-              className="inline-flex items-center gap-2 mt-4 px-5 py-2.5 rounded-xl bg-blue-600 text-white font-medium hover:shadow-lg transition-all duration-300"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to {user.role === "docente" ? "Courses" : "Dashboard"}
-            </Link>
           </div>
         </div>
       </DashboardLayout>
@@ -733,17 +960,19 @@ const categorizedAssessments = useMemo(() => {
 
   if (loading && selectedCourseId) {
     return (
-      <DashboardLayout 
-        title="Assessments"
-        subtitle={`${selectedCourse?.name || "Loading..."}`}
-         contentClassName="pt-0 lg:pt-1"
-      >
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-2">
-            <Loader2 className="h-10 w-10 animate-spin text-blue-500 mx-auto" />
-            <div className="space-y-2">
-              <p className="text-lg font-semibold text-gray-900">Loading assessments</p>
-              <p className="text-sm text-gray-500">Please wait while we load the assessment data</p>
+      <DashboardLayout contentClassName="pt-0 lg:pt-1">
+        <div className="relative overflow-x-hidden">
+          <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+          <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="flex min-h-[320px] items-center justify-center">
+              <div className="text-center space-y-2">
+                <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
+                <div className="space-y-1">
+                  <p className="text-lg font-semibold text-slate-900">Loading assessments</p>
+                  <p className="text-sm text-slate-600">Please wait while we load the assessment data.</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -752,367 +981,361 @@ const categorizedAssessments = useMemo(() => {
   }
 
   return (
-    <DashboardLayout
-      title="Assessments"
-      subtitle={selectedCourse ? `${selectedCourse.name} • ${selectedCourse.code}` : "Select a course"}
-       contentClassName="pt-0 lg:pt-1"
-    >
-      <div className="space-y-2">
-        <div className="grid grid-cols-4 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-          <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow duration-300">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="text-xs font-semibold text-blue-600 tracking-wide">Today</p>
-                </div>
-                <p className="text-xl font-bold text-gray-900">{stats.todayCount}</p>
-              </div>
-              <div className="hidden sm:flex h-8 w-8 rounded-xl bg-blue-100 items-center justify-center">
-                <CalendarDays className="h-4 w-4 text-blue-500" />
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow duration-300">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="text-xs font-semibold text-blue-600 tracking-wide">Upcoming</p>
-                </div>
-                <p className="text-xl font-bold text-gray-900">{stats.upcomingCount}</p>
-              </div>
-              <div className="hidden sm:flex h-8 w-8 rounded-xl bg-blue-100 items-center justify-center">
-                <CalendarClock className="h-4 w-4 text-blue-500" />
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow duration-300">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="text-xs font-semibold text-blue-600 tracking-wide">Past</p>
-                </div>
-                <p className="text-xl font-bold text-gray-900">{stats.pastCount}</p>
-              </div>
-              <div className="hidden sm:flex h-8 w-8 rounded-xl bg-blue-100 items-center justify-center">
-                <CalendarOff className="h-4 w-4 text-gray-500" />
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow duration-300">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="text-xs font-semibold text-blue-600 tracking-wide">No Date</p>
-                </div>
-                <p className="text-xl font-bold text-gray-900">{stats.noDueDateCount}</p>
-              </div>
-              <div className="hidden sm:flex h-8 w-8 rounded-xl bg-gray-100 items-center justify-center">
-                <Calendar className="h-4 w-4 text-gray-500" />
-              </div>
-            </div>
-          </div>
-        </div>
+    <DashboardLayout contentClassName="pt-0 lg:pt-1">
+      <div className="relative overflow-x-hidden">
+        <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+        <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="space-y-4">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+              <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
+              <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
-      <div className="bg-white border border-gray-100 rounded-2xl p-2 shadow-sm">
-  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-    <div className="flex-1 flex flex-col sm:flex-row gap-4">
-      <div className="flex-1">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search assessments..."
-            className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-      </div>
-      
-      <div className="relative min-w-[180px]">
-        <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
-          <School className="h-5 w-5 text-gray-400" />
-        </div>
-        <select
-          value={selectedCourseId || ""} 
-          onChange={(e) => {
-            const course = availableCourses.find(c => c.id === e.target.value);
-            if (course) {
-              handleCourseChange(course);
-            }
-          }}
-          className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium appearance-none"
-        >
-          <option value="">Select course...</option>
-          {availableCourses.map((course) => (
-            <option key={course.id} value={course.id}>
-              {course.code} 
-            </option>
-          ))}
-        </select>
-        <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-      </div>
-    </div>
-    
-    <div className="flex flex-col sm:flex-row gap-3">
-      <div className="relative hidden md:block">
-        <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-        <select
-          className="pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all appearance-none text-sm font-medium"
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)} 
-        >
-          <option value="all">All Types</option>
-          <option value="announcement">Announcements</option>
-          <option value="delivery">Delivery Activities</option>
-          <option value="exam">Exams</option>
-          <option value="quiz">Quizzes</option>
-          <option value="homework">Homework</option>
-          <option value="project">Projects</option>
-          <option value="participation">Participation</option>
-          <option value="forum">Forum</option>
-        </select>
-      </div>
-      
-      {user.role === "docente" && (
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-      )}
-    </div>
-  </div>
-</div>
-
-        {assessments.length === 0 ? (
-          <div className="bg-white border border-gray-100 rounded-2xl p-8 text-center shadow-sm">
-            <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gray-100 flex items-center justify-center">
-              <FileText className="h-12 w-12 text-gray-400" />
-            </div>
-            <h3 className="font-bold text-xl mb-3 text-gray-900">No assessments available</h3>
-            <p className="text-gray-500 max-w-md mx-auto mb-6">
-              {user.role === "docente"
-                ? "Create your first assessment to get started"
-                : "There are no assessments scheduled yet"}
-            </p>
-            {user.role === "docente" && (
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
-              >
-                <Plus className="h-4 w-4" />
-                Create First Assessment
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filteredToday.length > 0 && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-12 w-12 rounded-xl bg-red-50 flex items-center justify-center border border-red-200">
-                      <AlertTriangle className="h-6 w-6 text-red-500" />
+              <div className="relative z-10">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                      <Zap className="h-3.5 w-3.5" />
+                      Assessment Workspace
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-xl text-gray-900">Today's Assessments</h3>
-                        <span className="px-2 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full">
-                          {filteredToday.length} URGENT
-                        </span>
+                    <h2 className="mt-3 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
+                      Assessment control center
+                    </h2>
+                    <p className="mt-1.5 max-w-3xl text-sm text-slate-600">
+                      Track due items, organize evaluation types, and open grading quickly.
+                    </p>
+                  </div>
+                  {user.role === "docente" && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateModal(true)}
+                      aria-label="Add activity"
+                      title="Add activity"
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
+                    >
+                      <Plus className="h-4 w-4" />
+                      New activity
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+                        <CalendarDays className="h-4 w-4" />
                       </div>
-                      <p className="text-sm text-red-600 mt-1">Due today • Submit before deadline</p>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{stats.todayCount}</p>
                     </div>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Today</p>
                   </div>
-                </div>
-                
-                <div className="grid grid-cols-1 gap-4">
-                  {filteredToday.map((assessment) => (
-                    <AssessmentCard
-                      key={assessment.id}
-                      assessment={assessment}
-                      courseCode={selectedCourse?.code || ''}
-                      isTeacher={user.role === "docente"}
-                      onEdit={() => {
-                        setEditingAssessment(assessment);
-                        setShowEditModal(true);
-                      }}
-                      onDelete={() => {
-                        setSelectedAssessment(assessment);
-                        setShowDeleteModal(true);
-                      }}
-                      isToday={true}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {filteredUpcoming.length > 0 && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-12 w-12 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100">
-                      <CalendarClock className="h-6 w-6 text-blue-500" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-xl text-gray-900">Upcoming Assessments</h3>
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">
-                          {filteredUpcoming.length} Coming
-                        </span>
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+                        <CalendarClock className="h-4 w-4" />
                       </div>
-                      <p className="text-sm text-gray-500 mt-1">Next 30 days • Plan ahead</p>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{stats.upcomingCount}</p>
                     </div>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Upcoming</p>
                   </div>
-                </div>
-                
-                <div className="grid grid-cols-1 gap-4">
-                  {filteredUpcoming.map((assessment) => (
-                    <AssessmentCard
-                      key={assessment.id}
-                      assessment={assessment}
-                      courseCode={selectedCourse?.code || ''}
-                      isTeacher={user.role === "docente"}
-                      onEdit={() => {
-                        setEditingAssessment(assessment);
-                        setShowEditModal(true);
-                      }}
-                      onDelete={() => {
-                        setSelectedAssessment(assessment);
-                        setShowDeleteModal(true);
-                      }}
-                      isUpcoming={true}
-                    />
-                  ))}
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 text-slate-700">
+                        <CalendarOff className="h-4 w-4" />
+                      </div>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{stats.pastCount}</p>
+                    </div>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Past</p>
+                  </div>
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
+                        <Calendar className="h-4 w-4" />
+                      </div>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{stats.noDueDateCount}</p>
+                    </div>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">No date</p>
+                  </div>
                 </div>
               </div>
-            )}
+            </section>
 
-            {filteredPast.length > 0 && (
-              <div className="space-y-2 rounded-xl border border-gray-300 bg-gray-50/60 px-3 py-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCompletedAssessments((prev) => !prev)}
-                  className="flex w-full items-center justify-between text-left"
-                  aria-expanded={showCompletedAssessments}
-                >
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-base text-gray-700">Completed Assessments</h3>
-                    <span className="px-2 py-0.5 bg-gray-200 text-gray-700 text-xs font-semibold rounded-full">
-                      {filteredPast.length}
-                    </span>
-                  </div>
-                  <ChevronDown
-                    className={cn(
-                      "h-4 w-4 text-gray-500 transition-transform duration-200",
-                      showCompletedAssessments && "rotate-180"
-                    )}
+            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.8fr_1fr_1fr]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search assessments..."
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
                   />
-                </button>
+                </div>
 
-                {!showCompletedAssessments && (
-                  <p className="text-xs text-gray-500">Click to show completed items</p>
-                )}
-
-                {showCompletedAssessments && (
-                  <div className="grid grid-cols-1 gap-4 pt-2">
-                    {filteredPast.map((assessment) => (
-                      <AssessmentCard
-                        key={assessment.id}
-                        assessment={assessment}
-                        courseCode={selectedCourse?.code || ''}
-                        isTeacher={user.role === "docente"}
-                        onEdit={() => {
-                          setEditingAssessment(assessment);
-                          setShowEditModal(true);
-                        }}
-                        onDelete={() => {
-                          setSelectedAssessment(assessment);
-                          setShowDeleteModal(true);
-                        }}
-                        isPast={true}
-                      />
+                <div className="relative">
+                  <School className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <select
+                    value={selectedCourseId || ""}
+                    onChange={(e) => {
+                      const course = availableCourses.find((c) => c.id === e.target.value);
+                      if (course) handleCourseChange(course);
+                    }}
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  >
+                    <option value="">Select course...</option>
+                    {availableCourses.map((course) => (
+                      <option key={course.id} value={course.id}>
+                        {course.code}
+                      </option>
                     ))}
-                  </div>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
+
+                <div className="relative">
+                  <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <select
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value)}
+                  >
+                    <option value="all">All Types</option>
+                    <option value="announcement">Announcements</option>
+                    <option value="delivery">Delivery Activities</option>
+                    <option value="exam">Exams</option>
+                    <option value="quiz">Quizzes</option>
+                    <option value="homework">Homework</option>
+                    <option value="project">Projects</option>
+                    <option value="participation">Participation</option>
+                    <option value="forum">Forum</option>
+                    <option value="self_evaluation">Self Evaluation</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
+
+              
+              </div>
+            </section>
+
+            {assessments.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                <FileText className="mx-auto h-10 w-10 text-slate-400" />
+                <p className="mt-3 text-lg font-bold text-slate-900">No assessments available</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {user.role === "docente"
+                    ? "Create your first assessment to get started."
+                    : "There are no assessments scheduled yet."}
+                </p>
+                {user.role === "docente" && (
+                  <button
+                    onClick={() => setShowCreateModal(true)}
+                    className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Create first assessment</span>
+                  </button>
                 )}
               </div>
-            )}
-
-            {filteredNoDueDate.length > 0 && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-12 w-12 rounded-xl bg-gray-100 flex items-center justify-center border border-gray-200">
-                      <Calendar className="h-6 w-6 text-gray-500" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-xl text-gray-900">No Deadline</h3>
-                        <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs font-bold rounded-full">
-                          {filteredNoDueDate.length} FLEXIBLE
-                        </span>
+            ) : (
+              <div className="space-y-4">
+                {filteredToday.length > 0 && (
+                  <section className="rounded-2xl border border-amber-200 bg-amber-50/30 p-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                        <AlertTriangle className="h-4 w-4" />
                       </div>
-                      <p className="text-sm text-gray-500 mt-1">Activities without deadline • Take your time</p>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-base font-bold text-slate-900">Today's Assessments</h3>
+                          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                            {filteredToday.length} urgent
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600">Due today. Submit before the deadline.</p>
+                      </div>
                     </div>
-                  </div>
-                  <Clock className="h-5 w-5 text-gray-400 hidden lg:block" />
-                </div>
-                
-                <div className="grid grid-cols-1 gap-4">
-                  {filteredNoDueDate.map((assessment) => (
-                    <AssessmentCard
-                      key={assessment.id}
-                      assessment={assessment}
-                      courseCode={selectedCourse?.code || ''}
-                      isTeacher={user.role === "docente"}
-                      onEdit={() => {
-                        setEditingAssessment(assessment);
-                        setShowEditModal(true);
-                      }}
-                      onDelete={() => {
-                        setSelectedAssessment(assessment);
-                        setShowDeleteModal(true);
-                      }}
-                      noDueDate={true}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+                    <div className="mt-3 space-y-2">
+                      {filteredToday.map((assessment) => (
+                        <AssessmentCard
+                          key={assessment.id}
+                          assessment={assessment}
+                          courseCode={selectedCourse?.code || ""}
+                          isTeacher={user.role === "docente"}
+                          onEdit={() => {
+                            setEditingAssessment(assessment);
+                            setShowEditModal(true);
+                          }}
+                          onDelete={() => {
+                            setSelectedAssessment(assessment);
+                            setShowDeleteModal(true);
+                          }}
+                          isToday={true}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )}
 
-            {filteredToday.length === 0 && 
-             filteredUpcoming.length === 0 && 
-             filteredPast.length === 0 && 
-             filteredNoDueDate.length === 0 && (
-              <div className="bg-white border border-gray-100 rounded-2xl p-8 text-center shadow-sm">
-                <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gray-100 flex items-center justify-center">
-                  <Search className="h-10 w-10 text-gray-400" />
-                </div>
-                <h3 className="font-bold text-xl mb-3 text-gray-900">No matching assessments</h3>
-                <p className="text-gray-500 max-w-md mx-auto mb-6">
-                  Try different search terms or filters
-                </p>
-                <button
-                  onClick={() => {
-                    setSearchTerm('');
-                    setFilterType('all');
-                  }}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-700 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
-                >
-                  Clear filters
-                </button>
+                {(filteredUpcoming.length > 0 || filteredPast.length > 0) && (
+                  <div
+                    className={cn(
+                      "grid grid-cols-1 gap-4",
+                      filteredUpcoming.length > 0 && filteredPast.length > 0 && "xl:grid-cols-2",
+                    )}
+                  >
+                    {filteredUpcoming.length > 0 && (
+                      <section className="rounded-2xl border border-sky-200 bg-sky-50/20 p-4 shadow-sm">
+                        <div className="flex items-start gap-3">
+                          <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                            <CalendarClock className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-base font-bold text-slate-900">Upcoming Assessments</h3>
+                              <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+                                {filteredUpcoming.length} coming
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-600">Next 30 days. Plan ahead.</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          {filteredUpcoming.map((assessment) => (
+                            <AssessmentCard
+                              key={assessment.id}
+                              assessment={assessment}
+                              courseCode={selectedCourse?.code || ""}
+                              isTeacher={user.role === "docente"}
+                              onEdit={() => {
+                                setEditingAssessment(assessment);
+                                setShowEditModal(true);
+                              }}
+                              onDelete={() => {
+                                setSelectedAssessment(assessment);
+                                setShowDeleteModal(true);
+                              }}
+                              isUpcoming={true}
+                            />
+                          ))}
+                        </div>
+                      </section>
+                    )}
+
+                    {filteredPast.length > 0 && (
+                      <section className="rounded-2xl border border-slate-200 bg-slate-50/40 p-4 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => setShowCompletedAssessments((prev) => !prev)}
+                          className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-slate-300"
+                          aria-expanded={showCompletedAssessments}
+                        >
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-base font-bold text-slate-900">Completed Assessments</h3>
+                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                              {filteredPast.length}
+                            </span>
+                          </div>
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 text-slate-500 transition-transform",
+                              showCompletedAssessments && "rotate-180",
+                            )}
+                          />
+                        </button>
+
+                        {!showCompletedAssessments && (
+                          <p className="mt-2 text-xs text-slate-600">Click to show completed items.</p>
+                        )}
+
+                        {showCompletedAssessments && (
+                          <div className="mt-3 space-y-2">
+                            {filteredPast.map((assessment) => (
+                              <AssessmentCard
+                                key={assessment.id}
+                                assessment={assessment}
+                                courseCode={selectedCourse?.code || ""}
+                                isTeacher={user.role === "docente"}
+                                onEdit={() => {
+                                  setEditingAssessment(assessment);
+                                  setShowEditModal(true);
+                                }}
+                                onDelete={() => {
+                                  setSelectedAssessment(assessment);
+                                  setShowDeleteModal(true);
+                                }}
+                                isPast={true}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    )}
+                  </div>
+                )}
+
+                {filteredNoDueDate.length > 0 && (
+                  <section className="rounded-2xl border border-violet-200 bg-violet-50/20 p-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+                        <Clock className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-base font-bold text-slate-900">No Deadline</h3>
+                          <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+                            {filteredNoDueDate.length} flexible
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600">Activities without deadline. Take your time.</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {filteredNoDueDate.map((assessment) => (
+                        <AssessmentCard
+                          key={assessment.id}
+                          assessment={assessment}
+                          courseCode={selectedCourse?.code || ""}
+                          isTeacher={user.role === "docente"}
+                          onEdit={() => {
+                            setEditingAssessment(assessment);
+                            setShowEditModal(true);
+                          }}
+                          onDelete={() => {
+                            setSelectedAssessment(assessment);
+                            setShowDeleteModal(true);
+                          }}
+                          noDueDate={true}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {filteredToday.length === 0 &&
+                  filteredUpcoming.length === 0 &&
+                  filteredPast.length === 0 &&
+                  filteredNoDueDate.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                      <Search className="mx-auto h-9 w-9 text-slate-400" />
+                      <p className="mt-2 text-lg font-bold text-slate-900">No matching assessments</p>
+                      <p className="text-sm text-slate-600">Try different search terms or filters.</p>
+                      <button
+                        onClick={() => {
+                          setSearchTerm("");
+                          setFilterType("all");
+                        }}
+                        className="mt-4 inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                      >
+                        Clear filters
+                      </button>
+                    </div>
+                  )}
               </div>
             )}
           </div>
-        )}
+        </div>
       </div>
-
       {showCreateModal && selectedCourseId && (
         <CreateAssessmentModal
           courseId={selectedCourseId}
@@ -1157,16 +1380,17 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
 
   const getAssessmentIcon = () => {
     if (assessment.assessmentType === 'announcement') {
-      return <Megaphone className="h-6 w-6" />;
+      return <Megaphone className="h-4 w-4" />;
     } else if (assessment.assessmentType === 'delivery') {
-      return <Upload className="h-6 w-6" />;
+      return <Upload className="h-4 w-4" />;
     } else {
-      return assessment.type === "exam" ? <FileText className="h-6 w-6" /> :
-             assessment.type === "quiz" ? <BookOpen className="h-6 w-6" /> :
-             assessment.type === "homework" ? <FileCheck className="h-6 w-6" /> :
-             assessment.type === "project" ? <TrendingUp className="h-6 w-6" /> :
-             assessment.type === "forum" ? <MessageSquare className="h-6 w-6" /> :
-             <Users className="h-6 w-6" />;
+      return assessment.type === "exam" ? <FileText className="h-4 w-4" /> :
+             assessment.type === "quiz" ? <BookOpen className="h-4 w-4" /> :
+             assessment.type === "homework" ? <FileCheck className="h-4 w-4" /> :
+             assessment.type === "project" ? <TrendingUp className="h-4 w-4" /> :
+             assessment.type === "forum" ? <MessageSquare className="h-4 w-4" /> :
+             assessment.type === "self_evaluation" ? <ClipboardCheck className="h-4 w-4" /> :
+             <Users className="h-4 w-4" />;
     }
   };
 
@@ -1181,123 +1405,91 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
              assessment.type === "homework" ? "Homework" :
              assessment.type === "project" ? "Project" :
              assessment.type === "forum" ? "Forum" :
+             assessment.type === "self_evaluation" ? "Self Evaluation" :
              "Participation";
     }
   };
 
-  const getIconColor = () => {
-    return assessment.assessmentType === "announcement" ? "bg-blue-600" : "bg-blue-600";
-  };
+  const cardToneClass = isToday
+    ? "border-amber-200 bg-amber-50/40"
+    : isUpcoming
+      ? "border-sky-200 bg-sky-50/30"
+      : isPast
+        ? "border-slate-200 bg-slate-50/70"
+        : noDueDate
+          ? "border-violet-200 bg-violet-50/30"
+          : "border-slate-200 bg-white";
 
   return (
-    <div className={cn(
-      "bg-white border rounded-2xl p-4 shadow-sm hover:shadow-xl transition-all duration-300 group",
-      isToday ? "border-gray-200 hover:border-gray-300" :
-      isUpcoming ? "border-blue-200 hover:border-blue-300" :
-      isPast ? "border-blue-200 hover:border-blue-300" :
-      "border-gray-200 hover:border-gray-300"
-    )}>
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2">
-        <div className="flex-1">
-          <div className="flex items-start gap-4">
-            <div className={`h-10 w-10 rounded-xl ${getIconColor()} flex items-center justify-center text-white shadow-sm`}>
+    <div className={cn("rounded-xl border p-3 shadow-sm transition hover:shadow-md", cardToneClass)}>
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-3">
+            <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-slate-700 shadow-sm ring-1 ring-slate-200">
               {getAssessmentIcon()}
             </div>
-            
-            <div className="flex-1 ">
-              <div className="flex flex-wrap items-center gap-3 mb-2 ">
-                <h3 className={cn(
-                  "font-bold text-lg text-gray-900 transition-colors",
-                  isToday ? "group-hover:text-red-600" : "group-hover:text-blue-600",
-                )}>
-                  {assessment.name}
-                </h3>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-sm font-bold text-slate-900">{assessment.name}</h3>
+                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                  {getAssessmentTypeLabel()}
+                </span>
               </div>
-              
-              <div className="flex flex-wrap gap-4 text-sm text-gray-500">
-                {assessment.assessmentType === 'delivery' && startDate && (
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-gray-400" />
-                    <span className="font-medium">
-                      Starts: {format(parseISO(assessment.startDate), "MMM dd", { locale: enUS })}
-                    </span>
+
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {assessment.assessmentType === "delivery" && startDate && (
+                  <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600">
+                    <Calendar className="h-3 w-3" />
+                    <span>Starts: {format(parseISO(assessment.startDate), "MMM dd", { locale: enUS })}</span>
                   </div>
                 )}
                 {dueDate && (
-                  <div className="flex items-center gap-2">
-                    <Calendar className={cn(
-                      "h-4 w-4",
-                      isToday ? "text-red-500" :
-                      isUpcoming ? "text-blue-500" :
-                      "text-gray-400"
-                    )} />
-                    <span className={cn(
-                      "font-medium",
-                      isToday ? "text-red-600" :
-                      isUpcoming ? "text-blue-600" :
-                      "text-gray-600"
-                    )}>
-                      {assessment.assessmentType === 'delivery' ? 'Deadline: ' : 'Due: '}
+                  <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600">
+                    <Calendar className="h-3 w-3" />
+                    <span>
+                      {assessment.assessmentType === "delivery" ? "Deadline:" : "Due:"}{" "}
                       {format(parseISO(assessment.dueDate), "MMM dd, yyyy", { locale: enUS })}
                     </span>
                   </div>
                 )}
                 {assessment.percentage > 0 && (
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-600">{assessment.percentage}% of grade</span>
+                  <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600">
+                    <Percent className="h-3 w-3" />
+                    <span>{assessment.percentage}% of grade</span>
                   </div>
-                )} 
+                )}
               </div>
 
-              {descriptionPreview && (
-                <p className={cn(
-                  "text-sm mt-1 line-clamp-2",
-                  isToday ? "text-gray-700" : "text-gray-500",
-                )}>
-                  {descriptionPreview}
-                </p>
-              )}
+              {descriptionPreview && <p className="mt-2 line-clamp-2 text-xs text-slate-600">{descriptionPreview}</p>}
             </div>
           </div>
         </div>
-        
-        <div className="flex items-center gap-2 lg:flex-col lg:items-end">
-          <div className="">
-            <Link
+
+        <div className="flex items-center gap-2 self-end xl:self-start">
+          <Link
             to={`/courses/${courseCode}/assessments/${assessment.id}`}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gray-100 text-gray-700 hover:text-gray-900 hover:shadow-sm transition-all duration-300 font-medium text-sm border border-gray-200 group/view "
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50"
           >
-            <Eye className="h-4 w-4 group-hover/view:scale-110 transition-transform" />
-            View Details
+            <Eye className="h-4 w-4" />
+            <span>View details</span>
           </Link>
-          </div>
-          
+
           {isTeacher && (
-            <div className="flex items-center gap-1">
-              {assessment.assessmentType !== 'announcement' && (
-                <Link
-                  to={`/courses/${courseCode}/assessments/${assessment.id}/grade`}
-                  className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors hover:scale-110"
-                  title="Grade"
-                >
-                  <BarChart3 className="h-5 w-5" />
-                </Link>
-              )}
-              
+            <div className="inline-flex items-center gap-1">
               <button
                 onClick={onEdit}
-                className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors hover:scale-110"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
                 title="Edit"
               >
-                <Edit className="h-5 w-5" />
+                <Edit className="h-4 w-4" />
               </button>
-              
+
               <button
                 onClick={onDelete}
-                className="p-2 text-gray-700 hover:text-gray-800 hover:bg-red-50 rounded-lg transition-colors hover:scale-110"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-600 transition hover:bg-red-100"
                 title="Delete"
               >
-                <Trash2 className="h-5 w-5 text-red-600" />
+                <Trash2 className="h-4 w-4" />
               </button>
             </div>
           )}
@@ -1343,10 +1535,10 @@ function RichTextEditor({
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 hover:bg-gray-200"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100"
           onClick={() => applyCommand("bold")}
           title="Bold"
         >
@@ -1354,7 +1546,7 @@ function RichTextEditor({
         </button>
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 hover:bg-gray-200"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100"
           onClick={() => applyCommand("italic")}
           title="Italic"
         >
@@ -1362,7 +1554,7 @@ function RichTextEditor({
         </button>
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 hover:bg-gray-200"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100"
           onClick={() => applyCommand("underline")}
           title="Underline"
         >
@@ -1370,7 +1562,7 @@ function RichTextEditor({
         </button>
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 hover:bg-gray-200"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100"
           onClick={() => applyCommand("insertUnorderedList")}
           title="Bullet list"
         >
@@ -1378,7 +1570,7 @@ function RichTextEditor({
         </button>
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 hover:bg-gray-200"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100"
           onClick={() => applyCommand("insertOrderedList")}
           title="Numbered list"
         >
@@ -1386,7 +1578,7 @@ function RichTextEditor({
         </button>
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 hover:bg-gray-200"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100"
           onClick={() => applyCommand("formatBlock", "pre")}
           title="Code block"
         >
@@ -1394,7 +1586,7 @@ function RichTextEditor({
         </button>
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 hover:bg-gray-200"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100"
           onClick={handleLinkInsert}
           title="Insert link"
         >
@@ -1404,7 +1596,7 @@ function RichTextEditor({
           type="button"
           className={cn(
             "inline-flex h-8 items-center justify-center rounded-md px-2 text-xs font-semibold",
-            htmlMode ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-200",
+            htmlMode ? "bg-sky-100 text-sky-700" : "text-slate-600 transition hover:bg-slate-100",
           )}
           onClick={() => setHtmlMode((prev) => !prev)}
           title="Toggle HTML mode"
@@ -1418,7 +1610,7 @@ function RichTextEditor({
         <textarea
           name={name}
           rows={5}
-          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
           placeholder={placeholder}
           value={value}
           onChange={(event) => emitValue(event.target.value)}
@@ -1428,12 +1620,12 @@ function RichTextEditor({
           ref={editorRef}
           contentEditable
           onInput={(event) => emitValue((event.target as HTMLDivElement).innerHTML)}
-          className="min-h-[120px] w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+          className="min-h-[120px] w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
           data-placeholder={placeholder}
           suppressContentEditableWarning
         />
       )}
-      <p className="text-xs text-gray-500">You can add links and HTML content for this description.</p>
+      <p className="text-xs text-slate-500">You can add links and HTML content for this description.</p>
     </div>
   );
 }
@@ -1589,21 +1781,24 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-<div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[90vh] border border-gray-200">        <div className="p-6 border-b bg-white">
-          <div className="flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+        <div className="relative border-b border-slate-200 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 p-6">
+          <div className="pointer-events-none absolute -left-10 -top-16 h-28 w-28 rounded-full bg-sky-200/45 blur-2xl" />
+          <div className="pointer-events-none absolute -bottom-12 right-0 h-24 w-24 rounded-full bg-indigo-200/40 blur-xl" />
+          <div className="relative flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-blue-100 flex items-center justify-center">
-                <Plus className="h-5 w-5 text-blue-600" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-sky-200 bg-white/80 shadow-sm">
+                <Plus className="h-5 w-5 text-sky-600" />
               </div>
               <div>
-                <h3 className="font-bold text-lg text-gray-900">New Assessment</h3>
-                <p className="text-sm text-gray-500 mt-1">{courseName}</p>
+                <h3 className="text-lg font-bold text-slate-900">New Assessment</h3>
+                <p className="mt-1 text-sm text-slate-600">{courseName}</p>
               </div>
-            </div> 
-            <button 
+            </div>
+            <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg"
+              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/80 hover:text-slate-700"
             >
               <X className="h-5 w-5" />
             </button>
@@ -1613,11 +1808,11 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Assessment Type *</label>
+              <label className={modalLabelClass}>Assessment Type *</label>
               <select
                 name="assessmentType"
                 required
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                className={modalInputClass}
                 value={formData.assessmentType}
                 onChange={handleChange}
               >
@@ -1628,12 +1823,12 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Name *</label>
+              <label className={modalLabelClass}>Name *</label>
               <input
                 type="text"
                 name="name"
                 required
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                className={modalInputClass}
                 placeholder="Assessment name"
                 value={formData.name}
                 onChange={handleChange}
@@ -1641,33 +1836,33 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
             </div>
 
             <div className="lg:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Assign To Courses *</label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 border border-gray-200 rounded-xl p-3 bg-gray-50 max-h-48 overflow-y-auto">
+              <label className={modalLabelClass}>Assign To Courses *</label>
+              <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-2">
                 {(availableCourses || []).map((course: any) => (
                   <label
                     key={course.id}
-                    className="flex items-start gap-2 p-2 rounded-lg hover:bg-white cursor-pointer border border-transparent hover:border-gray-200"
+                    className="flex items-start gap-2 p-2 rounded-lg hover:bg-white cursor-pointer border border-transparent hover:border-slate-200"
                   >
                     <input
                       type="checkbox"
                       checked={selectedTargetCourseIds.includes(course.id)}
                       onChange={() => handleToggleTargetCourse(course.id)}
-                      className="mt-1 h-4 w-4 text-blue-600 rounded border-gray-300"
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-sky-600"
                     />
-                    <span className="text-sm text-gray-700">
-                      <span className="font-semibold text-gray-900">{course.name}</span>
-                      <span className="block text-xs text-gray-500">{course.code}</span>
+                    <span className="text-sm text-slate-700">
+                      <span className="font-semibold text-slate-900">{course.name}</span>
+                      <span className="block text-xs text-slate-500">{course.code}</span>
                     </span>
                   </label>
                 ))}
               </div>
-              <p className="text-xs text-gray-500 mt-2">
+              <p className="text-xs text-slate-500 mt-2">
                 Selected: {selectedTargetCourseIds.length}. The same activity will be created in each selected course.
               </p>
             </div>
 
             <div className="lg:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+              <label className={modalLabelClass}>Description</label>
               <RichTextEditor
                 name="description"
                 value={formData.description}
@@ -1679,11 +1874,11 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
             {formData.assessmentType === 'assessment' && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Type *</label>
+                  <label className={modalLabelClass}>Type *</label>
                   <select
                     name="type"
                     required
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.type}
                     onChange={handleChange}
                   >
@@ -1697,7 +1892,7 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Percentage *</label>
+                  <label className={modalLabelClass}>Percentage *</label>
                   <input
                     type="number"
                     name="percentage"
@@ -1705,7 +1900,7 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
                     min="0"
                     max="100"
                     step="0.1"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     placeholder="5%"
                     value={formData.percentage}
                     onChange={handleChange}
@@ -1717,25 +1912,25 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
             {formData.assessmentType === 'assessment' && formData.type === 'forum' && (
               <div className="space-y-3 lg:col-span-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Forum Closes At</label>
+                  <label className={modalLabelClass}>Forum Closes At</label>
                   <input
                     type="datetime-local"
                     name="forumCloseAt"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.forumCloseAt}
                     onChange={handleChange}
                     min={getCurrentDateTimeLocal()}
                   />
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-slate-500 mt-2">
                     This controls forum locking. After this date/time, new comments and replies are blocked.
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Forum Rules Preset</label>
+                  <label className={modalLabelClass}>Forum Rules Preset</label>
                   <select
                     name="forumPreset"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.forumPreset}
                     onChange={handleChange}
                   >
@@ -1748,49 +1943,49 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Main Post Min Words</label>
+                    <label className={modalLabelClass}>Main Post Min Words</label>
                     <input
                       type="number"
                       name="forumMainResponseMinWords"
                       min="0"
                       step="1"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                      className={modalInputClass}
                       value={formData.forumMainResponseMinWords}
                       onChange={handleChange}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Main Posts Required</label>
+                    <label className={modalLabelClass}>Main Posts Required</label>
                     <input
                       type="number"
                       name="forumMainResponsesRequired"
                       min="1"
                       step="1"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                      className={modalInputClass}
                       value={formData.forumMainResponsesRequired}
                       onChange={handleChange}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Replies to Peers</label>
+                    <label className={modalLabelClass}>Replies to Peers</label>
                     <input
                       type="number"
                       name="forumPeerRepliesRequired"
                       min="0"
                       step="1"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                      className={modalInputClass}
                       value={formData.forumPeerRepliesRequired}
                       onChange={handleChange}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Comments on Peer Replies</label>
+                    <label className={modalLabelClass}>Comments on Peer Replies</label>
                     <input
                       type="number"
                       name="forumPeerReplyCommentsRequired"
                       min="0"
                       step="1"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                      className={modalInputClass}
                       value={formData.forumPeerReplyCommentsRequired}
                       onChange={handleChange}
                     />
@@ -1801,23 +1996,23 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
 
             {formData.assessmentType === 'delivery' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Type *</label>
+                <label className={modalLabelClass}>Delivery Type *</label>
                 <select
                   name="deliveryType"
                   required
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                  className={modalInputClass}
                   value={formData.deliveryType}
                   onChange={handleChange}
                 >
                   <option value="text">Text Only</option>
                 </select>
-                <p className="text-xs text-gray-500 mt-2">Delivery activities only accept text submissions</p>
+                <p className="text-xs text-slate-500 mt-2">Delivery activities only accept text submissions</p>
               </div>
             )}
 
             {formData.assessmentType !== 'announcement' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className={modalLabelClass}>
                   {hasMultipleCoursesSelected ? "Reference Grade Sheet" : "Grade Sheet *"}
                 </label>
                 <div className="relative">
@@ -1828,7 +2023,7 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
                       (hasMultipleCoursesSelected && formData.mapGradeSheetByTitle && gradeSheets.length > 0)
                     }
                     disabled={loadingSheets}
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all disabled:bg-gray-100 text-sm font-medium"
+                    className={modalInputDisabledClass}
                     value={formData.gradeSheetId}
                     onChange={handleChange}
                   >
@@ -1848,25 +2043,25 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
                     ))}
                   </select>
                   {loadingSheets && (
-                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-blue-500" />
+                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-sky-500" />
                   )}
                 </div>
                 {errorSheets && (
-                  <p className="text-sm text-gray-500 mt-2">{errorSheets}</p>
+                  <p className="text-sm text-slate-500 mt-2">{errorSheets}</p>
                 )}
                 {hasMultipleCoursesSelected && (
                   <div className="mt-3 space-y-2">
-                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
                       <input
                         type="checkbox"
                         name="mapGradeSheetByTitle"
                         checked={Boolean(formData.mapGradeSheetByTitle)}
                         onChange={handleChange}
-                        className="h-4 w-4 text-blue-600 rounded border-gray-300"
+                        className="h-4 w-4 rounded border-slate-300 text-sky-600"
                       />
                       Link grade sheet by the same title in each selected course
                     </label>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-slate-500">
                       Uses the selected reference grade sheet title and matches it in each course.
                     </p>
                   </div>
@@ -1877,53 +2072,53 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
             {formData.assessmentType === 'delivery' && (
               <div className="space-y-2 lg:col-span-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Start Date *</label>
+                  <label className={modalLabelClass}>Start Date *</label>
                   <input
                     type="date"
                     name="startDate"
                     required
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.startDate}
                     onChange={handleChange}
                     min={getCurrentDate()}
                     max={getMaxDate()}
                   />
-                  <p className="text-xs text-gray-500 mt-2">Date when students can start submitting</p>
+                  <p className="text-xs text-slate-500 mt-2">Date when students can start submitting</p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Deadline *</label>
+                  <label className={modalLabelClass}>Deadline *</label>
                   <input
                     type="date"
                     name="dueDate"
                     required
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.dueDate}
                     onChange={handleChange}
                     min={formData.startDate || getCurrentDate()}
                     max={getMaxDate()}
                   />
-                  <p className="text-xs text-gray-500 mt-2">Final submission deadline</p>
+                  <p className="text-xs text-slate-500 mt-2">Final submission deadline</p>
                 </div>
               </div>
             )}
 
             {formData.assessmentType === 'assessment' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className={modalLabelClass}>
                   {formData.type === 'forum' ? 'Due Date (Optional)' : 'Due Date'}
                 </label>
                 <input
                   type="date"
                   name="dueDate"
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                  className={modalInputClass}
                   value={formData.dueDate}
                   onChange={handleChange}
                   min={getCurrentDate()}
                   max={getMaxDate()}
                 />
                 {formData.type === 'forum' && (
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-slate-500 mt-2">
                     This is separate from <strong>Forum Closes At</strong>.
                   </p>
                 )}
@@ -1932,31 +2127,31 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
 
             {formData.assessmentType === 'announcement' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Expiration Date (Optional)</label>
+                <label className={modalLabelClass}>Expiration Date (Optional)</label>
                 <input
                   type="date"
                   name="dueDate"
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                  className={modalInputClass}
                   value={formData.dueDate}
                   onChange={handleChange}
                   min={getCurrentDate()}
                   max={getMaxDate()}
                 />
-                <p className="text-xs text-gray-500 mt-2">Date when announcement expires (optional)</p>
+                <p className="text-xs text-slate-500 mt-2">Date when announcement expires (optional)</p>
               </div>
             )}
 
             {(formData.assessmentType === 'assessment' || formData.assessmentType === 'delivery') && (
               <div className="grid grid-cols-2 gap-4 lg:col-span-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Max Points *</label>
+                  <label className={modalLabelClass}>Max Points *</label>
                   <input
                     type="number"
                     name="maxPoints"
                     required
                     min="0"
                     step="0.1"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     placeholder="4.5"
                     value={formData.maxPoints}
                     onChange={handleChange}
@@ -1964,14 +2159,14 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Passing Score *</label>
+                  <label className={modalLabelClass}>Passing Score *</label>
                   <input
                     type="number"
                     name="passingScore"
                     required
                     min="0"
                     step="0.1"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     placeholder="4.3"
                     value={formData.passingScore}
                     onChange={handleChange}
@@ -1982,17 +2177,17 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
 
           </div>
 
-          <div className="flex gap-3 pt-6 mt-6 border-t border-gray-200">
+          <div className="mt-6 flex gap-3 border-t border-slate-200 pt-6">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-all duration-300"
+              className={cn(modalSecondaryButtonClass, "flex-1")}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-3 rounded-xl bg-blue-600 text-white hover:shadow-lg font-medium transition-all duration-300 flex items-center justify-center gap-2"
+              className={cn(modalPrimaryButtonClass, "flex-1")}
             >
               <Plus className="h-4 w-4" />
               Create
@@ -2005,7 +2200,8 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
 }
 
 function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
-  const detectedPreset = detectForumPreset(assessment?.forumRequirements);
+  const resolvedForumRequirements = resolveForumRequirementsFromAssessment(assessment);
+  const detectedPreset = detectForumPreset(resolvedForumRequirements || undefined);
   const [formData, setFormData] = useState({
     name: assessment?.name || "",
     description: assessment?.description || "",
@@ -2022,10 +2218,10 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
       ? new Date(assessment.forumCloseAt).toISOString().slice(0, 16)
       : "",
     forumPreset: detectedPreset,
-    forumMainResponseMinWords: String(assessment?.forumRequirements?.mainResponseMinWords ?? FORUM_PRESETS.basic.mainResponseMinWords),
-    forumPeerRepliesRequired: String(assessment?.forumRequirements?.peerRepliesRequired ?? FORUM_PRESETS.basic.peerRepliesRequired),
-    forumPeerReplyCommentsRequired: String(assessment?.forumRequirements?.peerReplyCommentsRequired ?? FORUM_PRESETS.basic.peerReplyCommentsRequired),
-    forumMainResponsesRequired: String(assessment?.forumRequirements?.mainResponsesRequired ?? FORUM_PRESETS.basic.mainResponsesRequired),
+    forumMainResponseMinWords: String(resolvedForumRequirements?.mainResponseMinWords ?? FORUM_PRESETS.basic.mainResponseMinWords),
+    forumPeerRepliesRequired: String(resolvedForumRequirements?.peerRepliesRequired ?? FORUM_PRESETS.basic.peerRepliesRequired),
+    forumPeerReplyCommentsRequired: String(resolvedForumRequirements?.peerReplyCommentsRequired ?? FORUM_PRESETS.basic.peerReplyCommentsRequired),
+    forumMainResponsesRequired: String(resolvedForumRequirements?.mainResponsesRequired ?? FORUM_PRESETS.basic.mainResponsesRequired),
   });
 
   const [gradeSheets, setGradeSheets] = useState<GradeSheet[]>([]);
@@ -2065,6 +2261,15 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
       }));
       return;
     }
+    if (name === "type" && value === "self_evaluation") {
+      setFormData((prev) => ({
+        ...prev,
+        type: "self_evaluation",
+        maxPoints: "5",
+        passingScore: prev.passingScore ? prev.passingScore : "3",
+      }));
+      return;
+    }
 
     setFormData(prev => ({ ...prev, [name]: value }));
   };
@@ -2077,24 +2282,28 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
     const now = new Date();
     return now.toISOString().split('T')[0];
   };
+  const isSelfEvaluationType =
+    formData.assessmentType === "assessment" && formData.type === "self_evaluation";
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[90vh] border border-gray-200">
-        <div className="p-4 border-b bg-white">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-blue-100 flex items-center justify-center">
-                <Edit className="h-5 w-5 text-blue-600" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+        <div className="relative border-b border-slate-200 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 p-6">
+          <div className="pointer-events-none absolute -left-10 -top-16 h-28 w-28 rounded-full bg-sky-200/45 blur-2xl" />
+          <div className="pointer-events-none absolute -bottom-12 right-0 h-24 w-24 rounded-full bg-indigo-200/40 blur-xl" />
+          <div className="relative flex items-center justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-sky-200 bg-white/80 shadow-sm">
+                <Edit className="h-5 w-5 text-sky-600" />
               </div>
-              <div>
-                <h3 className="font-bold text-lg text-gray-900">Edit Assessment</h3>
-                <p className="text-sm text-gray-500 mt-1">Update assessment details</p>
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-slate-900">Edit Assessment</h3>
+                <p className="mt-1 text-sm text-slate-600">Update assessment details</p>
               </div>
             </div>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg"
+              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/80 hover:text-slate-700"
             >
               <X className="h-5 w-5" />
             </button>
@@ -2104,10 +2313,10 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Assessment Type</label>
+              <label className={modalLabelClass}>Assessment Type</label>
               <select
                 name="assessmentType"
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                className={modalInputClass}
                 value={formData.assessmentType}
                 onChange={handleChange}
               >
@@ -2118,19 +2327,19 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Name *</label>
+              <label className={modalLabelClass}>Name *</label>
               <input
                 type="text"
                 name="name"
                 required
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                className={modalInputClass}
                 value={formData.name}
                 onChange={handleChange}
               />
             </div>
 
             <div className="lg:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+              <label className={modalLabelClass}>Description</label>
               <RichTextEditor
                 name="description"
                 value={formData.description}
@@ -2142,11 +2351,11 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
             {formData.assessmentType === 'assessment' && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Type *</label>
+                  <label className={modalLabelClass}>Type *</label>
                   <select
                     name="type"
                     required
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.type}
                     onChange={handleChange}
                   >
@@ -2156,11 +2365,12 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
                     <option value="project">Project</option>
                     <option value="participation">Participation</option>
                     <option value="forum">Forum</option>
+                    <option value="self_evaluation">Self Evaluation</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Percentage *</label>
+                  <label className={modalLabelClass}>Percentage *</label>
                   <input
                     type="number"
                     name="percentage"
@@ -2168,7 +2378,7 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
                     min="0"
                     max="100"
                     step="0.1"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.percentage}
                     onChange={handleChange}
                   />
@@ -2179,24 +2389,24 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
             {formData.assessmentType === 'assessment' && formData.type === 'forum' && (
               <div className="space-y-3 lg:col-span-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Forum Closes At</label>
+                  <label className={modalLabelClass}>Forum Closes At</label>
                   <input
                     type="datetime-local"
                     name="forumCloseAt"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.forumCloseAt}
                     onChange={handleChange}
                   />
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-slate-500 mt-2">
                     This controls forum locking. After this date/time, new comments and replies are blocked.
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Forum Rules Preset</label>
+                  <label className={modalLabelClass}>Forum Rules Preset</label>
                   <select
                     name="forumPreset"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.forumPreset}
                     onChange={handleChange}
                   >
@@ -2209,49 +2419,49 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Main Post Min Words</label>
+                    <label className={modalLabelClass}>Main Post Min Words</label>
                     <input
                       type="number"
                       name="forumMainResponseMinWords"
                       min="0"
                       step="1"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                      className={modalInputClass}
                       value={formData.forumMainResponseMinWords}
                       onChange={handleChange}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Main Posts Required</label>
+                    <label className={modalLabelClass}>Main Posts Required</label>
                     <input
                       type="number"
                       name="forumMainResponsesRequired"
                       min="1"
                       step="1"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                      className={modalInputClass}
                       value={formData.forumMainResponsesRequired}
                       onChange={handleChange}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Replies to Peers</label>
+                    <label className={modalLabelClass}>Replies to Peers</label>
                     <input
                       type="number"
                       name="forumPeerRepliesRequired"
                       min="0"
                       step="1"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                      className={modalInputClass}
                       value={formData.forumPeerRepliesRequired}
                       onChange={handleChange}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Comments on Peer Replies</label>
+                    <label className={modalLabelClass}>Comments on Peer Replies</label>
                     <input
                       type="number"
                       name="forumPeerReplyCommentsRequired"
                       min="0"
                       step="1"
-                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                      className={modalInputClass}
                       value={formData.forumPeerReplyCommentsRequired}
                       onChange={handleChange}
                     />
@@ -2262,11 +2472,11 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 
             {formData.assessmentType === 'delivery' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Type</label>
+                <label className={modalLabelClass}>Delivery Type</label>
                 <select
                   name="deliveryType"
                   required
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                  className={modalInputClass}
                   value={formData.deliveryType}
                   onChange={handleChange}
                 >
@@ -2277,12 +2487,12 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 
             {formData.assessmentType !== 'announcement' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Grade Sheet</label>
+                <label className={modalLabelClass}>Grade Sheet</label>
                 <div className="relative">
                   <select
                     name="gradeSheetId"
                     disabled={loadingSheets}
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.gradeSheetId}
                     onChange={handleChange}
                   >
@@ -2300,22 +2510,22 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
             {formData.assessmentType === 'delivery' && (
               <div className="space-y-2 lg:col-span-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+                  <label className={modalLabelClass}>Start Date</label>
                   <input
                     type="date"
                     name="startDate"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.startDate}
                     onChange={handleChange}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Deadline</label>
+                  <label className={modalLabelClass}>Deadline</label>
                   <input
                     type="date"
                     name="dueDate"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.dueDate}
                     onChange={handleChange}
                   />
@@ -2325,18 +2535,18 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 
             {formData.assessmentType === 'assessment' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className={modalLabelClass}>
                   {formData.type === 'forum' ? 'Due Date (Optional)' : 'Due Date'}
                 </label>
                 <input
                   type="date"
                   name="dueDate"
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                  className={modalInputClass}
                   value={formData.dueDate}
                   onChange={handleChange}
                 />
                 {formData.type === 'forum' && (
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-slate-500 mt-2">
                     This is separate from <strong>Forum Closes At</strong>.
                   </p>
                 )}
@@ -2345,11 +2555,11 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 
             {formData.assessmentType === 'announcement' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Expiration Date</label>
+                <label className={modalLabelClass}>Expiration Date</label>
                 <input
                   type="date"
                   name="dueDate"
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                  className={modalInputClass}
                   value={formData.dueDate}
                   onChange={handleChange}
                 />
@@ -2359,28 +2569,34 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
             {(formData.assessmentType === 'assessment' || formData.assessmentType === 'delivery') && (
               <div className="grid grid-cols-2 gap-4 lg:col-span-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Max Points *</label>
+                  <label className={modalLabelClass}>Max Points *</label>
                   <input
                     type="number"
                     name="maxPoints"
                     required
-                    min="0"
+                    min={isSelfEvaluationType ? "5" : "0"}
+                    max={isSelfEvaluationType ? "5" : undefined}
                     step="0.1"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.maxPoints}
                     onChange={handleChange}
+                    readOnly={isSelfEvaluationType}
                   />
+                  {isSelfEvaluationType && (
+                    <p className="text-xs text-slate-500 mt-2">Self Evaluation uses Colombian scale (0.0 - 5.0).</p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Passing Score *</label>
+                  <label className={modalLabelClass}>Passing Score *</label>
                   <input
                     type="number"
                     name="passingScore"
                     required
                     min="0"
+                    max={isSelfEvaluationType ? "5" : undefined}
                     step="0.1"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className={modalInputClass}
                     value={formData.passingScore}
                     onChange={handleChange}
                   />
@@ -2390,17 +2606,17 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 
           </div>
 
-          <div className="flex gap-3 pt-6 mt-6 border-t border-gray-200">
+          <div className="mt-6 flex gap-3 border-t border-slate-200 pt-6">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-all duration-300"
+              className={cn(modalSecondaryButtonClass, "flex-1")}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-3 rounded-xl bg-blue-600 text-white hover:shadow-lg font-medium transition-all duration-300 flex items-center justify-center gap-2"
+              className={cn(modalPrimaryButtonClass, "flex-1")}
             >
               <Edit className="h-4 w-4" />
               Save Changes
@@ -2414,26 +2630,26 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 
 function DeleteConfirmationModal({ title, message, onConfirm, onCancel }: any) {
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 border border-gray-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
         <div className="text-center">
-          <div className="h-20 w-20 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center border border-gray-200">
-            <AlertCircle className="h-10 w-10 text-gray-600" />
+          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-2xl border border-red-100 bg-red-50">
+            <AlertCircle className="h-10 w-10 text-red-500" />
           </div>
-          
-          <h3 className="font-bold text-xl text-gray-900 mb-3">{title}</h3>
-          <p className="text-gray-600 mb-6">{message}</p>
-          
+
+          <h3 className="mb-3 text-xl font-bold text-slate-900">{title}</h3>
+          <p className="mb-6 text-slate-600">{message}</p>
+
           <div className="flex justify-center gap-3">
             <button
               onClick={onCancel}
-              className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 font-medium transition-all duration-300"
+              className={modalSecondaryButtonClass}
             >
               Cancel
             </button>
             <button
               onClick={onConfirm}
-              className="px-6 py-3 bg-gray-900 text-white rounded-xl hover:shadow-lg font-medium transition-all duration-300"
+              className="inline-flex items-center justify-center rounded-xl bg-red-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 hover:shadow-md"
             >
               Delete
             </button>

@@ -14,6 +14,7 @@ import {
   X, 
   FolderOpen,
   ChevronRight,
+  ChevronLeft,
   FileText,
   ClipboardCheck,
   Settings,
@@ -21,25 +22,32 @@ import {
   User,
   FileSpreadsheet,
   CalendarDays,
+  ShieldCheck,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { useAcademic } from '@/contexts/AcademicContext';
+import { isAdminEmail } from '@/lib/services/adminAccessService';
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ReactNode;
-  roles: Array<'docente' | 'estudiante'>;
+  roles: Array<'docente' | 'estudiante' | 'admin'>;
   showCondition?: () => boolean;
 }
 
 interface SidebarProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  showCollapseToggle?: boolean;
 }
 
-export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
+export function Sidebar({
+  isCollapsed,
+  onToggleCollapse,
+  showCollapseToggle = true,
+}: SidebarProps) {
   const { user, logout } = useAuth();
   const { courses, selectedCourse } = useAcademic();
   const location = useLocation();
@@ -54,7 +62,9 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
   const getUserFirstCourse = () => {
     if (!user) return null;
     
-    const userCourses = user.role === 'docente' 
+    if (user.role === 'admin') return null;
+
+    const userCourses = user.role === 'docente'
       ? courses.filter(c => c.teacherId === user.id)
       : courses.filter(c => c.enrolledStudents?.includes(user.id));
     
@@ -107,13 +117,15 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
     localStorage.removeItem(quizGuardStorageKey);
   };
 
-  // Definir los items de navegación con rutas en inglés
+  const dashboardPath =
+    user?.role === 'docente' ? '/teacher' : user?.role === 'admin' ? '/admin/dashboard' : '/student';
+
   const navItems: NavItem[] = [
     {
       label: 'Dashboard',
-      href: user?.role === 'docente' ? '/teacher' : '/student',
+      href: dashboardPath,
       icon: <LayoutDashboard className="h-4 w-4" />,
-      roles: ['docente', 'estudiante'],
+      roles: ['docente', 'estudiante', 'admin'],
     },
     {
       label: 'Calendar',
@@ -125,7 +137,7 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
       label: 'Courses',
       href: '/courses',
       icon: <BookOpen className="h-4 w-4" />,
-      roles: ['docente', 'estudiante'],
+      roles: ['docente', 'estudiante', 'admin'],
     },
     { 
       label: 'Assessments',
@@ -192,12 +204,46 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
       roles: ['docente'],
     },
     {
+      label: 'Admin Emails',
+      href: '/admin/admins',
+      icon: <ShieldCheck className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Teacher Approvals',
+      href: '/admin/teacher-approvals',
+      icon: <ClipboardCheck className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Teacher Ops',
+      href: '/admin/teacher-ops',
+      icon: <BarChart3 className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Deletion Requests',
+      href: '/admin/deletions',
+      icon: <Users className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Admin Inbox',
+      href: '/admin/inbox',
+      icon: <Bell className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
       label: 'Profile',
       href: user
-        ? `${user.role === 'docente' ? '/teacher' : '/student'}/profile/${user.id}`
+        ? user.role === 'docente'
+          ? `/teacher/profile/${user.id}`
+          : user.role === 'estudiante'
+            ? `/student/profile/${user.id}`
+            : '/profile'
         : '/profile',
       icon: <User className="h-4 w-4" />,
-      roles: ['docente', 'estudiante'],
+      roles: ['docente', 'estudiante', 'admin'],
     },
   ];
 
@@ -217,7 +263,6 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
   const isActive = (href: string, label: string) => {
     // Casos especiales primero
     if (label === 'Dashboard') {
-      const dashboardPath = user?.role === 'docente' ? '/teacher' : '/student';
       return location.pathname === dashboardPath;
     }
     
@@ -254,7 +299,7 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
     if (label === 'Notifications') {
       return location.pathname.startsWith('/teacher/notifications');
     }
-    
+
     // Para otros items
     return location.pathname.startsWith(href) && 
            !location.pathname.startsWith('/courses/view/');
@@ -265,7 +310,10 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
       {/* Mobile menu button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed top-4 left-4 z-50 lg:hidden p-2 rounded-lg bg-blue-600 text-white shadow-md hover:bg-blue-700 transition-colors"
+        className={cn(
+          "app-sidebar-mobile-toggle fixed top-3 left-3 z-50 h-10 w-10 rounded-lg flex items-center justify-center transition-colors lg:hidden",
+          isOpen && "pointer-events-none opacity-0",
+        )}
         aria-label={isOpen ? 'Close menu' : 'Open menu'}
       >
         {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
@@ -274,7 +322,7 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
       {/* Overlay */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/30 z-40 lg:hidden"
+          className="app-sidebar-overlay fixed inset-0 z-40 lg:hidden"
           onClick={() => setIsOpen(false)}
         />
       )}
@@ -282,35 +330,58 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed top-0 left-0 z-40 h-screen bg-gray-900 border-r border-gray-800 transition-all duration-300 lg:translate-x-0 flex flex-col',
+          'app-sidebar fixed top-0 left-0 z-40 flex h-screen flex-col transition-all duration-300 lg:translate-x-0',
           isOpen ? 'translate-x-0' : '-translate-x-full',
-          isCollapsed ? 'w-16' : 'w-64'
+          isCollapsed ? 'w-20' : 'w-64'
         )}
       >
         <div className="flex h-full min-h-0 flex-col">
           {/* Header */}
           <div className={cn(
-            "flex items-center gap-2 p-4 border-b border-gray-700",
-            isCollapsed && "justify-center p-3"
+            "app-sidebar-header relative flex items-center gap-2 p-4",
+            isCollapsed ? "app-sidebar-header-collapsed justify-center" : "pr-12"
           )}>
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white flex-shrink-0 overflow-hidden border border-blue-200">
+            <div className="app-sidebar-brand-icon flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white">
               <img src="/logo.png" alt="Multicourses logo" className="h-7 w-7 object-contain" />
             </div>
             
             {!isCollapsed && (
               <div className="flex flex-col flex-1 min-w-0">
-                <span className="text-sm font-semibold text-white truncate">
+                <span className="app-sidebar-brand-title truncate text-sm font-semibold">
                   Multicourses
                 </span>
-                <span className="text-xs text-gray-300 truncate">
+                <span className="app-sidebar-brand-subtitle truncate text-xs">
                   Academic Platform
                 </span>
               </div>
             )}
+
+            {showCollapseToggle && (
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className={cn(
+                  "app-sidebar-toggle-btn hidden items-center justify-center lg:inline-flex",
+                  isCollapsed && "app-sidebar-toggle-btn-collapsed",
+                )}
+                aria-label={isCollapsed ? "Expandir sidebar" : "Contraer sidebar"}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="h-4 w-4" />
+                ) : (
+                  <ChevronLeft className="h-4 w-4" />
+                )}
+              </button>
+            )}
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-2 space-y-1">
+          <nav
+            className={cn(
+              "app-sidebar-nav no-scrollbar flex-1 min-h-0 space-y-1 overflow-y-auto p-2",
+              isCollapsed && "app-sidebar-nav-collapsed",
+            )}
+          >
             {filteredNavItems.map((item) => {
               const active = isActive(item.href, item.label);
               return (
@@ -323,16 +394,15 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
                     setIsOpen(false);
                   }}
                   className={cn(
-                    'flex items-center gap-3 px-3 py-2 rounded-lg text-gray-200 hover:bg-gray-700/50 hover:text-white transition-all duration-200 group relative',
-                    active && 'bg-blue-600/25 text-white font-medium border-l-2 border-blue-400',
-                    isCollapsed && 'justify-center px-2'
+                    "app-sidebar-link group relative flex items-center gap-3 rounded-xl px-3 py-2 transition-all duration-200",
+                    active && "app-sidebar-link-active font-medium",
+                    isCollapsed && "app-sidebar-link-collapsed justify-center"
                   )}
                   title={isCollapsed ? item.label : undefined} 
                 >
                   <div className={cn(
-                    "flex items-center justify-center h-8 w-8 rounded-lg",
-                    active ? "bg-blue-500/20" : "bg-gray-700/30",
-                    active ? "text-blue-300" : "text-gray-400"
+                    "app-sidebar-icon-wrap flex h-8 w-8 items-center justify-center rounded-lg",
+                    isCollapsed && "app-sidebar-icon-wrap-collapsed",
                   )}>
                     {item.icon}
                   </div>
@@ -341,14 +411,14 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
                     <>
                       <span className="flex-1 text-sm">{item.label}</span>
                       {active && (
-                        <ChevronRight className="h-4 w-4 ml-auto text-blue-400" />
+                        <ChevronRight className="app-sidebar-active-arrow ml-auto h-4 w-4" />
                       )}
                     </>
                   )}
                   
                   {/* Tooltip for collapsed sidebar */}
                   {isCollapsed && (
-                    <div className="absolute left-full ml-2 px-2 py-1 bg-gray-800 text-gray-100 text-sm rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 border border-gray-700">
+                    <div className="app-sidebar-tooltip pointer-events-none absolute left-full z-50 ml-2 whitespace-nowrap rounded-md px-2 py-1 text-sm opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
                       {item.label}
                     </div>
                   )}
@@ -358,12 +428,12 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
           </nav>
 
           {/* User section */}
-          <div className="shrink-0 border-t border-gray-700 p-3">
+          <div className={cn("app-sidebar-user shrink-0 p-3", isCollapsed && "app-sidebar-user-collapsed")}>
           <div className={cn(
               "flex items-center mb-2 px-2",
-              isCollapsed ? "justify-center" : "gap-3"
+              isCollapsed ? "justify-center mb-1 px-0" : "gap-3"
             )}>
-              <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold flex-shrink-0 overflow-hidden">
+              <div className="app-sidebar-avatar flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold">
                 {user?.avatarUrl ? (
                   <img src={user.avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
                 ) : user?.avatarEmoji ? (
@@ -375,11 +445,15 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
               
               {!isCollapsed && (
                 <div className="flex-1 min-w-0 ">
-                  <p className="text-sm font-medium text-white truncate">
+                  <p className="app-sidebar-user-name truncate text-sm font-medium">
                     {user?.name}
                   </p>
-                  <p className="text-xs text-gray-300 capitalize truncate">
-                    {user?.role === 'docente' ? 'Teacher' : 'Student'}
+                  <p className="app-sidebar-user-role truncate text-xs capitalize">
+                    {user?.role === 'admin' || isAdminEmail(user?.email)
+                      ? 'Admin'
+                      : user?.role === 'docente'
+                        ? 'Teacher'
+                        : 'Student'}
                   </p>
                 </div>
               )}
@@ -388,13 +462,13 @@ export function Sidebar({ isCollapsed, onToggleCollapse }: SidebarProps) {
             <button 
               onClick={logout}
               className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-300 hover:bg-red-600/10 hover:text-red-300 w-full transition-colors",
-                isCollapsed && "justify-center px-2"
+                "app-sidebar-logout flex w-full items-center gap-3 rounded-lg px-3 py-2.5 transition-colors",
+                isCollapsed && "app-sidebar-logout-collapsed justify-center px-0"
               )}
               title={isCollapsed ? "Log out" : undefined}
             >
-              <div className="h-8 w-8 rounded-lg bg-red-500/10 flex items-center justify-center">
-                <LogOut className="h-4 w-4 text-red-400" />
+              <div className="app-sidebar-logout-icon flex h-8 w-8 items-center justify-center rounded-lg">
+                <LogOut className="h-4 w-4 text-red-200" />
               </div>
               {!isCollapsed && <span className="text-sm">Log out</span>}
             </button>

@@ -9,6 +9,10 @@ export interface NotificationAutomationSettings {
 }
 
 export type NotificationAutomationKey = keyof NotificationAutomationSettings;
+export type NotificationAutomationBooleanKey = Exclude<
+  NotificationAutomationKey,
+  "deadlineReminderHours"
+>;
 
 export const defaultNotificationAutomations: NotificationAutomationSettings = {
   assessmentCreated: true,
@@ -43,7 +47,7 @@ export function getNotificationAutomations(userId?: string): NotificationAutomat
 
 export function isNotificationAutomationEnabled(
   userId: string | undefined,
-  key: NotificationAutomationKey,
+  key: NotificationAutomationBooleanKey,
 ): boolean {
   return getNotificationAutomations(userId)[key];
 }

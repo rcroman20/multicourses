@@ -215,7 +215,7 @@ export function calculateCourseRealStats(
 
   // Combinar calificaciones de ambos sistemas
   for (const studentId of enrolledStudents) {
-    let studentGrades: number[] = [];
+    const studentGrades: number[] = [];
     
     // 1. Buscar en grades tradicionales
     const traditionalGrades = grades.filter(

@@ -169,6 +169,10 @@
     background: linear-gradient(145deg, hsl(0 0% 100%) 0%, hsl(210 40% 98%) 100%);
     box-shadow: var(--shadow-card);
   }
+
+  .dark .modern-card {
+    background: linear-gradient(145deg, hsl(222 47% 13%) 0%, hsl(222 47% 10%) 100%);
+  }
   
   .modern-card:hover {
     @apply border-primary/30;
@@ -203,6 +207,10 @@
   .progress-modern {
     @apply h-3 rounded-full bg-gray-200 overflow-hidden;
   }
+
+  .dark .progress-modern {
+    @apply bg-slate-700;
+  }
   
   .progress-modern-fill {
     @apply h-full rounded-full transition-all duration-700 ease-out;
@@ -215,6 +223,10 @@
     @apply placeholder:text-gray-400;
     @apply focus:outline-none focus:ring-4 focus:ring-primary/20 focus:border-primary;
     @apply transition-all duration-300 ease-out;
+  }
+
+  .dark .input-modern {
+    @apply border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-400;
   }
 
   /* Botón principal moderno */
@@ -234,6 +246,10 @@
     @apply hover:bg-gradient-to-r hover:from-primary/5 hover:to-secondary/5 hover:border-primary;
     @apply hover:shadow-lg active:scale-[0.98];
     @apply transition-all duration-300 ease-out;
+  }
+
+  .dark .btn-modern-outline {
+    @apply bg-slate-900 text-slate-100 border-slate-700;
   }
 
   /* Sidebar link moderno */
@@ -267,6 +283,10 @@
   
   .table-modern tbody tr:hover {
     @apply bg-gradient-to-r from-primary/5 to-secondary/5;
+  }
+
+  .dark .table-modern thead {
+    @apply from-slate-800 to-slate-700;
   }
 
   /* Animación de fade in mejorada */
@@ -565,6 +585,7 @@
   /* Texto con gradiente */
   .text-gradient-primary {
     background: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(190 90% 50%) 100%);
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
@@ -597,6 +618,7 @@
     overflow: hidden;
     display: -webkit-box;
     -webkit-box-orient: vertical;
+    line-clamp: 1;
     -webkit-line-clamp: 1;
   }
   
@@ -604,6 +626,7 @@
     overflow: hidden;
     display: -webkit-box;
     -webkit-box-orient: vertical;
+    line-clamp: 2;
     -webkit-line-clamp: 2;
   }
   
@@ -611,6 +634,7 @@
     overflow: hidden;
     display: -webkit-box;
     -webkit-box-orient: vertical;
+    line-clamp: 3;
     -webkit-line-clamp: 3;
   }
 }

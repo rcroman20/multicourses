@@ -16,7 +16,6 @@ import {
   onSnapshot,
   QuerySnapshot,
   DocumentData,
-  arrayUnion,
   arrayRemove,
 } from "firebase/firestore";
 
@@ -24,7 +23,11 @@ export { fileService } from "./services/fileService";
 export type { CourseFile } from "./services/fileService";
 
 
-import type { Course, Assessment, Grade, User } from "@/types/academic";
+import type { Course, CourseClassSchedule, Assessment, Grade, User } from "@/types/academic";
+import {
+  changeCourseEnrollmentWithPlan,
+  createCourseWithPlan,
+} from "@/lib/services/teacherPlanEnforcementService";
 
 // Referencias a colecciones
 export const coursesCollection = collection(firebaseDB, "cursos");
@@ -34,6 +37,43 @@ export const studentsCollection = collection(firebaseDB, "estudiantes");
 export const usersCollection = collection(firebaseDB, "usuarios");
 export const gradeSheetsCollection = collection(firebaseDB, "gradeSheets");
 export const unitsCollection = collection(firebaseDB, "units");
+
+const normalizeClassSchedule = (value: unknown): CourseClassSchedule[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const row = entry as {
+        dayOfWeek?: unknown;
+        startTime?: unknown;
+        endTime?: unknown;
+        location?: unknown;
+      };
+
+      const dayOfWeek = Number(row.dayOfWeek);
+      const startTime = typeof row.startTime === "string" ? row.startTime.trim() : "";
+      const endTime = typeof row.endTime === "string" ? row.endTime.trim() : "";
+      const location = typeof row.location === "string" ? row.location.trim() : "";
+
+      if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) return null;
+      if (!startTime || !endTime) return null;
+
+      return {
+        dayOfWeek,
+        startTime,
+        endTime,
+        ...(location ? { location } : {}),
+      } satisfies CourseClassSchedule;
+    })
+    .filter((item): item is CourseClassSchedule => Boolean(item))
+    .sort((a, b) => {
+      if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
+      if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+      if (a.endTime !== b.endTime) return a.endTime.localeCompare(b.endTime);
+      return (a.location || "").localeCompare(b.location || "");
+    });
+};
 
 // Operaciones CRUD para Cursos - ACTUALIZADO CON FUNCIONES DE ELIMINACIÓN
 export const courseService = {
@@ -54,6 +94,7 @@ export const courseService = {
         teacherId: data.teacherId || "",
         teacherName: data.teacherName || "",
         description: data.description || "",
+        classSchedule: normalizeClassSchedule(data.classSchedule),
         enrolledStudents: data.enrolledStudents || [],
         createdAt: data.createdAt?.toDate() || new Date(),
       };
@@ -94,6 +135,7 @@ await updateDoc(doc(firebaseDB, "cursos", courseId), data);
         teacherId: data.teacherId || "",
         teacherName: data.teacherName || "",
         description: data.description || "",
+        classSchedule: normalizeClassSchedule(data.classSchedule),
         enrolledStudents: data.enrolledStudents || [],
         createdAt: data.createdAt?.toDate() || new Date(),
       };
@@ -121,6 +163,7 @@ await updateDoc(doc(firebaseDB, "cursos", courseId), data);
         teacherId: data.teacherId || "",
         teacherName: data.teacherName || "",
         description: data.description || "",
+        classSchedule: normalizeClassSchedule(data.classSchedule),
         enrolledStudents: data.enrolledStudents || [],
         createdAt: data.createdAt?.toDate() || new Date(),
       };
@@ -129,11 +172,16 @@ await updateDoc(doc(firebaseDB, "cursos", courseId), data);
 
   // Crear nuevo curso
   create: async (course: Omit<Course, "id" | "createdAt">): Promise<string> => {
-    const docRef = await addDoc(coursesCollection, {
-      ...course,
-      createdAt: serverTimestamp(),
+    const result = await createCourseWithPlan({
+      name: String(course.name || ""),
+      code: String(course.code || ""),
+      semester: String(course.semester || ""),
+      group: String(course.group || ""),
+      credits: Number(course.credits || 0),
+      description: String(course.description || ""),
+      classSchedule: Array.isArray(course.classSchedule) ? course.classSchedule : [],
     });
-    return docRef.id;
+    return result.courseId;
   },
 
 
@@ -266,19 +314,11 @@ await updateDoc(doc(firebaseDB, "cursos", courseId), data);
 
   // Inscribir estudiante en curso
   enrollStudent: async (courseId: string, studentId: string): Promise<void> => {
-    const docRef = doc(coursesCollection, courseId);
-    const courseDoc = await getDoc(docRef);
-
-    if (courseDoc.exists()) {
-      const data = courseDoc.data();
-      const enrolledStudents = data.enrolledStudents || [];
-
-      if (!enrolledStudents.includes(studentId)) {
-        await updateDoc(docRef, {
-          enrolledStudents: [...enrolledStudents, studentId],
-        });
-      }
-    }
+    await changeCourseEnrollmentWithPlan({
+      courseId,
+      studentId,
+      action: "enroll",
+    });
   },
 
   // Retirar estudiante de curso
@@ -286,21 +326,11 @@ await updateDoc(doc(firebaseDB, "cursos", courseId), data);
     courseId: string,
     studentId: string,
   ): Promise<void> => {
-    const docRef = doc(coursesCollection, courseId);
-    const courseDoc = await getDoc(docRef);
-
-    if (courseDoc.exists()) {
-      const data = courseDoc.data();
-      const enrolledStudents = data.enrolledStudents || [];
-
-      const updatedEnrolledStudents = enrolledStudents.filter(
-        (id: string) => id !== studentId,
-      );
-
-      await updateDoc(docRef, {
-        enrolledStudents: updatedEnrolledStudents,
-      });
-    }
+    await changeCourseEnrollmentWithPlan({
+      courseId,
+      studentId,
+      action: "unenroll",
+    });
   },
 };
 
@@ -535,37 +565,11 @@ export const enrollmentService = {
     courseId: string,
     studentId: string,
   ): Promise<void> => {
-    const courseRef = doc(coursesCollection, courseId);
-    const courseDoc = await getDoc(courseRef);
-
-    if (!courseDoc.exists()) {
-      throw new Error("Curso no encontrado");
-    }
-
-    const data = courseDoc.data();
-    const enrolledStudents = data.enrolledStudents || [];
-
-    // Verificar si el estudiante ya está inscrito
-    if (enrolledStudents.includes(studentId)) {
-      throw new Error("El estudiante ya está inscrito en este curso");
-    }
-
-    // Agregar estudiante al array
-    await updateDoc(courseRef, {
-      enrolledStudents: [...enrolledStudents, studentId],
+    await changeCourseEnrollmentWithPlan({
+      courseId,
+      studentId,
+      action: "enroll",
     });
-
-    // También actualizar el documento del estudiante (opcional)
-    try {
-      const studentRef = doc(studentsCollection, studentId);
-      await updateDoc(studentRef, {
-        courses: arrayUnion(courseId),
-      });
-    } catch (error) {
-      console.log(
-        "Nota: No se pudo actualizar el documento del estudiante, pero se inscribió en el curso",
-      );
-    }
   },
 
   getAllStudents: async (): Promise<any[]> => {
@@ -587,34 +591,11 @@ export const enrollmentService = {
     courseId: string,
     studentId: string,
   ): Promise<void> => {
-    const courseRef = doc(coursesCollection, courseId);
-    const courseDoc = await getDoc(courseRef);
-
-    if (!courseDoc.exists()) {
-      throw new Error("Curso no encontrado");
-    }
-
-    const data = courseDoc.data();
-    const enrolledStudents = data.enrolledStudents || [];
-
-    // Filtrar el estudiante del array
-    const updatedEnrolledStudents = enrolledStudents.filter(
-      (id: string) => id !== studentId,
-    );
-
-    await updateDoc(courseRef, {
-      enrolledStudents: updatedEnrolledStudents,
+    await changeCourseEnrollmentWithPlan({
+      courseId,
+      studentId,
+      action: "unenroll",
     });
-
-    // También actualizar el documento del estudiante (opcional)
-    try {
-      const studentRef = doc(studentsCollection, studentId);
-      await updateDoc(studentRef, {
-        courses: arrayRemove(courseId),
-      });
-    } catch (error) {
-      console.log("Nota: No se pudo actualizar el documento del estudiante");
-    }
   },
 
   // Obtener estudiantes inscritos en un curso con sus datos completos
@@ -699,6 +680,7 @@ export const enrollmentService = {
         teacherId: data.teacherId || "",
         teacherName: data.teacherName || "",
         description: data.description || "",
+        classSchedule: normalizeClassSchedule(data.classSchedule),
         enrolledStudents: data.enrolledStudents || [],
         createdAt: data.createdAt?.toDate() || new Date(),
       };
@@ -773,6 +755,7 @@ export const realTimeService = {
           teacherId: data.teacherId || "",
           teacherName: data.teacherName || "",
           description: data.description || "",
+          classSchedule: normalizeClassSchedule(data.classSchedule),
           enrolledStudents: data.enrolledStudents || [],
           createdAt: data.createdAt?.toDate() || new Date(),
         };

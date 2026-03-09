@@ -5,11 +5,8 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { firebaseDB } from "@/lib/firebase";
 import {
   collection,
-  getDoc,
   getDocs,
   addDoc,
-  deleteDoc,
-  doc,
   query,
   where,
 } from "firebase/firestore";
@@ -42,6 +39,9 @@ import { z } from "zod";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { deleteUserByAdmin } from "@/lib/services/adminUserDeletionService";
+import { isTeacherPlanExpired } from "@/lib/services/teacherPlanAccessService";
+import { isAdminEmail } from "@/lib/services/adminAccessService";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -61,12 +61,59 @@ const studentSchema = z.object({
   role: z.enum(["estudiante", "docente"]).default("estudiante"),
 });
 
+type UserRole = "estudiante" | "docente";
+type TeacherApprovalStatus = "pending" | "approved" | "rejected";
+type StudentRoleDisplay = "student" | "teacher" | "teacher_pending" | "teacher_rejected";
+
+const normalizeUserRole = (value: unknown): UserRole | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+
+  if (
+    normalized === "docente" ||
+    normalized === "teacher" ||
+    normalized === "profesor" ||
+    normalized === "professor" ||
+    normalized === "instructor"
+  ) {
+    return "docente";
+  }
+
+  if (
+    normalized === "estudiante" ||
+    normalized === "student" ||
+    normalized === "alumno" ||
+    normalized === "learner"
+  ) {
+    return "estudiante";
+  }
+
+  return null;
+};
+
+const normalizeTeacherApprovalStatus = (
+  value: unknown,
+): TeacherApprovalStatus | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "pending" ||
+    normalized === "approved" ||
+    normalized === "rejected"
+  ) {
+    return normalized as TeacherApprovalStatus;
+  }
+  return null;
+};
+
 interface Student {
   id: string;
   idNumber: string;
   email: string;
   name: string;
   role: "estudiante" | "docente";
+  requestedRole?: UserRole;
+  teacherApprovalStatus?: TeacherApprovalStatus;
   whatsApp: string;
   avatarUrl?: string;
   avatarEmoji?: string;
@@ -75,9 +122,26 @@ interface Student {
   canDelete: boolean;
 }
 
+const getStudentRoleDisplay = (
+  student: Pick<Student, "role" | "requestedRole" | "teacherApprovalStatus">,
+): StudentRoleDisplay => {
+  if (student.role === "docente") return "teacher";
+  if (student.requestedRole !== "docente") return "student";
+  if (student.teacherApprovalStatus === "pending") return "teacher_pending";
+  if (student.teacherApprovalStatus === "rejected") return "teacher_rejected";
+  if (student.teacherApprovalStatus === "approved") return "teacher";
+  return "student";
+};
+
+const isTeacherDisplay = (
+  student: Pick<Student, "role" | "requestedRole" | "teacherApprovalStatus">,
+): boolean => getStudentRoleDisplay(student) !== "student";
+
 export default function StudentsPage() {
   const { user } = useAuth();
-  const { createNotification } = useNotifications();
+  const {
+    createNotification,
+  } = useNotifications();
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -93,10 +157,14 @@ export default function StudentsPage() {
   const [courseNames, setCourseNames] = useState<Record<string, string>>({});
 
   const isTeacher = user?.role === "docente";
-  const isAdmin = user?.role === "docente"; // Only if you have admin role
+  const isAdmin = isAdminEmail(user?.email);
   const [myCourseStudentIds, setMyCourseStudentIds] = useState<Set<string>>(
     new Set(),
   );
+  const [myTeacherCourseIds, setMyTeacherCourseIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [teacherCourseCount, setTeacherCourseCount] = useState(0);
   const [showOnlyMyStudents, setShowOnlyMyStudents] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
@@ -122,7 +190,7 @@ export default function StudentsPage() {
       const names: Record<string, string> = {};
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        names[doc.id] = data.name || data.nombre || "Unknown Course";
+        names[doc.id] = data.name || data.nombre || "";
       });
 
       setCourseNames(names);
@@ -132,7 +200,12 @@ export default function StudentsPage() {
   }, []);
 
   const fetchTeacherCourses = useCallback(async () => {
-    if (!isTeacher || !user?.id) return;
+    if (!isTeacher || !user?.id) {
+      setMyCourseStudentIds(new Set());
+      setMyTeacherCourseIds(new Set());
+      setTeacherCourseCount(0);
+      return;
+    }
 
     try {
       const coursesRef = collection(firebaseDB, "cursos");
@@ -142,9 +215,11 @@ export default function StudentsPage() {
       );
       const querySnapshot = await getDocs(teacherCoursesQuery);
 
+      const ownedCourseIds = new Set<string>();
       const allStudentIds = new Set<string>();
 
       querySnapshot.forEach((doc) => {
+        ownedCourseIds.add(doc.id);
         const data = doc.data() as Record<string, any>;
         if (data.enrolledStudents && Array.isArray(data.enrolledStudents)) {
           data.enrolledStudents.forEach((studentId: string) => {
@@ -153,7 +228,9 @@ export default function StudentsPage() {
         }
       });
 
+      setMyTeacherCourseIds(ownedCourseIds);
       setMyCourseStudentIds(allStudentIds);
+      setTeacherCourseCount(querySnapshot.size);
     } catch {
       // Non-critical for page usage; avoid noisy toast while navigating.
     }
@@ -177,6 +254,10 @@ export default function StudentsPage() {
       studentsSnapshot.forEach((studentDoc) => {
         studentsById.set(studentDoc.id, studentDoc.data() as Record<string, any>);
       });
+
+      const validCourseIds = new Set<string>(
+        coursesSnapshot.docs.map((courseDoc) => courseDoc.id),
+      );
 
       const coursesByUserId = new Map<string, Set<string>>();
       const teacherIds = new Set<string>();
@@ -209,16 +290,33 @@ export default function StudentsPage() {
       const studentList: Student[] = Array.from(userIds).map((id) => {
         const userData = usersById.get(id) || {};
         const studentData = studentsById.get(id) || {};
-        const roleFromData = userData.role || studentData.role;
+        const roleFromData =
+          normalizeUserRole(userData.role) ||
+          normalizeUserRole(studentData.role);
+        const requestedRole =
+          normalizeUserRole(userData.requestedRole) ||
+          normalizeUserRole(studentData.requestedRole) ||
+          undefined;
+        const teacherApprovalStatus =
+          normalizeTeacherApprovalStatus(userData.teacherApprovalStatus) ||
+          normalizeTeacherApprovalStatus(studentData.teacherApprovalStatus) ||
+          undefined;
         const inferredRole =
-          roleFromData === "docente" || roleFromData === "estudiante"
+          roleFromData
             ? roleFromData
+            : requestedRole === "docente" && teacherApprovalStatus === "approved"
+              ? "docente"
             : (teacherIds.has(id) ? "docente" : "estudiante");
 
         const directCourses = Array.isArray(studentData.courses)
-          ? studentData.courses.filter((courseId): courseId is string => typeof courseId === "string")
+          ? studentData.courses.filter(
+              (courseId): courseId is string =>
+                typeof courseId === "string" && validCourseIds.has(courseId),
+            )
           : [];
-        const inferredCourses = Array.from(coursesByUserId.get(id) || []);
+        const inferredCourses = Array.from(coursesByUserId.get(id) || []).filter(
+          (courseId) => validCourseIds.has(courseId),
+        );
 
         const createdAt =
           studentData.createdAt?.toDate?.() ||
@@ -235,6 +333,8 @@ export default function StudentsPage() {
           email: studentData.email || userData.email || "",
           name: studentData.name || userData.name || "Unknown user",
           role: inferredRole as "docente" | "estudiante",
+          requestedRole,
+          teacherApprovalStatus,
           whatsApp:
             studentData.whatsApp ||
             studentData.phone ||
@@ -285,7 +385,7 @@ export default function StudentsPage() {
     () =>
       students.filter(
         (student) =>
-          student.role === "docente" ||
+          isTeacherDisplay(student) ||
           (student.courses && student.courses.length > 0),
       ),
     [students],
@@ -294,37 +394,40 @@ export default function StudentsPage() {
   const studentsWithoutCourses = useMemo(() => {
     const withoutCourses = students.filter(
       (student) =>
-        student.role === "estudiante" &&
+        !isTeacherDisplay(student) &&
         (!student.courses || student.courses.length === 0),
     );
 
     if (isTeacher && showOnlyMyStudents) {
-      return withoutCourses.filter(
-        (student) => !myCourseStudentIds.has(student.id),
-      );
+      return [];
     }
 
     if (isAdmin || isTeacher) return withoutCourses;
     return [];
-  }, [students, isTeacher, isAdmin, showOnlyMyStudents, myCourseStudentIds]);
+  }, [students, isTeacher, isAdmin, showOnlyMyStudents]);
 
   const baseStudents = useMemo(() => {
-    if (isAdmin) return studentsWithCourses;
-    if (isTeacher) {
-      return showOnlyMyStudents
-        ? studentsWithCourses.filter(
-            (student) =>
-              student.role === "docente" || myCourseStudentIds.has(student.id),
-          )
-        : studentsWithCourses;
+    if (isTeacher && showOnlyMyStudents) {
+      return students.filter((student) => {
+        if (isTeacherDisplay(student)) return false;
+        if (!myCourseStudentIds.has(student.id)) return false;
+
+        const courseIds = Array.isArray(student.courses) ? student.courses : [];
+        if (courseIds.length === 0) return true;
+        return courseIds.some((courseId) => myTeacherCourseIds.has(courseId));
+      });
     }
+    if (isAdmin) return studentsWithCourses;
+    if (isTeacher) return studentsWithCourses;
     return studentsWithCourses.filter((student) => student.id === user?.id);
   }, [
+    students,
     studentsWithCourses,
     isAdmin,
     isTeacher,
     showOnlyMyStudents,
     myCourseStudentIds,
+    myTeacherCourseIds,
     user?.id,
   ]);
 
@@ -332,7 +435,11 @@ export default function StudentsPage() {
     let list = [...baseStudents];
 
     if (roleFilter !== "all") {
-      list = list.filter((student) => student.role === roleFilter);
+      list = list.filter((student) =>
+        roleFilter === "docente"
+          ? isTeacherDisplay(student)
+          : !isTeacherDisplay(student),
+      );
     }
 
     if (debouncedSearchTerm) {
@@ -363,7 +470,9 @@ export default function StudentsPage() {
       }
 
       if (sortBy === "role") {
-        const value = a.role.localeCompare(b.role);
+        const value = getStudentRoleDisplay(a).localeCompare(
+          getStudentRoleDisplay(b),
+        );
         return sortOrder === "asc" ? value : -value;
       }
 
@@ -414,6 +523,44 @@ export default function StudentsPage() {
     );
   };
 
+  const renderStudentRoleBadge = (student: Student) => {
+    const roleDisplay = getStudentRoleDisplay(student);
+
+    if (roleDisplay === "teacher") {
+      return (
+        <span className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-4 py-2 text-xs font-bold text-indigo-700">
+          <Shield className="h-3 w-3" />
+          Teacher
+        </span>
+      );
+    }
+
+    if (roleDisplay === "teacher_pending") {
+      return (
+        <span className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-700">
+          <Clock className="h-3 w-3" />
+           Pending
+        </span>
+      );
+    }
+
+    if (roleDisplay === "teacher_rejected") {
+      return (
+        <span className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700">
+          <AlertCircle className="h-3 w-3" />
+          Teacher Rejected
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-700">
+        <GraduationCap className="h-3 w-3" />
+        Student
+      </span>
+    );
+  };
+
   const handleSortClick = (
     field: "createdAt" | "idNumber" | "name" | "role",
   ) => {
@@ -429,6 +576,18 @@ export default function StudentsPage() {
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    if (
+      isTeacher &&
+      (isTeacherPlanBlocked || isTeacherStudentQuotaReached)
+    ) {
+      const message = isTeacherPlanBlocked
+        ? "Plan expired. Renew payment to add users."
+        : "Student quota reached for your current plan.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
 
     const validation = studentSchema.safeParse(newStudent);
     if (!validation.success) {
@@ -511,33 +670,32 @@ export default function StudentsPage() {
     }
     setIsDeletingStudent(true);
     try {
-      // Delete from both collections if present (estudiantes + usuarios)
-      const studentRef = doc(firebaseDB, "estudiantes", studentToDelete.id);
-      const userRef = doc(firebaseDB, "usuarios", studentToDelete.id);
-
-      const [studentSnap, userSnap] = await Promise.all([
-        getDoc(studentRef),
-        getDoc(userRef),
-      ]);
-
-      const deleteOps: Promise<void>[] = [];
-      if (studentSnap.exists()) deleteOps.push(deleteDoc(studentRef));
-      if (userSnap.exists()) deleteOps.push(deleteDoc(userRef));
-
-      if (deleteOps.length === 0) {
-        toast.error("User record not found");
-        return;
-      }
-
-      await Promise.all(deleteOps);
+      // Cloud Function also removes Firebase Auth user to keep identity data in sync.
+      await deleteUserByAdmin(studentToDelete.id);
       setStudents((prev) =>
         prev.filter((student) => student.id !== studentToDelete.id),
       );
-      toast.success("User deleted successfully");
+      toast.success("User deleted successfully (Firestore + Auth).");
       setStudentToDelete(null);
-    } catch {
-      setError("Error deleting student");
-      toast.error("Error deleting student");
+    } catch (error: unknown) {
+      const code =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof (error as { code?: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : "";
+
+      if (code.includes("functions/permission-denied")) {
+        toast.error("You do not have permission to delete this account.");
+      } else if (code.includes("functions/unavailable")) {
+        toast.error("Delete service unavailable. Deploy Cloud Functions and retry.");
+      } else if (code.includes("functions/failed-precondition")) {
+        toast.error("This account cannot be deleted from this panel.");
+      } else {
+        setError("Error deleting student");
+        toast.error("Error deleting student");
+      }
     } finally {
       setIsDeletingStudent(false);
     }
@@ -551,9 +709,37 @@ export default function StudentsPage() {
       : students.filter((s) => s.id === user?.id).length;
 
   const studentCountByRole = {
-    estudiante: filteredStudents.filter((s) => s.role === "estudiante").length,
-    docente: filteredStudents.filter((s) => s.role === "docente").length,
+    estudiante: filteredStudents.filter((s) => !isTeacherDisplay(s)).length,
+    docente: filteredStudents.filter((s) => isTeacherDisplay(s)).length,
   };
+  const teacherPlanCourseLimit =
+    typeof user?.teacherPlanCourseLimit === "number" && user.teacherPlanCourseLimit > 0
+      ? user.teacherPlanCourseLimit
+      : null;
+  const teacherPlanStudentLimit =
+    typeof user?.teacherPlanStudentLimit === "number" && user.teacherPlanStudentLimit > 0
+      ? user.teacherPlanStudentLimit
+      : null;
+  const remainingTeacherCourseQuota = teacherPlanCourseLimit
+    ? Math.max(0, teacherPlanCourseLimit - teacherCourseCount)
+    : null;
+  const usedTeacherStudentQuota = myCourseStudentIds.size;
+  const remainingTeacherStudentQuota = teacherPlanStudentLimit
+    ? Math.max(0, teacherPlanStudentLimit - usedTeacherStudentQuota)
+    : null;
+  const isTeacherStudentQuotaReached =
+    isTeacher &&
+    Boolean(teacherPlanStudentLimit) &&
+    usedTeacherStudentQuota >= teacherPlanStudentLimit;
+  const isTeacherPlanBlocked =
+    isTeacher &&
+    isTeacherPlanExpired({
+      role: user?.role,
+      teacherPlanStatus: user?.teacherPlanStatus,
+      teacherPlanExpiresAt: user?.teacherPlanExpiresAt,
+    });
+  const canTeacherAddUsers =
+    !isTeacher || (!isTeacherPlanBlocked && !isTeacherStudentQuotaReached);
   const sortLabel =
     sortBy === "createdAt"
       ? "Most Recent"
@@ -566,20 +752,22 @@ export default function StudentsPage() {
   // Loading state
   if (isLoading) {
     return (
-      <DashboardLayout
-        title="Students Management"
-        subtitle="Manage students and teachers in the system"
-      >
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center space-y-2">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto" />
-            <div className="space-y-2">
-              <p className="text-lg font-semibold text-gray-900">
-                Loading students
-              </p>
-              <p className="text-sm text-gray-600">
-                Please wait while we load the student data
-              </p>
+      <DashboardLayout contentClassName="pt-0 lg:pt-1">
+        <div className="relative overflow-x-clip">
+          <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+          <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+
+          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="flex min-h-[320px] items-center justify-center">
+              <div className="space-y-2 text-center">
+                <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
+                <div>
+                  <p className="text-lg font-semibold text-slate-900">Loading students</p>
+                  <p className="text-sm text-slate-600">
+                    Please wait while we load the student data
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -588,110 +776,172 @@ export default function StudentsPage() {
   }
 
   return (
-    <DashboardLayout
-      title="Students Management"
-      subtitle="Manage students and teachers in the system"
-    >
-      <div className="space-y-2">
-        {/* Stats Header */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow duration-300">
-            <div className="flex items-center justify-between">
+    <DashboardLayout contentClassName="pt-0 lg:pt-1">
+      <div className="relative overflow-x-clip">
+        <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+        <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="flex flex-col gap-3">
+        <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+          <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
+          <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
+          <div className="relative z-10">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Users className="h-4 w-4 text-blue-500" />
-                  <p className="text-xs font-semibold text-blue-600  tracking-wide">
-                    Total Registered
-                  </p>
+                <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                  <Users className="h-3.5 w-3.5" />
+                  Student Workspace
                 </div>
-                <p className="text-xl font-bold text-gray-900">
-                  {studentCount}
+                <h2 className="mt-3 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
+                  Student Management Center
+                </h2>
+                <p className="mt-1.5 max-w-3xl text-sm text-slate-600">
+                  Manage users, monitor enrollments, and keep course rosters clean.
                 </p>
-            
               </div>
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                <Users className="h-4 w-4 text-blue-500" />
+              <button
+                onClick={() => setShowAddForm(true)}
+                disabled={!canTeacherAddUsers}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <UserPlus className="h-4 w-4" />
+                Add User
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <div
+          className={`grid grid-cols-1 gap-2 sm:grid-cols-2 ${
+            isTeacher && (teacherPlanCourseLimit || teacherPlanStudentLimit)
+              ? "lg:grid-cols-5"
+              : "lg:grid-cols-4"
+          }`}
+        >
+          <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                    <Users className="h-4 w-4" />
+                  </div>
+                  <p className="text-lg font-extrabold leading-5 text-slate-900">{studentCount}</p>
+                </div>
+                <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Total Registered</p>
+              </div>
+              <div className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                All
               </div>
             </div>
           </div>
 
-          <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow duration-300">
+          <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <GraduationCap className="h-4 w-4 text-blue-500" />
-                  <p className="text-xs font-semibold text-blue-600 tracking-wide">
-                    Students
-                  </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+                    <GraduationCap className="h-4 w-4" />
+                  </div>
+                  <p className="text-lg font-extrabold leading-5 text-slate-900">{studentCountByRole.estudiante}</p>
                 </div>
-                <p className="text-xl font-bold text-gray-900">
-                  {studentCountByRole.estudiante}
-                </p>
+                <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Students</p>
               </div>
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                <GraduationCap className="h-4 w-4 text-blue-500" />
+              <div className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                Active
               </div>
             </div>
           </div>
 
-          <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow duration-300">
+          <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Shield className="h-4 w-4 text-blue-500" />
-                  <p className="text-xs font-semibold text-blue-600  tracking-wide">
-                    Teachers
-                  </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+                    <Shield className="h-4 w-4" />
+                  </div>
+                  <p className="text-lg font-extrabold leading-5 text-slate-900">{studentCountByRole.docente}</p>
                 </div>
-                <p className="text-xl font-bold text-gray-900">
-                  {studentCountByRole.docente}
-                </p>
+                <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Teachers</p>
               </div>
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                <Shield className="h-4 w-4 text-blue-500" />
+              <div className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700">
+                Staff
               </div>
             </div>
           </div>
 
-          <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow duration-300">
+          <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <BookOpen className="h-4 w-4 text-blue-500" />
-                  <p className="text-xs font-semibold text-blue-600 tracking-wide">
-                    Without Courses
-                  </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+                    <BookOpen className="h-4 w-4" />
+                  </div>
+                  <p className="text-lg font-extrabold leading-5 text-slate-900">{studentsWithoutCourses.length}</p>
                 </div>
-                <p className="text-xl font-bold text-gray-900">
-                  {studentsWithoutCourses.length}
-                </p>
+                <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Without Courses</p>
               </div>
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                <BookOpen className="h-4 w-4 text-blue-500" />
+              <div className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+                Review
               </div>
             </div>
           </div>
+
+          {isTeacher && (teacherPlanCourseLimit || teacherPlanStudentLimit) && (
+            <div className="min-w-0 rounded-xl border border-sky-200 bg-sky-50 p-2.5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                      <BookOpen className="h-4 w-4" />
+                    </div>
+                    <p className="text-sm font-extrabold leading-5 text-slate-900">
+                      {teacherPlanStudentLimit
+                        ? `${usedTeacherStudentQuota}/${teacherPlanStudentLimit}`
+                        : usedTeacherStudentQuota}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Plan Students</p>
+                  <p className="text-[10px] text-slate-500">
+                    Courses: {teacherPlanCourseLimit ? `${teacherCourseCount}/${teacherPlanCourseLimit}` : teacherCourseCount}
+                  </p>
+                </div>
+                <div className="rounded-full border border-sky-200 bg-white px-2 py-1 text-[11px] font-semibold text-sky-700">
+                  Rem {teacherPlanStudentLimit ? remainingTeacherStudentQuota : "inf"}
+                </div>
+              </div>
+              {isTeacherPlanBlocked && (
+                <p className="mt-1.5 text-[10px] font-semibold text-rose-700">
+                  Plan expired. Renew payment to continue.
+                </p>
+              )}
+              {!isTeacherPlanBlocked && teacherPlanCourseLimit && remainingTeacherCourseQuota === 0 && (
+                <p className="mt-1.5 text-[10px] font-semibold text-amber-700">
+                  Course quota reached.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Search and Filter Bar */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-3 shadow-sm hover:shadow-md transition-all duration-300">
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="flex-1">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
                   placeholder="Search by ID, name, email or phone..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                  className="w-full rounded-xl border border-slate-300 bg-slate-50 py-2.5 pl-10 pr-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 />
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col sm:flex-row gap-2">
               <div className="relative">
-                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Filter className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <select
                   value={roleFilter}
                   onChange={(e) =>
@@ -699,22 +949,23 @@ export default function StudentsPage() {
                       e.target.value as "all" | "estudiante" | "docente",
                     )
                   }
-                  className="pl-10 pr-4 py-2.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all appearance-none text-sm font-medium"
+                  className="h-10 appearance-none rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-8 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 >
                   <option value="all">All Roles</option>
                   <option value="estudiante">Students</option>
                   <option value="docente">Teachers</option>
                 </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               </div>
 
               {isTeacher && (
                 <button
                   onClick={() => setShowOnlyMyStudents((prev) => !prev)}
                   className={cn(
-                    "px-4 py-2.5 rounded-xl border-2 text-sm font-medium transition-all duration-300",
+                    "h-10 rounded-xl border px-3 text-sm font-semibold transition",
                     showOnlyMyStudents
-                      ? "border-blue-500 text-blue-700 bg-blue-50"
-                      : "border-gray-300 text-gray-700 hover:bg-gray-50",
+                      ? "border-sky-300 bg-sky-50 text-sky-700"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
                   )}
                 >
                   {showOnlyMyStudents ? "Only My Students" : "All Students"}
@@ -723,7 +974,8 @@ export default function StudentsPage() {
 
               <button
                 onClick={() => setShowAddForm(true)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
+                disabled={!canTeacherAddUsers}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <UserPlus className="h-4 w-4" />
                 Add User
@@ -732,37 +984,36 @@ export default function StudentsPage() {
           </div>
         </div>
 
-        {/* Students List - Only students WITH courses */}
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden">
-          <div className="px-6 py-5 border-b border-gray-200 bg-white">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 bg-slate-50/60 px-4 py-4 sm:px-6">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <UserCheck className="h-4 w-4 text-blue-500" />
+                  <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                    <UserCheck className="h-4 w-4" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-gray-900">
+                    <h3 className="text-lg font-bold text-slate-900">
                       {isTeacher && showOnlyMyStudents
                         ? "My Students"
                         : "Registered Users"}
                     </h3>
-                    <p className="text-sm text-gray-500 mt-1">
+                    <p className="mt-0.5 text-sm text-slate-500">
                       {filteredStudents.length} users with courses
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-gray-400" />
-                <span className="text-sm text-gray-600">
+              <div className="flex flex-wrap items-center gap-2">
+                <Clock className="h-4 w-4 text-slate-400" />
+                <span className="text-sm text-slate-600">
                   Sorted by: <span className="font-medium">{sortLabel}</span> (
                   {sortOrder})
                 </span>
                 <button
                   onClick={() => handleSortClick("createdAt")}
-                  className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium"
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   Most Recent
                   {sortBy === "createdAt" &&
@@ -778,7 +1029,7 @@ export default function StudentsPage() {
                       setSearchTerm("");
                       setRoleFilter("all");
                     }}
-                    className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 font-medium"
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     <X className="h-3 w-3" />
                     Clear filters
@@ -790,31 +1041,31 @@ export default function StudentsPage() {
 
           {filteredStudents.length === 0 ? (
             <div className="text-center py-12 px-4">
-              <div className="h-20 w-20 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center">
-                <Users className="h-10 w-10 text-gray-400" />
+              <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-slate-100">
+                <Users className="h-10 w-10 text-slate-400" />
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">
+              <h3 className="mb-2 text-xl font-bold text-slate-900">
                 {searchTerm || roleFilter !== "all"
                   ? "No results found"
                   : "No students with courses"}
               </h3>
-              <p className="text-gray-600 max-w-md mx-auto mb-6">
+              <p className="mx-auto mb-6 max-w-md text-slate-600">
                 {searchTerm || roleFilter !== "all"
                   ? "Try different search terms"
                   : "All students are currently without course assignments"}
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="overflow-x-auto stm-table-wrap">
+              <table className="w-full table-modern stm-table">
                 <thead>
-                  <tr className="bg-blue-50/50 border-b border-gray-200">
-                    <th className="text-left px-6 py-4 font-bold text-gray-900 min-w-[180px]">
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="min-w-[180px] px-6 py-4 text-left font-bold text-slate-900">
                       <button
                         onClick={() => handleSortClick("idNumber")}
-                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                        className="flex items-center gap-2 transition-colors hover:text-sky-700"
                       >
-                        <Hash className="h-4 w-4 text-gray-500" />
+                        <Hash className="h-4 w-4 text-slate-500" />
                         ID Number
                         {sortBy === "idNumber" &&
                           (sortOrder === "asc" ? (
@@ -824,10 +1075,10 @@ export default function StudentsPage() {
                           ))}
                       </button>
                     </th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[220px]">
+                    <th className="min-w-[220px] px-4 py-4 text-left font-bold text-slate-900">
                       <button
                         onClick={() => handleSortClick("name")}
-                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                        className="flex items-center gap-2 transition-colors hover:text-sky-700"
                       >
                         Name & Details
                         {sortBy === "name" &&
@@ -838,13 +1089,13 @@ export default function StudentsPage() {
                           ))}
                       </button>
                     </th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[200px]">
+                    <th className="min-w-[320px] px-4 py-4 text-left font-bold text-slate-900">
                       Contact Information
                     </th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[120px]">
+                    <th className="min-w-[120px] px-4 py-4 text-left font-bold text-slate-900">
                       <button
                         onClick={() => handleSortClick("role")}
-                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                        className="flex items-center gap-2 transition-colors hover:text-sky-700"
                       >
                         Role
                         {sortBy === "role" &&
@@ -856,7 +1107,7 @@ export default function StudentsPage() {
                       </button>
                     </th>
                     {isTeacher && (
-                      <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[140px]">
+                      <th className="min-w-[140px] px-4 py-4 text-left font-bold text-slate-900">
                         Actions
                       </th>
                     )}
@@ -867,44 +1118,47 @@ export default function StudentsPage() {
                     <tr
                       key={student.id}
                       className={cn(
-                        "border-b border-gray-200 hover:bg-blue-50/30 transition-all duration-300",
-                        index % 2 === 0 ? "bg-white" : "bg-gray-50/30",
+                        "border-b border-slate-200 transition-all duration-300 hover:bg-sky-50/30",
+                        index % 2 === 0 ? "bg-white" : "bg-slate-50/30",
                       )}
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           {renderStudentAvatar(student)}
-                          <span className="font-mono text-sm font-semibold text-gray-900">
+                          <span className="font-mono text-sm font-semibold text-slate-900">
                             {student.idNumber}
                           </span>
                         </div>
                       </td>
                       <td className="px-4 py-4">
                         <div>
-                          <span className="font-semibold text-gray-900">
+                          <span className="font-semibold text-slate-900">
                             {student.name}
                           </span>
                           {student.courses && student.courses.length > 0 ? (
                             <div className="mt-2">
-                              <span className="text-xs font-medium px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
+                              <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700">
                                 {student.courses.length} course
                                 {student.courses.length !== 1 ? "s" : ""}
                               </span>
-                              <div className="mt-1 text-xs text-gray-600 space-y-0.5">
-                                {student.courses.slice(0, 2).map((courseId) => (
-                                  <div key={courseId} className="leading-tight">
-                                    {courseNames[courseId] || "Unknown Course"}
-                                  </div>
-                                ))}
-                                {student.courses.length > 2 && (
-                                  <div className="text-gray-500">
-                                    +{student.courses.length - 2} more
+                              <div className="mt-1 space-y-0.5 text-xs text-slate-600">
+                                {student.courses
+                                  .filter((courseId) => Boolean(courseNames[courseId]))
+                                  .slice(0, 2)
+                                  .map((courseId) => (
+                                    <div key={courseId} className="leading-tight">
+                                      {courseNames[courseId]}
+                                    </div>
+                                  ))}
+                                {student.courses.filter((courseId) => Boolean(courseNames[courseId])).length > 2 && (
+                                  <div className="text-slate-500">
+                                    +{student.courses.filter((courseId) => Boolean(courseNames[courseId])).length - 2} more
                                   </div>
                                 )}
                               </div>
                             </div>
                           ) : (
-                            <div className="mt-2 text-xs text-gray-400">
+                            <div className="mt-2 text-xs text-slate-400">
                               No courses assigned
                             </div>
                           )}
@@ -913,58 +1167,59 @@ export default function StudentsPage() {
                       <td className="px-4 py-4">
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                              <Mail className="h-4 w-4 text-blue-500" />
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50">
+                              <Mail className="h-4 w-4 text-sky-600" />
                             </div>
-                            <span className="text-sm text-gray-700 break-all">
+                            <span className="whitespace-nowrap text-sm text-slate-700">
                               {student.email}
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                              <Phone className="h-4 w-4 text-blue-500" />
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50">
+                              <Phone className="h-4 w-4 text-sky-600" />
                             </div>
-                            <span className="text-sm text-gray-700">
+                            <span className="text-sm text-slate-700">
                               {student.whatsApp}
                             </span>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-4">
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold",
-                            student.role === "docente"
-                              ? "bg-blue-100 text-blue-700 border border-blue-200"
-                              : "bg-blue-100 text-blue-700 border border-blue-200",
-                          )}
-                        >
-                          {student.role === "docente" ? (
-                            <>
-                              <Shield className="h-3 w-3" />
-                              Teacher
-                            </>
-                          ) : (
-                            <>
-                              <GraduationCap className="h-3 w-3" />
-                              Student
-                            </>
-                          )}
-                        </span>
+                        {renderStudentRoleBadge(student)}
                       </td>
                       {isTeacher && (
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
-                            <Link
-                              to={`/students/${student.id}/enroll`}
-                              className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition-all duration-300"
-                              title="Enroll in courses"
-                            >
-                              <LinkIcon className="h-4 w-4" />
-                            </Link>
+                            {(() => {
+                              const canOpenEnrollPage =
+                                !isTeacherPlanBlocked &&
+                                (!isTeacherStudentQuotaReached || myCourseStudentIds.has(student.id));
+                              return canOpenEnrollPage ? (
+                                <Link
+                                  to={`/students/${student.id}/enroll`}
+                                  className="rounded-xl p-2 text-sky-600 transition-all duration-300 hover:bg-sky-50 hover:text-sky-700"
+                                  title="Enroll in courses"
+                                >
+                                  <LinkIcon className="h-4 w-4" />
+                                </Link>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="cursor-not-allowed rounded-xl p-2 text-slate-400"
+                                  title={
+                                    isTeacherPlanBlocked
+                                      ? "Plan expired. Renew payment to continue."
+                                      : "Student quota reached for your current plan."
+                                  }
+                                >
+                                  <LinkIcon className="h-4 w-4" />
+                                </button>
+                              );
+                            })()}
                             <Link
                               to={`/students/${student.id}`}
-                              className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-xl transition-all duration-300"
+                              className="rounded-xl p-2 text-slate-600 transition-all duration-300 hover:bg-slate-100 hover:text-slate-800"
                               title="View details"
                             >
                               <Eye className="h-4 w-4" />
@@ -972,7 +1227,7 @@ export default function StudentsPage() {
                             <button
                               onClick={() => setStudentToDelete(student)}
                               disabled={!student.canDelete}
-                              className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                              className="rounded-xl p-2 text-rose-600 transition-all duration-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                               title={
                                 student.canDelete
                                   ? "Delete student"
@@ -991,8 +1246,8 @@ export default function StudentsPage() {
             </div>
           )}
           {filteredStudents.length > 0 && (
-            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
-              <p className="text-sm text-gray-600">
+            <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4">
+              <p className="text-sm text-slate-600">
                 Showing {(currentPage - 1) * pageSize + 1}-
                 {Math.min(currentPage * pageSize, filteredStudents.length)} of{" "}
                 {filteredStudents.length}
@@ -1003,11 +1258,11 @@ export default function StudentsPage() {
                   onClick={() =>
                     setCurrentPage((prev) => Math.max(1, prev - 1))
                   }
-                  className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-slate-50"
                 >
                   Prev
                 </button>
-                <span className="text-sm text-gray-700">
+                <span className="text-sm text-slate-700">
                   Page {currentPage} / {totalPages}
                 </span>
                 <button
@@ -1015,7 +1270,7 @@ export default function StudentsPage() {
                   onClick={() =>
                     setCurrentPage((prev) => Math.min(totalPages, prev + 1))
                   }
-                  className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-slate-50"
                 >
                   Next
                 </button>
@@ -1026,41 +1281,41 @@ export default function StudentsPage() {
 
         {/* Students Without Courses Section - Only students WITHOUT courses */}
         {isTeacher && studentsWithoutCourses.length > 0 && (
-          <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 shadow-sm sm:p-6">
             <div className="flex items-center gap-3 mb-4">
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                <BookOpen className="h-4 w-4 text-blue-600" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100">
+                <BookOpen className="h-4 w-4 text-amber-700" />
               </div>
               <div>
-                <h3 className="font-bold text-lg text-gray-900">
+                <h3 className="text-lg font-bold text-slate-900">
                   Students Without Courses ({studentsWithoutCourses.length})
                 </h3>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-slate-600">
                   These students are not enrolled in any course
                 </p>
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full">
+            <div className="overflow-x-auto stm-table-wrap">
+              <table className="w-full table-modern stm-table">
                 <thead>
-                  <tr className="bg-gray-50/50 border-b border-gray-200">
-                    <th className="text-left px-6 py-4 font-bold text-gray-900 min-w-[180px]">
+                  <tr className="border-b border-slate-200 bg-slate-100/70">
+                    <th className="min-w-[180px] px-6 py-4 text-left font-bold text-slate-900">
                       <div className="flex items-center gap-2">
-                        <Hash className="h-4 w-4 text-gray-500" />
+                        <Hash className="h-4 w-4 text-slate-500" />
                         ID Number
                       </div>
                     </th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[220px]">
+                    <th className="min-w-[220px] px-4 py-4 text-left font-bold text-slate-900">
                       Name & Details
                     </th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[200px]">
+                    <th className="min-w-[320px] px-4 py-4 text-left font-bold text-slate-900">
                       Contact Information
                     </th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[120px]">
+                    <th className="min-w-[120px] px-4 py-4 text-left font-bold text-slate-900">
                       Role
                     </th>
-                    <th className="text-left px-4 py-4 font-bold text-gray-900 min-w-[200px]">
+                    <th className="min-w-[200px] px-4 py-4 text-left font-bold text-slate-900">
                       Actions
                     </th>
                   </tr>
@@ -1070,25 +1325,25 @@ export default function StudentsPage() {
                     <tr
                       key={student.id}
                       className={cn(
-                        "border-b border-gray-200 hover:bg-gray-50/50 transition-all duration-300",
-                        index % 2 === 0 ? "bg-white" : "bg-gray-50/30",
+                        "border-b border-slate-200 transition-all duration-300 hover:bg-sky-50/30",
+                        index % 2 === 0 ? "bg-white" : "bg-slate-50/30",
                       )}
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           {renderStudentAvatar(student)}
-                          <span className="font-mono text-sm font-semibold text-gray-900">
+                          <span className="font-mono text-sm font-semibold text-slate-900">
                             {student.idNumber}
                           </span>
                         </div>
                       </td>
                       <td className="px-4 py-4">
                         <div>
-                          <span className="font-semibold text-gray-900">
+                          <span className="font-semibold text-slate-900">
                             {student.name}
                           </span>
                           <div className="mt-2">
-                            <span className="text-xs font-medium px-2 py-1 bg-gray-100 text-gray-700 rounded-full">
+                            <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
                               No courses
                             </span>
                           </div>
@@ -1097,57 +1352,38 @@ export default function StudentsPage() {
                       <td className="px-4 py-4">
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                              <Mail className="h-4 w-4 text-blue-500" />
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50">
+                              <Mail className="h-4 w-4 text-sky-600" />
                             </div>
-                            <span className="text-sm text-gray-700 break-all">
+                            <span className="whitespace-nowrap text-sm text-slate-700">
                               {student.email}
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                              <Phone className="h-4 w-4 text-blue-500" />
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-50">
+                              <Phone className="h-4 w-4 text-sky-600" />
                             </div>
-                            <span className="text-sm text-gray-700">
+                            <span className="text-sm text-slate-700">
                               {student.whatsApp}
                             </span>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-4">
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold",
-                            student.role === "docente"
-                              ? "bg-blue-100 text-blue-700 border border-blue-200"
-                              : "bg-blue-100 text-blue-700 border border-blue-200",
-                          )}
-                        >
-                          {student.role === "docente" ? (
-                            <>
-                              <Shield className="h-3 w-3" />
-                              Teacher
-                            </>
-                          ) : (
-                            <>
-                              <GraduationCap className="h-3 w-3" />
-                              Student
-                            </>
-                          )}
-                        </span>
+                        {renderStudentRoleBadge(student)}
                       </td>
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-2">
                           <Link
                             to={`/students/${student.id}/enroll`}
-                            className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition-all duration-300"
+                            className="rounded-xl p-2 text-sky-600 transition-all duration-300 hover:bg-sky-50 hover:text-sky-700"
                             title="Enroll in courses"
                           >
                             <LinkIcon className="h-4 w-4" />
                           </Link>
                           <Link
                             to={`/students/${student.id}`}
-                            className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-xl transition-all duration-300"
+                            className="rounded-xl p-2 text-slate-600 transition-all duration-300 hover:bg-slate-100 hover:text-slate-800"
                             title="View details"
                           >
                             <Eye className="h-4 w-4" />
@@ -1155,7 +1391,7 @@ export default function StudentsPage() {
                           <button
                             onClick={() => setStudentToDelete(student)}
                             disabled={!student.canDelete}
-                            className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-xl transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                            className="rounded-xl p-2 text-rose-600 transition-all duration-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                             title={
                               student.canDelete
                                 ? "Delete student"
@@ -1174,13 +1410,15 @@ export default function StudentsPage() {
 
             {studentsWithoutCourses.length > 10 && (
               <div className="mt-4 text-center">
-                <button className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+                <button className="text-sm font-semibold text-sky-700 hover:text-sky-800">
                   View all {studentsWithoutCourses.length} students...
                 </button>
               </div>
             )}
           </div>
         )}
+          </div>
+        </div>
       </div>
 
       <AlertDialog
@@ -1219,19 +1457,19 @@ export default function StudentsPage() {
 
       {/* Add Student Modal */}
       {showAddForm && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-gray-200">
-            <div className="p-6 border-b border-gray-200">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px] stm-modal-overlay">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)] stm-modal">
+            <div className="border-b border-slate-200 p-4 stm-modal-head">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <UserPlus className="h-4 w-4 text-blue-600" />
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100">
+                    <UserPlus className="h-4 w-4 text-sky-700" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-lg text-gray-900">
+                    <h3 className="text-base font-bold text-slate-900">
                       Add New User
                     </h3>
-                    <p className="text-sm text-gray-500 mt-1">
+                    <p className="mt-0.5 text-xs text-slate-500">
                       Register a student or teacher
                     </p>
                   </div>
@@ -1241,26 +1479,26 @@ export default function StudentsPage() {
                     setShowAddForm(false);
                     setError("");
                   }}
-                  className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
 
             {error && (
-              <div className="mx-6 mt-6 p-4 rounded-xl bg-gray-100 border border-gray-200 text-gray-700">
+              <div className="mx-4 mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700 stm-alert">
                 <div className="flex items-center gap-3">
-                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
-                  <p className="font-medium">{error}</p>
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <p className="text-sm font-medium">{error}</p>
                 </div>
               </div>
             )}
 
-            <form onSubmit={handleAddStudent} className="p-6">
+            <form onSubmit={handleAddStudent} className="p-4 stm-modal-form">
               <div className="space-y-2">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                     ID Number *
                   </label>
                   <input
@@ -1270,16 +1508,16 @@ export default function StudentsPage() {
                       setNewStudent({ ...newStudent, idNumber: e.target.value })
                     }
                     placeholder="Student or teacher ID"
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 stm-modal-input"
                     required
                   />
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="mt-1 text-xs text-slate-500">
                     Unique identification number
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                     Full Name *
                   </label>
                   <input
@@ -1289,13 +1527,13 @@ export default function StudentsPage() {
                       setNewStudent({ ...newStudent, name: e.target.value })
                     }
                     placeholder="Full name"
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 stm-modal-input"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                     Email *
                   </label>
                   <input
@@ -1305,13 +1543,13 @@ export default function StudentsPage() {
                       setNewStudent({ ...newStudent, email: e.target.value })
                     }
                     placeholder="Email address"
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 stm-modal-input"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                     Phone Number *
                   </label>
                   <input
@@ -1321,13 +1559,13 @@ export default function StudentsPage() {
                       setNewStudent({ ...newStudent, whatsApp: e.target.value })
                     }
                     placeholder="Phone number"
-                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium"
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 stm-modal-input"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                     Role *
                   </label>
                   <div className="relative">
@@ -1339,40 +1577,40 @@ export default function StudentsPage() {
                           role: e.target.value as "estudiante" | "docente",
                         })
                       }
-                      className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm font-medium appearance-none"
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 stm-modal-input"
                       required
                     >
                       <option value="estudiante">Student</option>
                       <option value="docente">Teacher</option>
                     </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   </div>
                 </div>
 
-                <div className="flex gap-3 pt-6">
+                <div className="flex gap-2 pt-3 stm-modal-actions">
                   <button
                     type="button"
                     onClick={() => {
                       setShowAddForm(false);
                       setError("");
                     }}
-                    className="flex-1 px-4 py-3 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition-all duration-300"
+                    className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 stm-modal-btn-secondary"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="flex-1 px-4 py-3 rounded-xl bg-blue-600 text-white hover:shadow-lg font-medium transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-sky-300 bg-sky-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50 stm-modal-btn-primary"
                   >
                     {isSubmitting ? (
                       <>
-                        <Loader2 className="h-5 w-5 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                         Adding...
                       </>
                     ) : (
                       <>
-                        <Save className="h-5 w-5" />
+                        <Save className="h-4 w-4" />
                         Add User
                       </>
                     )}

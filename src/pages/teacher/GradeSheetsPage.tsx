@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAcademic } from "@/contexts/AcademicContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -39,6 +39,8 @@ import { z } from "zod";
 import { cn } from "@/lib/utils";
 import { notificationService } from "@/lib/services/notificationService";
 import { isNotificationAutomationEnabled } from "@/lib/services/notificationAutomation";
+import { useNavigate, useParams } from "react-router-dom";
+import * as XLSX from "xlsx";
 
 const studentGradeSchema = z.object({
   studentId: z.string(),
@@ -54,7 +56,13 @@ const gradeSheetSchema = z.object({
   courseName: z.string().min(1, "Course name is required"),
   teacherId: z.string(),
   teacherName: z.string(),
-  gradingPeriod: z.enum(["1st Term", "2nd Term", "Final"]),
+  gradingPeriod: z.enum([
+    "1st Term",
+    "2nd Term",
+    "3rd Term",
+    "4th Term",
+    "Final",
+  ]),
   activities: z.array(
     z.object({
       id: z.string(),
@@ -78,6 +86,7 @@ const gradeSheetSchema = z.object({
   createdAt: z.any(),
   updatedAt: z.any(),
   isPublished: z.boolean().default(false),
+  weightPercentage: z.number().min(0).max(100).optional(),
 });
 
 interface Activity {
@@ -119,12 +128,13 @@ interface GradeSheet {
   courseName: string;
   teacherId: string;
   teacherName: string;
-  gradingPeriod: "1st Term" | "2nd Term" | "Final";
+  gradingPeriod: string;
   activities: Activity[];
   students: StudentGrade[];
   createdAt: Date;
   updatedAt: Date;
   isPublished: boolean;
+  weightPercentage?: number;
 }
 
 interface Student {
@@ -147,17 +157,207 @@ interface StudentAverage {
   email?: string;
   idNumber?: string;
   averages: {
-    [sheetTitle: string]: number;
+    [sheetId: string]: number;
   };
   overallAverage: number;
   approved: boolean;
   completedSheets: number; 
   totalSheets: number;
-} 
+  firstTermAverage: number;
+  secondTermAverage: number;
+  firstTermEquivalent: number;
+  secondTermEquivalent: number;
+}
+
+const DISPLAY_MAX_SCORE = 5.0;
+type SupportedTerm = "1st Term" | "2nd Term";
+
+const toFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value));
+
+const normalizeGradingPeriod = (period: string): string => {
+  const normalized = (period || "").trim().toLowerCase();
+  const periodMap: Record<string, string> = {
+    "first term": "1st Term",
+    "1st term": "1st Term",
+    q1: "1st Term",
+    quarter1: "1st Term",
+    quarter_1: "1st Term",
+    "second term": "2nd Term",
+    "2nd term": "2nd Term",
+    q2: "2nd Term",
+    quarter2: "2nd Term",
+    quarter_2: "2nd Term",
+    "third term": "3rd Term",
+    "3rd term": "3rd Term",
+    q3: "3rd Term",
+    quarter3: "3rd Term",
+    quarter_3: "3rd Term",
+    "fourth term": "4th Term",
+    "4th term": "4th Term",
+    q4: "4th Term",
+    quarter4: "4th Term",
+    quarter_4: "4th Term",
+    final: "Final",
+  };
+
+  return periodMap[normalized] || period || "Final";
+};
+
+const getGradingPeriodOrder = (period: string): number => {
+  const normalized = normalizeGradingPeriod(period);
+  if (normalized === "Final") return -1;
+
+  const match = normalized.match(/^(\d+)(st|nd|rd|th)\s+term$/i);
+  if (!match) return 998;
+
+  const termNumber = Number(match[1]);
+  return Number.isFinite(termNumber) ? termNumber : -2;
+};
+
+const getSupportedTerm = (period: string): SupportedTerm | null => {
+  const normalized = normalizeGradingPeriod(period);
+  if (normalized === "1st Term") return "1st Term";
+  if (normalized === "2nd Term") return "2nd Term";
+  return null;
+};
+
+const getTermEquivalences = (
+  sheets: Array<
+    Pick<GradeSheet, "gradingPeriod" | "weightPercentage"> & {
+      activities?: unknown[];
+    }
+  >
+): Record<SupportedTerm, number> => {
+  const weightedTotal = sheets.reduce(
+    (sum, sheet) => sum + Math.max(0, Number(sheet.weightPercentage) || 0),
+    0
+  );
+
+  if (weightedTotal > 0) {
+    return sheets.reduce(
+      (acc, sheet) => {
+        const term = getSupportedTerm(sheet.gradingPeriod);
+        if (!term) return acc;
+        acc[term] += Math.max(0, Number(sheet.weightPercentage) || 0);
+        return acc;
+      },
+      { "1st Term": 0, "2nd Term": 0 } as Record<SupportedTerm, number>
+    );
+  }
+
+  const termActivityCounts: Record<SupportedTerm, number> = {
+    "1st Term": 0,
+    "2nd Term": 0,
+  };
+  const termSheetCounts: Record<SupportedTerm, number> = {
+    "1st Term": 0,
+    "2nd Term": 0,
+  };
+
+  sheets.forEach((sheet) => {
+    const term = getSupportedTerm(sheet.gradingPeriod);
+    if (!term) return;
+
+    termSheetCounts[term] += 1;
+    const activityCount = Array.isArray(sheet.activities)
+      ? sheet.activities.length
+      : 0;
+    termActivityCounts[term] += Math.max(0, activityCount);
+  });
+
+  const totalActivities =
+    termActivityCounts["1st Term"] + termActivityCounts["2nd Term"];
+
+  if (totalActivities > 0) {
+    return {
+      "1st Term": (termActivityCounts["1st Term"] / totalActivities) * 100,
+      "2nd Term": (termActivityCounts["2nd Term"] / totalActivities) * 100,
+    };
+  }
+
+  const totalSheets = termSheetCounts["1st Term"] + termSheetCounts["2nd Term"];
+  if (totalSheets > 0) {
+    return {
+      "1st Term": (termSheetCounts["1st Term"] / totalSheets) * 100,
+      "2nd Term": (termSheetCounts["2nd Term"] / totalSheets) * 100,
+    };
+  }
+
+  if (sheets.length === 0) {
+    return { "1st Term": 0, "2nd Term": 0 };
+  }
+  return { "1st Term": 0, "2nd Term": 0 };
+};
+
+const calculateNormalizedTotal = (
+  grades: Record<string, { value?: number | null }>,
+  activities: Activity[]
+): number => {
+  let normalizedSum = 0;
+  let gradedActivities = 0;
+
+  for (const activity of activities) {
+    const rawValue = toFiniteNumber(grades?.[activity.id]?.value);
+    if (rawValue === null) continue;
+
+    const activityMax = toFiniteNumber(activity.maxScore);
+    const safeMax = activityMax && activityMax > 0 ? activityMax : DISPLAY_MAX_SCORE;
+    const clampedRaw = clamp(rawValue, 0, safeMax);
+    const normalized = clamp((clampedRaw / safeMax) * DISPLAY_MAX_SCORE, 0, DISPLAY_MAX_SCORE);
+    normalizedSum += normalized;
+    gradedActivities += 1;
+  }
+
+  return gradedActivities > 0
+    ? clamp(normalizedSum / gradedActivities, 0, DISPLAY_MAX_SCORE)
+    : 0;
+};
+
+const determineStudentStatus = (
+  grades: Record<string, { value?: number | null }>,
+  activities: Activity[]
+): StudentGrade["status"] => {
+  const gradedActivities = activities.filter((activity) => {
+    const gradeValue = toFiniteNumber(grades?.[activity.id]?.value);
+    return gradeValue !== null;
+  }).length;
+
+  if (gradedActivities === 0) return "pending";
+  if (activities.length > 0 && gradedActivities === activities.length) return "completed";
+  return "incomplete";
+};
+
+const toPlainText = (value: unknown, fallback = ""): string => {
+  if (typeof value !== "string") return fallback;
+
+  const withoutTags = value.replace(/<[^>]*>/g, " ");
+  const decoded = withoutTags
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+
+  const normalized = decoded.replace(/\s+/g, " ").trim();
+  return normalized || fallback;
+};
 
 export default function GradeSheetsPage() {
   const { user } = useAuth(); 
   const { selectedCourseId, setSelectedCourseId } = useAcademic();
+  const navigate = useNavigate();
+  const { courseCode } = useParams<{ courseCode?: string }>();
   const [gradeSheets, setGradeSheets] = useState<GradeSheet[]>([]);
   const [currentSheet, setCurrentSheet] = useState<GradeSheet | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -171,13 +371,22 @@ export default function GradeSheetsPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [studentAverages, setStudentAverages] = useState<StudentAverage[]>([]);
   const [showAveragesSection, setShowAveragesSection] = useState(false);
+  const [averagesDisplayMode, setAveragesDisplayMode] = useState<
+    "term" | "sheet" | "both"
+  >("term");
+  const [selectedAveragesTerm, setSelectedAveragesTerm] = useState<string>("all");
   const [isSyncing, setIsSyncing] = useState(false);
   const commentTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const currentSheetSectionRef = useRef<HTMLDivElement | null>(null);
+  const shouldScrollToCurrentSheetRef = useRef(false);
 
   
   const [selectedCourseFilter, setSelectedCourseFilter] = useState<string>(
     selectedCourseId || "all",
   );
+  const [collapsedTermGroups, setCollapsedTermGroups] = useState<
+    Record<string, boolean>
+  >({});
   
   const hasLoadedInitialData = useRef(false);
 
@@ -185,7 +394,12 @@ export default function GradeSheetsPage() {
     title: "",
     courseId: "",
     courseName: "",
-    gradingPeriod: "1st Term" as "1st Term" | "2nd Term" | "Final",
+    gradingPeriod: "1st Term" as
+      | "1st Term"
+      | "2nd Term"
+      | "3rd Term"
+      | "4th Term"
+      | "Final",
     activities: [] as Activity[],
   });
 
@@ -214,6 +428,29 @@ export default function GradeSheetsPage() {
   }, [selectedCourseFilter, selectedCourseId, setSelectedCourseId]);
 
   useEffect(() => {
+    if (!courseCode || courses.length === 0) return;
+
+    const courseFromRoute = courses.find((course) => course.code === courseCode);
+    if (!courseFromRoute) return;
+
+    setSelectedCourseFilter((current) =>
+      current === courseFromRoute.id ? current : courseFromRoute.id
+    );
+    setSelectedCourseId(courseFromRoute.id);
+  }, [courseCode, courses, setSelectedCourseId]);
+
+  useEffect(() => {
+    if (selectedCourseFilter === "all") return;
+
+    const selectedCourse = courses.find((course) => course.id === selectedCourseFilter);
+    if (!selectedCourse) return;
+
+    if (courseCode !== selectedCourse.code) {
+      navigate(`/courses/${selectedCourse.code}/grade-sheets`, { replace: true });
+    }
+  }, [selectedCourseFilter, courses, courseCode, navigate]);
+
+  useEffect(() => {
     if (courses.length === 0) {
       if (selectedCourseFilter !== "all") {
         setSelectedCourseFilter("all");
@@ -238,16 +475,114 @@ export default function GradeSheetsPage() {
     }
   }, [courses, selectedCourseFilter, selectedCourseId]);
 
-  const filteredGradeSheets = searchTerm
-    ? gradeSheets.filter(
+  const filteredGradeSheets = useMemo(() => {
+    if (searchTerm) {
+      return gradeSheets.filter(
         (sheet) =>
           sheet.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
           sheet.courseName.toLowerCase().includes(searchTerm.toLowerCase()) ||
           sheet.teacherName.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    : selectedCourseFilter === "all"
-    ? gradeSheets
-    : gradeSheets.filter((sheet) => sheet.courseId === selectedCourseFilter);
+      );
+    }
+
+    if (selectedCourseFilter === "all") {
+      return gradeSheets;
+    }
+
+    return gradeSheets.filter((sheet) => sheet.courseId === selectedCourseFilter);
+  }, [gradeSheets, searchTerm, selectedCourseFilter]);
+
+  const groupedFilteredGradeSheets = useMemo(() => {
+    const grouped = filteredGradeSheets.reduce<Record<string, GradeSheet[]>>(
+      (acc, sheet) => {
+        const term = normalizeGradingPeriod(sheet.gradingPeriod || "Final");
+        if (!acc[term]) acc[term] = [];
+        acc[term].push(sheet);
+        return acc;
+      },
+      {},
+    );
+
+    return Object.entries(grouped)
+      .map(([term, sheets]) => ({
+        term,
+        sheets: [...sheets].sort(
+          (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime(),
+        ),
+      }))
+      .sort((a, b) => {
+        const orderA = getGradingPeriodOrder(a.term);
+        const orderB = getGradingPeriodOrder(b.term);
+        if (orderA !== orderB) return orderB - orderA;
+        return a.term.localeCompare(b.term);
+      });
+  }, [filteredGradeSheets]);
+
+  const toggleTermDropdown = (term: string) => {
+    setCollapsedTermGroups((prev) => ({
+      ...prev,
+      [term]: !(prev[term] ?? false),
+    }));
+  };
+
+  const openSheetDetails = (sheet: GradeSheet, shouldScroll = true) => {
+    shouldScrollToCurrentSheetRef.current = shouldScroll;
+    setCurrentSheet(sheet);
+  };
+
+  const averageGradeSheets = useMemo(() => {
+    if (selectedCourseFilter === "all") {
+      return gradeSheets;
+    }
+
+    return gradeSheets.filter((sheet) => sheet.courseId === selectedCourseFilter);
+  }, [gradeSheets, selectedCourseFilter]);
+
+  const courseTermEquivalences = useMemo(
+    () => getTermEquivalences(averageGradeSheets),
+    [averageGradeSheets]
+  );
+
+  const averagesTermOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        averageGradeSheets.map((sheet) =>
+          normalizeGradingPeriod(sheet.gradingPeriod || "Final"),
+        ),
+      ),
+    ).sort((a, b) => {
+      const orderA = getGradingPeriodOrder(a);
+      const orderB = getGradingPeriodOrder(b);
+      if (orderA !== orderB) return orderB - orderA;
+      return a.localeCompare(b);
+    });
+  }, [averageGradeSheets]);
+
+  const visibleAverageSheets = useMemo(() => {
+    if (selectedAveragesTerm === "all") return averageGradeSheets;
+    return averageGradeSheets.filter(
+      (sheet) =>
+        normalizeGradingPeriod(sheet.gradingPeriod || "Final") ===
+        selectedAveragesTerm,
+    );
+  }, [averageGradeSheets, selectedAveragesTerm]);
+
+  const visibleAverageTerms = useMemo(() => {
+    if (selectedAveragesTerm === "all") return averagesTermOptions;
+    return averagesTermOptions.filter((term) => term === selectedAveragesTerm);
+  }, [averagesTermOptions, selectedAveragesTerm]);
+
+  const gradedStudentAverages = useMemo(
+    () => studentAverages.filter((student) => student.completedSheets > 0),
+    [studentAverages]
+  );
+
+  useEffect(() => {
+    if (selectedAveragesTerm === "all") return;
+    if (!averagesTermOptions.includes(selectedAveragesTerm)) {
+      setSelectedAveragesTerm("all");
+    }
+  }, [averagesTermOptions, selectedAveragesTerm]);
 
   useEffect(() => {
     if (user && !hasLoadedInitialData.current) {
@@ -272,10 +607,20 @@ export default function GradeSheetsPage() {
   }, [user]);
 
   useEffect(() => {
-    if (gradeSheets.length > 0 && students.length > 0) {
-      calculateStudentAverages();
-    }
-  }, [gradeSheets, students]);
+    if (!currentSheet || !shouldScrollToCurrentSheetRef.current) return;
+
+    shouldScrollToCurrentSheetRef.current = false;
+    requestAnimationFrame(() => {
+      currentSheetSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, [currentSheet]);
+
+  useEffect(() => {
+    calculateStudentAverages();
+  }, [averageGradeSheets, students]);
 
   useEffect(() => {
     const syncAllStudents = async () => {
@@ -454,15 +799,36 @@ export default function GradeSheetsPage() {
             type: act.type || "quiz",
             maxScore:
               typeof act.maxScore === "number"
-                ? Math.max(1, Math.min(5.0, act.maxScore))
+                ? Math.max(1, act.maxScore)
                 : 5.0,
             description: act.description || "",
           })
         );
 
-        const students = (data.students || []).sort((a: any, b: any) =>
-          a.name.localeCompare(b.name, "es", { sensitivity: "base" })
-        );
+        const students: StudentGrade[] = (data.students || [])
+          .map((student: any) => {
+            const normalizedGrades = Object.entries(student.grades || {}).reduce(
+              (acc, [activityId, value]: [string, any]) => {
+                const numericValue = toFiniteNumber(value?.value);
+                acc[activityId] = {
+                  value: numericValue,
+                  comment: value?.comment || "",
+                  submittedAt: value?.submittedAt ?? null,
+                };
+                return acc;
+              },
+              {} as Record<string, { value?: number | null; comment?: string; submittedAt?: Date | null }>
+            );
+
+            return {
+              studentId: student.studentId,
+              name: student.name || "Student",
+              grades: normalizedGrades,
+              total: calculateNormalizedTotal(normalizedGrades, activities),
+              status: determineStudentStatus(normalizedGrades, activities),
+            };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" }));
 
         sheets.push({
           id: doc.id,
@@ -471,12 +837,13 @@ export default function GradeSheetsPage() {
           courseName: data.courseName || "Unnamed course",
           teacherId: data.teacherId || "",
           teacherName: data.teacherName || "Teacher",
-          gradingPeriod: data.gradingPeriod || "1st Term",
+          gradingPeriod: normalizeGradingPeriod(data.gradingPeriod || "1st Term"),
           activities,
           students,
           createdAt: data.createdAt?.toDate() || new Date(),
           updatedAt: data.updatedAt?.toDate() || new Date(),
           isPublished: data.isPublished || false,
+          weightPercentage: Math.max(0, Number(data.weightPercentage) || 0),
         });
       }
 
@@ -539,13 +906,29 @@ export default function GradeSheetsPage() {
   };
 
   const calculateStudentAverages = () => {
-    const averages: StudentAverage[] = [];
+    const teacherSheets = averageGradeSheets.filter(
+      (sheet) => sheet.teacherId === user?.id
+    );
 
-    const filteredStudents = students.filter(student => {
-      return courses.some(course => 
-        course.enrolledStudents.includes(student.id)
-      );
-    });
+    if (students.length === 0 || teacherSheets.length === 0) {
+      setStudentAverages([]);
+      return;
+    }
+
+    const averages: StudentAverage[] = [];
+    const hasWeightedSheets = teacherSheets.some(
+      (sheet) => Math.max(0, Number(sheet.weightPercentage) || 0) > 0
+    );
+
+    const studentIdsInSheets = new Set(
+      teacherSheets.flatMap((sheet) =>
+        sheet.students.map((student) => student.studentId)
+      )
+    );
+
+    const filteredStudents = students.filter((student) =>
+      studentIdsInSheets.has(student.id)
+    );
 
     filteredStudents.forEach((student) => {
       const studentAvg: StudentAverage = {
@@ -557,35 +940,110 @@ export default function GradeSheetsPage() {
         overallAverage: 0,
         approved: false,
         completedSheets: 0,
-        totalSheets: gradeSheets.filter(sheet => 
-          sheet.teacherId === user?.id
-        ).length,
+        totalSheets: teacherSheets.length,
+        firstTermAverage: 0,
+        secondTermAverage: 0,
+        firstTermEquivalent: 0,
+        secondTermEquivalent: 0,
       };
 
-      let totalSum = 0;
-      let sheetsWithGrades = 0;
-
-      const teacherSheets = gradeSheets.filter(sheet => 
-        sheet.teacherId === user?.id
-      );
+      let firstTermSimpleSum = 0;
+      let firstTermSimpleCount = 0;
+      let secondTermSimpleSum = 0;
+      let secondTermSimpleCount = 0;
+      let firstTermWeightedSum = 0;
+      let firstTermWeight = 0;
+      let secondTermWeightedSum = 0;
+      let secondTermWeight = 0;
 
       teacherSheets.forEach((sheet) => {
         const studentInSheet = sheet.students.find(
           (s) => s.studentId === student.id
         );
 
-        if (studentInSheet && studentInSheet.total !== undefined) {
-          studentAvg.averages[sheet.title] = studentInSheet.total;
-          totalSum += studentInSheet.total;
-          sheetsWithGrades++;
-          studentAvg.completedSheets++;
+        if (studentInSheet) {
+          const hasAtLeastOneGrade = Object.values(studentInSheet.grades || {}).some(
+            (grade: any) => toFiniteNumber(grade?.value) !== null
+          );
+
+          const normalizedTotal = calculateNormalizedTotal(
+            studentInSheet.grades || {},
+            sheet.activities || []
+          );
+
+          studentAvg.averages[sheet.id] = normalizedTotal;
+
+          if (hasAtLeastOneGrade) {
+            const sheetWeightFactor =
+              Math.max(0, Number(sheet.weightPercentage) || 0) / 100;
+            const supportedTerm = getSupportedTerm(sheet.gradingPeriod);
+
+            studentAvg.completedSheets++;
+
+            if (supportedTerm === "1st Term") {
+              firstTermSimpleSum += normalizedTotal;
+              firstTermSimpleCount += 1;
+              if (sheetWeightFactor > 0) {
+                firstTermWeightedSum += normalizedTotal * sheetWeightFactor;
+                firstTermWeight += sheetWeightFactor;
+              }
+            }
+
+            if (supportedTerm === "2nd Term") {
+              secondTermSimpleSum += normalizedTotal;
+              secondTermSimpleCount += 1;
+              if (sheetWeightFactor > 0) {
+                secondTermWeightedSum += normalizedTotal * sheetWeightFactor;
+                secondTermWeight += sheetWeightFactor;
+              }
+            }
+
+          }
         } else {
-          studentAvg.averages[sheet.title] = 0;
+          studentAvg.averages[sheet.id] = 0;
         }
       });
 
+      studentAvg.firstTermAverage = hasWeightedSheets
+        ? firstTermWeight > 0
+          ? firstTermWeightedSum / firstTermWeight
+          : firstTermSimpleCount > 0
+          ? firstTermSimpleSum / firstTermSimpleCount
+          : 0
+        : firstTermSimpleCount > 0
+        ? firstTermSimpleSum / firstTermSimpleCount
+        : 0;
+
+      studentAvg.secondTermAverage = hasWeightedSheets
+        ? secondTermWeight > 0
+          ? secondTermWeightedSum / secondTermWeight
+          : secondTermSimpleCount > 0
+          ? secondTermSimpleSum / secondTermSimpleCount
+          : 0
+        : secondTermSimpleCount > 0
+        ? secondTermSimpleSum / secondTermSimpleCount
+        : 0;
+
+      const termAveragesForFinal: number[] = [];
+      if (firstTermSimpleCount > 0) {
+        termAveragesForFinal.push(studentAvg.firstTermAverage);
+      }
+      if (secondTermSimpleCount > 0) {
+        termAveragesForFinal.push(studentAvg.secondTermAverage);
+      }
+
       studentAvg.overallAverage =
-        sheetsWithGrades > 0 ? totalSum / sheetsWithGrades : 0;
+        termAveragesForFinal.length > 0
+          ? termAveragesForFinal.reduce((sum, grade) => sum + grade, 0) /
+            termAveragesForFinal.length
+          : 0;
+      const termShare =
+        termAveragesForFinal.length > 0 ? 100 / termAveragesForFinal.length : 0;
+      studentAvg.firstTermEquivalent =
+        firstTermSimpleCount > 0 ? termShare : 0;
+      studentAvg.secondTermEquivalent =
+        secondTermSimpleCount > 0 ? termShare : 0;
+
       studentAvg.approved = studentAvg.overallAverage >= 3.0;
 
       averages.push(studentAvg);
@@ -641,11 +1099,6 @@ export default function GradeSheetsPage() {
       return;
     }
 
-    if (newSheet.activities.length === 0) {
-      setError("You must add at least one activity");
-      return;
-    }
-
     const teacherName = user?.name || user?.email?.split('@')[0] || "Teacher";
 
     try {
@@ -688,6 +1141,7 @@ export default function GradeSheetsPage() {
         teacherId: user?.id || "",
         teacherName: teacherName,
         gradingPeriod: newSheet.gradingPeriod,
+        weightPercentage: 0,
         activities: newSheet.activities.map(act => ({
           id: act.id,
           name: act.name,
@@ -719,6 +1173,7 @@ export default function GradeSheetsPage() {
         teacherId: user?.id || "",
         teacherName: teacherName,
         gradingPeriod: newSheet.gradingPeriod,
+        weightPercentage: 0,
         activities: newSheet.activities,
         students: studentGrades,
         createdAt: new Date(),
@@ -1065,6 +1520,23 @@ export default function GradeSheetsPage() {
     return "incomplete";
   };
 
+  const getStudentTermAverage = (student: StudentAverage, term: string): number => {
+    if (term === "1st Term") return student.firstTermAverage;
+    if (term === "2nd Term") return student.secondTermAverage;
+
+    const termSheets = averageGradeSheets.filter(
+      (sheet) =>
+        normalizeGradingPeriod(sheet.gradingPeriod || "Final") === term,
+    );
+    const values = termSheets
+      .map((sheet) => student.averages[sheet.id] || 0)
+      .filter((value) => value > 0);
+
+    return values.length > 0
+      ? values.reduce((sum, value) => sum + value, 0) / values.length
+      : 0;
+  };
+
   const exportToCSV = () => {
     if (!currentSheet) return;
 
@@ -1104,42 +1576,88 @@ export default function GradeSheetsPage() {
     document.body.removeChild(link);
   };
 
-  const exportAveragesToCSV = () => {
+  const exportAveragesToExcel = () => {
     if (studentAverages.length === 0) return;
 
-    let csvContent = "data:text/csv;charset=utf-8,";
+    const includeTermColumns =
+      averagesDisplayMode === "term" || averagesDisplayMode === "both";
+    const includeSheetColumns =
+      averagesDisplayMode === "sheet" || averagesDisplayMode === "both";
 
-    const headers = [
+    const termHeaders = includeTermColumns
+      ? visibleAverageTerms.map((term) =>
+          term === "1st Term"
+            ? `${term} (${courseTermEquivalences["1st Term"].toFixed(0)}%)`
+            : term === "2nd Term"
+              ? `${term} (${courseTermEquivalences["2nd Term"].toFixed(0)}%)`
+              : term,
+        )
+      : [];
+
+    const usedLabels = new Map<string, number>();
+    const sheetColumns = includeSheetColumns
+      ? visibleAverageSheets.map((sheet) => {
+          const baseLabel = `${sheet.title} (${normalizeGradingPeriod(
+            sheet.gradingPeriod || "Final",
+          )})`;
+          const count = (usedLabels.get(baseLabel) || 0) + 1;
+          usedLabels.set(baseLabel, count);
+          return {
+            id: sheet.id,
+            label: count > 1 ? `${baseLabel} #${count}` : baseLabel,
+          };
+        })
+      : [];
+
+    const rows: Array<Record<string, string | number>> = studentAverages.map(
+      (student) => {
+        const row: Record<string, string | number> = {
+          Student: student.studentName,
+        };
+
+        if (includeTermColumns) {
+          visibleAverageTerms.forEach((term, index) => {
+            const average = getStudentTermAverage(student, term);
+            row[termHeaders[index]] = average > 0 ? Number(average.toFixed(1)) : "--";
+          });
+        }
+
+        if (includeSheetColumns) {
+          sheetColumns.forEach((sheetColumn) => {
+            const average = student.averages[sheetColumn.id] || 0;
+            row[sheetColumn.label] = Number(average.toFixed(1));
+          });
+        }
+
+        row["Avg. score"] = Number(student.overallAverage.toFixed(1));
+        row.Passed = student.approved ? "Yes" : "No";
+        return row;
+      },
+    );
+
+    const headerOrder = [
       "Student",
-      "ID",
-      "Email",
-      ...gradeSheets.map((sheet) => sheet.title),
-      "Overall average",
+      ...termHeaders,
+      ...sheetColumns.map((column) => column.label),
+      "Avg. score",
       "Passed",
     ];
-    csvContent += headers.join(",") + "\n";
 
-    studentAverages.forEach((student) => {
-      const row = [
-        student.studentName,
-        student.idNumber || "",
-        student.email || "",
-        ...gradeSheets.map(
-          (sheet) => student.averages[sheet.title]?.toFixed(1) || "0.0"
-        ),
-        student.overallAverage.toFixed(1),
-        student.approved ? "Yes" : "No",
-      ];
-      csvContent += row.join(",") + "\n";
-    });
+    const worksheet = XLSX.utils.json_to_sheet(rows, { header: headerOrder });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Averages");
 
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "student_averages.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const modeLabel =
+      averagesDisplayMode === "term"
+        ? "by-term"
+        : averagesDisplayMode === "sheet"
+          ? "by-sheet"
+          : "term-and-sheet";
+    const termLabel =
+      selectedAveragesTerm === "all"
+        ? "all-terms"
+        : selectedAveragesTerm.toLowerCase().replace(/\s+/g, "-");
+    XLSX.writeFile(workbook, `student_averages_${modeLabel}_${termLabel}.xlsx`);
   };
 
   const publishGradeSheet = async () => {
@@ -1188,197 +1706,228 @@ export default function GradeSheetsPage() {
     }
   };
 
+  const selectedCourseDetails =
+    selectedCourseFilter === "all"
+      ? null
+      : courses.find((course) => course.id === selectedCourseFilter) || null;
+
+  const globalAverage =
+    gradedStudentAverages.length > 0
+      ? (
+          gradedStudentAverages.reduce(
+            (sum, student) => sum + student.overallAverage,
+            0,
+          ) / gradedStudentAverages.length
+        ).toFixed(1)
+      : "0.0";
+
   return (
-    <DashboardLayout 
-      title="Grade Sheets"
-      subtitle="Manage and grade your students"
-       contentClassName="pt-0 lg:pt-1"
-    >
-      <div className="space-y-2 fade-in-up">
-        {isSyncing && ( 
-          <div className="modern-card bg-blue-50 border border-blue-100 p-3 rounded-xl">
-            <div className="flex items-center gap-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-              <span className="text-sm font-medium text-blue-700">
-                Syncing students...
-              </span>
-            </div>
-          </div>
-        )}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4">
-          <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow duration-300">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold mb-1 text-center md:text-left text-blue-600 tracking-wide">
-                  {selectedCourseFilter === "all"
-                    ? "Total sheets"
-                    : `${
-                        courses.find(c => c.id === selectedCourseFilter)?.code || ""
-                      }`}
-                </p>
-                <p className="text-xl md:text-2xl font-bold text-gray-900 text-center md:text-left">
-                  {filteredGradeSheets.length}
-                </p>
-              </div>
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                <FileSpreadsheet className="h-4 w-4 text-blue-500" />
-              </div>
-            </div>
-          </div>
+    <DashboardLayout contentClassName="pt-0 lg:pt-1">
+      <div className="relative overflow-x-hidden">
+        <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+        <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-          <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow duration-300">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold mb-1 text-center md:text-left text-blue-600 tracking-wide">
-                  Active courses
-                </p>
-                <p className="text-xl md:text-xl font-bold text-gray-900 text-center md:text-left">
-                  {courses.length}
-                </p>
-              </div>
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                <BookOpen className="h-4 w-4 text-blue-500" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow duration-300">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold mb-1 text-center md:text-left text-blue-600 tracking-wide">
-                  Students
-                </p>
-                <p className="text-xl md:text-xl font-bold text-gray-900 text-center md:text-left">
-                  {students.length}
-                </p>
-              </div>
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                <Users className="h-4 w-4 text-blue-500" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow duration-300">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold mb-1 text-center md:text-left text-blue-600 tracking-wide">
-                  Current term
-                </p>
-                <p className="text-xl md:text-xl font-bold text-gray-900 text-center md:text-left">
-                  2025-2
-                </p>
-              </div>
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                <Calendar className="h-4 w-4 text-blue-500" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow duration-300">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold mb-1 text-center md:text-left text-blue-600 tracking-wide">
-                  Avg. score
-                </p>
-                <p className="text-xl md:text-xl font-bold text-gray-900 text-center md:text-left">
-                  {studentAverages.length > 0
-                    ? (
-                        studentAverages.reduce(
-                          (sum, s) => sum + s.overallAverage,
-                          0
-                        ) / studentAverages.length
-                      ).toFixed(1)
-                    : "0.0"}
-                </p>
-              </div>
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                <BarChart3 className="h-4 w-4 text-blue-500" />
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="modern-card bg-white border border-gray-200 p-5">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div className="flex-1 flex flex-col sm:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search sheets by title, course, or teacher..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="input-modern pl-10 w-full"
-                  />
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="flex flex-col gap-3">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+              <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
+              <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
+              <div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                    <FileSpreadsheet className="h-3.5 w-3.5" />
+                    Grade Sheets Workspace
+                  </div>
+                  <h2 className="mt-3 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
+                    Grade sheets command center
+                  </h2>
+                  <p className="mt-1.5 max-w-3xl text-sm text-slate-600">
+                    Create sheets, grade faster, and monitor student averages in one place.
+                  </p>
+                  {selectedCourseDetails && (
+                    <p className="mt-2 text-xs font-medium text-slate-500">
+                      Course: {selectedCourseDetails.code} · {selectedCourseDetails.name}
+                    </p>
+                  )}
                 </div>
-              </div>
-              
-              <div className="relative min-w-[180px]">
-                <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
-                  <School className="h-5 w-5 text-gray-400" />
-                </div>
-                <select
-                  value={selectedCourseFilter}
-                  onChange={(e) => setSelectedCourseFilter(e.target.value)}
-                  className="input-modern pl-10 w-full appearance-none"
+                <button
+                  onClick={() => setShowNewSheetModal(true)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
                 >
-                  <option value="all">All courses</option>
-                  {courses.map((course) => (
-                    <option key={course.id} value={course.id}>
-                      {course.code}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <Plus className="h-4 w-4" />
+                  New sheet
+                </button>
               </div>
-            </div>
+            </section>
 
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setShowNewSheetModal(true)}
-                className="btn-modern-outline flex items-center gap-2 text-sm"
-              >
-                <Plus className="h-4 w-4" />
-                New sheet
-              </button>
-              
-              <button
-                onClick={() => setShowAveragesSection(!showAveragesSection)}
-                className={cn(
-                  "btn-modern-outline flex items-center gap-2 text-sm",
-                  showAveragesSection && "bg-blue-50 border-blue-300"
-                )}
-              >
-                <TrendingUp className="h-4 w-4" />
-                Averages
-              </button>
-            </div>
-          </div>
-        </div>
+            {isSyncing && (
+              <div className="rounded-2xl border border-sky-100 bg-sky-50 p-3 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-sky-600"></div>
+                  <span className="text-sm font-medium text-sky-700">
+                    Syncing students...
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="grid grid-cols-2 gap-2 md:gap-2.5 lg:grid-cols-5">
+                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="mb-1 text-center text-xs font-semibold tracking-wide text-slate-500 md:text-left">
+                        {selectedCourseFilter === "all" ? "Total sheets" : `${selectedCourseDetails?.code || ""}`}
+                      </p>
+                      <p className="text-center text-lg font-extrabold text-slate-900 md:text-left">
+                        {filteredGradeSheets.length}
+                      </p>
+                    </div>
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100">
+                      <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-700" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="mb-1 text-center text-xs font-semibold tracking-wide text-slate-500 md:text-left">
+                        Active courses
+                      </p>
+                      <p className="text-center text-lg font-extrabold text-slate-900 md:text-left">
+                        {courses.length}
+                      </p>
+                    </div>
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100">
+                      <BookOpen className="h-3.5 w-3.5 text-indigo-700" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="mb-1 text-center text-xs font-semibold tracking-wide text-slate-500 md:text-left">
+                        Students
+                      </p>
+                      <p className="text-center text-lg font-extrabold text-slate-900 md:text-left">
+                        {students.length}
+                      </p>
+                    </div>
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100">
+                      <Users className="h-3.5 w-3.5 text-emerald-700" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="mb-1 text-center text-xs font-semibold tracking-wide text-slate-500 md:text-left">
+                        Current term
+                      </p>
+                      <p className="text-center text-lg font-extrabold text-slate-900 md:text-left">
+                        2025-2
+                      </p>
+                    </div>
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100">
+                      <Calendar className="h-3.5 w-3.5 text-amber-700" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="mb-1 text-center text-xs font-semibold tracking-wide text-slate-500 md:text-left">
+                        Avg. score
+                      </p>
+                      <p className="text-center text-lg font-extrabold text-slate-900 md:text-left">
+                        {globalAverage}
+                      </p>
+                    </div>
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100">
+                      <BarChart3 className="h-3.5 w-3.5 text-sky-700" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-1 flex-col gap-3 sm:flex-row">
+                  <div className="flex-1">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search sheets by title, course, or teacher..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium text-slate-700 transition-all focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="relative min-w-[180px]">
+                    <School className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <select
+                      value={selectedCourseFilter}
+                      onChange={(e) => setSelectedCourseFilter(e.target.value)}
+                      className="h-12 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-10 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    >
+                      <option value="all">All courses</option>
+                      {courses.map((course) => (
+                        <option key={course.id} value={course.id}>
+                          {course.code}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowAveragesSection(!showAveragesSection)}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50",
+                      showAveragesSection &&
+                        "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100",
+                    )}
+                  >
+                    <TrendingUp className="h-4 w-4" />
+                    Averages
+                  </button>
+                </div>
+              </div>
+            </section>
         {success && (
-          <div className="modern-card bg-blue-50 border border-blue-200 p-4 rounded-xl">
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-3">
             <div className="flex items-center gap-3">
-              <CheckCircle className="h-4 w-4 text-blue-600" />
+              <CheckCircle className="h-4 w-4 text-sky-700" />
               <div>
-                <p className="font-medium text-blue-800">{success}</p>
+                <p className="font-medium text-sky-800">{success}</p>
               </div>
             </div>
           </div>
         )}
 
         {error && (
-          <div className="modern-card bg-gray-100 border border-gray-200 p-4 rounded-xl">
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
             <div className="flex items-center gap-3">
-              <AlertCircle className="h-4 w-4 text-gray-700" />
+              <AlertCircle className="h-4 w-4 text-rose-700" />
               <div>
-                <p className="font-medium text-gray-800">{error}</p>
+                <p className="font-medium text-rose-800">{error}</p>
               </div>
             </div>
           </div>
         )}
         {showAveragesSection && studentAverages.length > 0 && (
-          <div className="modern-card">
-            <div className="flex items-center justify-between mb-6">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
                   <TrendingUp className="h-4 w-4 text-blue-600" />
@@ -1390,40 +1939,89 @@ export default function GradeSheetsPage() {
                   <p className="text-sm text-gray-600">
                     Average summary across all grade sheets
                   </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Si no hay pesos por hoja, la equivalencia de 1st/2nd Term se calcula por actividades (o por hojas si no hay actividades).
+                  </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
+                <div className="relative">
+                  <select
+                    value={averagesDisplayMode}
+                    onChange={(e) =>
+                      setAveragesDisplayMode(
+                        e.target.value as "term" | "sheet" | "both",
+                      )
+                    }
+                    className="h-9 rounded-xl border border-slate-200 bg-white px-3 pr-8 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  >
+                    <option value="term">Average by term</option>
+                    <option value="sheet">Grades by sheet</option>
+                    <option value="both">Term + sheet</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
+                <div className="relative">
+                  <select
+                    value={selectedAveragesTerm}
+                    onChange={(e) => setSelectedAveragesTerm(e.target.value)}
+                    className="h-9 rounded-xl border border-slate-200 bg-white px-3 pr-8 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  >
+                    <option value="all">All terms</option>
+                    {averagesTermOptions.map((term) => (
+                      <option key={term} value={term}>
+                        {term}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                </div>
                 <button
-                  onClick={exportAveragesToCSV}
-                  className="btn-modern-outline flex items-center gap-2 text-sm"
+                  onClick={exportAveragesToExcel}
+                  className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <Download className="h-4 w-4" />
-                  Export CSV
+                  Export Excel
                 </button>
               </div>
             </div>
 
-            <div className="overflow-x-auto border border-gray-200 rounded-xl">
-              <table className="w-full table-modern">
+            <div className="overflow-x-auto border border-gray-200 rounded-xl gs-table-scroll">
+              <table className="w-full table-modern gs-table gs-averages-table">
                 <thead>
-                  <tr className="bg-blue-50/10">
+                  <tr className="bg-slate-50/80">
                     <th className="py-3 px-4 text-left font-bold text-gray-900 tracking-wide">
                       Student
                     </th>
-                  
-                    {gradeSheets.map((sheet) => (
-                      <th
-                        key={sheet.id}
-                        className="py-3 px-4 text-left font-bold text-gray-900 tracking-wide"
-                      >
-                        <div className="truncate" title={sheet.title}>
-                          {sheet.title.length > 15
-                            ? `${sheet.title.substring(0, 15)}...`
-                            : sheet.title}
-                        </div>
-                      </th>
-                    ))}
+                    {(averagesDisplayMode === "term" ||
+                      averagesDisplayMode === "both") && (
+                      visibleAverageTerms.map((term) => (
+                        <th
+                          key={`term-header-${term}`}
+                          className="py-3 px-4 text-left font-bold text-gray-900 tracking-wide"
+                        >
+                          {term === "1st Term"
+                            ? `${term} (${courseTermEquivalences["1st Term"].toFixed(0)}%)`
+                            : term === "2nd Term"
+                              ? `${term} (${courseTermEquivalences["2nd Term"].toFixed(0)}%)`
+                              : term}
+                        </th>
+                      ))
+                    )}
+
+                    {(averagesDisplayMode === "sheet" ||
+                      averagesDisplayMode === "both") &&
+                      visibleAverageSheets.map((sheet) => (
+                        <th
+                          key={sheet.id}
+                          className="py-3 px-4 text-left font-bold text-gray-900 tracking-wide align-top"
+                        >
+                          <div className="max-w-[220px] min-w-[150px] whitespace-normal break-words leading-snug">
+                            {sheet.title}
+                          </div>
+                        </th>
+                      ))}
                     <th className="py-3 px-4 text-left font-bold text-gray-900 tracking-wide">
                       Avg. score
                     </th>
@@ -1434,41 +2032,69 @@ export default function GradeSheetsPage() {
                 </thead>
                 <tbody>
                   {studentAverages.map((student) => (
-                    <tr key={student.studentId} className="hover:bg-blue-50/10">
-                      <td className="py-3 px-4">
+                    <tr key={student.studentId} className="hover:bg-slate-50/80">
+                      <td className="py-3 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-3">
                           <div>
-                            <span className="font-medium text-gray-900">
-                              {student.studentName}
+                            <span className="font-medium text-gray-900 whitespace-nowrap">
+                      {student.studentName}
                             </span>
                           </div>
                         </div>
                       </td>
-                    
+                      {(averagesDisplayMode === "term" ||
+                        averagesDisplayMode === "both") && (
+                        visibleAverageTerms.map((term) => {
+                          const termAverage = getStudentTermAverage(student, term);
 
-                      {gradeSheets.map((sheet) => {
-                        const average = student.averages[sheet.title] || 0;
-                        return (
-                          <td key={sheet.id} className="py-3 px-4">
-                            <div className="text-center">
-                              <span
-                                className={cn(
-                                  "text-sm font-bold",
-                                  average >= 4.0
-                                    ? "text-blue-600"
-                                    : average >= 3.0
-                                    ? "text-blue-600"
-                                    : average > 0
-                                    ? "text-gray-700"
-                                    : "text-gray-400"
-                                )}
-                              >
-                                {average.toFixed(1)}
-                              </span>
-                            </div>
-                          </td>
-                        );
-                      })}
+                          return (
+                            <td key={`${student.studentId}-term-${term}`} className="py-3 px-4">
+                              <div className="text-center">
+                                <span
+                                  className={cn(
+                                    "text-sm font-bold",
+                                    termAverage >= 4.0
+                                      ? "text-blue-600"
+                                      : termAverage >= 3.0
+                                        ? "text-blue-600"
+                                        : termAverage > 0
+                                          ? "text-gray-700"
+                                          : "text-gray-400",
+                                  )}
+                                >
+                                  {termAverage > 0 ? termAverage.toFixed(1) : "--"}
+                                </span>
+                              </div>
+                            </td>
+                          );
+                        })
+                      )}
+
+                      {(averagesDisplayMode === "sheet" ||
+                        averagesDisplayMode === "both") &&
+                        visibleAverageSheets.map((sheet) => {
+                          const average = student.averages[sheet.id] || 0;
+                          return (
+                            <td key={sheet.id} className="py-3 px-4">
+                              <div className="text-center">
+                                <span
+                                  className={cn(
+                                    "text-sm font-bold",
+                                    average >= 4.0
+                                      ? "text-blue-600"
+                                      : average >= 3.0
+                                        ? "text-blue-600"
+                                        : average > 0
+                                          ? "text-gray-700"
+                                          : "text-gray-400",
+                                  )}
+                                >
+                                  {average.toFixed(1)}
+                                </span>
+                              </div>
+                            </td>
+                          );
+                        })}
 
                       <td className="py-3 px-4">
                         <div className="text-center">
@@ -1508,8 +2134,8 @@ export default function GradeSheetsPage() {
               </table>
             </div>
 
-            <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+            <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3 gs-metric-grid">
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
                 <div className="text-xs font-semibold text-blue-600 mb-1">
                   Students Passeds
                 </div>
@@ -1527,7 +2153,7 @@ export default function GradeSheetsPage() {
                 </div>
               </div>
 
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
                 <div className="text-xs font-semibold text-blue-600 mb-1">
                   Highest average
                 </div>
@@ -1540,7 +2166,7 @@ export default function GradeSheetsPage() {
                 </div>
               </div>
 
-              <div className="bg-gray-100 border border-gray-200 rounded-xl p-4">
+              <div className="bg-gray-100 border border-gray-200 rounded-xl p-3">
                 <div className="text-xs font-semibold text-gray-700 mb-1">
                   Lowest average
                 </div>
@@ -1555,7 +2181,7 @@ export default function GradeSheetsPage() {
                 </div>
               </div>
 
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
                 <div className="text-xs font-semibold text-blue-600 mb-1">
                   Completed sheets
                 </div>
@@ -1577,17 +2203,20 @@ export default function GradeSheetsPage() {
           </div>
         )}
         {currentSheet && (
-          <div className="modern-card">
-            <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
-              <div className="flex items-center gap-4">
-                <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                  <FileSpreadsheet className="h-4 w-4 text-blue-600" />
+          <div
+            ref={currentSheetSectionRef}
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+          >
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-200 gs-sheet-head">
+              <div className="flex items-center gap-4 gs-sheet-title-wrap">
+                <div className="h-8 w-8 rounded-xl bg-emerald-100 flex items-center justify-center">
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
                 </div>
                 <div>
                   <h3 className="font-bold text-xl text-gray-900">
                     {currentSheet.title}
                   </h3>
-                  <div className="flex items-center gap-3 mt-1">
+                  <div className="flex items-center gap-3 mt-1 gs-sheet-meta">
                     <span className="text-sm text-gray-600">
                       {currentSheet.courseName}
                     </span>
@@ -1599,7 +2228,7 @@ export default function GradeSheetsPage() {
                       className={cn(
                         "ml-2 px-2 py-1 rounded-full text-xs font-bold",
                         currentSheet.isPublished
-                          ? "bg-blue-100 text-blue-700"
+                          ? "bg-emerald-100 text-emerald-700"
                           : "bg-gray-100 text-gray-700"
                       )}
                     >
@@ -1609,10 +2238,10 @@ export default function GradeSheetsPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 gs-sheet-actions">
                 <button
                   onClick={() => setShowAddActivityModal(true)}
-                  className="btn-modern-outline flex items-center gap-2 text-sm"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   title={
                     currentSheet.isPublished
                       ? "This sheet is published. New activities will remain unpublished until you publish again."
@@ -1626,7 +2255,7 @@ export default function GradeSheetsPage() {
                 {!currentSheet.isPublished && (
                   <button
                     onClick={publishGradeSheet}
-                    className="btn-modern-outline flex items-center gap-2 text-sm"
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     <Eye className="h-4 w-4" />
                     Publish
@@ -1635,7 +2264,7 @@ export default function GradeSheetsPage() {
 
                 <button
                   onClick={exportToCSV}
-                  className="btn-modern-outline flex items-center gap-2 text-sm"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <Download className="h-4 w-4" />
                   CSV
@@ -1649,10 +2278,10 @@ export default function GradeSheetsPage() {
               </div>
             </div>
 
-            <div className="overflow-x-auto border border-gray-200 rounded-xl">
-              <table className="w-full min-w-[800px]">
+            <div className="overflow-x-auto border border-gray-200 rounded-xl gs-table-scroll gs-sheet-table-scroll">
+              <table className="w-full min-w-[800px] gs-sheet-table">
                 <thead>
-                  <tr className="bg-blue-50/10">
+                  <tr className="bg-slate-50/80">
                     <th className="sticky left-0 z-20 bg-blue-50 border-r border-gray-200 px-3 py-3 text-left font-bold text-gray-900 tracking-wide min-w-[200px]">
                       <div className="flex items-center justify-between">
                         <span>Student</span>
@@ -1662,75 +2291,72 @@ export default function GradeSheetsPage() {
                       </div>
                     </th>
 
-                    {currentSheet.activities.map((activity) => (
-                      <th
-                        key={activity.id}
-                        className="px-3 py-3 text-left font-bold text-gray-900 tracking-wide border-b border-gray-200 min-w-[140px]"
-                      >
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1 min-w-0">
-                              <div
-                                className="text-sm font-bold truncate cursor-help"
-                                title={`${activity.name}\nType: ${activity.type}\nMax: ${activity.maxScore}${
-                                  activity.description
-                                    ? `\n\n${activity.description}`
-                                    : ""
-                                }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (activity.description) {
-                                    alert(
-                                      `Description:\n\n${activity.description}`
-                                    );
-                                  }
-                                }}
-                              >
-                                {activity.name}
-                              </div>
-                            </div>
+                    {currentSheet.activities.map((activity) => {
+                      const activityName = toPlainText(activity.name, "Untitled activity");
+                      const activityDescription = toPlainText(activity.description || "");
 
-                            {!currentSheet.isPublished && (
+                      return (
+                        <th
+                          key={activity.id}
+                          className="px-3 py-3 text-left font-bold text-gray-900 tracking-wide border-b border-gray-200 min-w-[140px]"
+                        >
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div
+                                  className="text-sm font-bold truncate cursor-help"
+                                  title={`${activityName}\nType: ${activity.type}\nMax: ${activity.maxScore}${
+                                    activityDescription ? `\n\n${activityDescription}` : ""
+                                  }`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (activityDescription) {
+                                      alert(`Description:\n\n${activityDescription}`);
+                                    }
+                                  }}
+                                >
+                                  {activityName}
+                                </div>
+                              </div>
+
                               <div className="flex items-center">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     removeActivityFromCurrentSheet(activity.id);
                                   }}
-                                  className="ml-1 p-1 text-gray-700 hover:bg-red-50 rounded transition-colors"
+                                  className="ml-2 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 hover:border-red-300 transition-colors"
                                   title="Delete activity"
                                 >
-                                  <Trash2 className="h-4 w-4 text-red-600" />
+                                  <Trash2 className="h-3.5 w-3.5" />
                                 </button>
+                              </div>
+                            </div>
+
+                            {activityDescription && (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  className="text-gray-400 hover:text-gray-600"
+                                  title={`View full description: ${activityDescription}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    alert(`Description:\n\n${activityDescription}`);
+                                  }}
+                                >
+                                  <Info className="h-3 w-3" />
+                                </button>
+                                <div className="text-[10px] text-gray-500 truncate flex-1">
+                                  {activityDescription.length > 25
+                                    ? `${activityDescription.substring(0, 25)}...`
+                                    : activityDescription}
+                                </div>
                               </div>
                             )}
                           </div>
-
-                          {activity.description && (
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                className="text-gray-400 hover:text-gray-600"
-                                title={`View full description: ${activity.description}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  alert(
-                                    `Description:\n\n${activity.description}`
-                                  );
-                                }}
-                              >
-                                <Info className="h-3 w-3" />
-                              </button>
-                              <div className="text-[10px] text-gray-500 truncate flex-1">
-                                {activity.description.length > 25
-                                  ? `${activity.description.substring(0, 25)}...`
-                                  : activity.description}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </th>
-                    ))}
+                        </th>
+                      );
+                    })}
 
                     <th className="px-3 py-3 text-left font-bold text-gray-900 tracking-wide border-b border-gray-200 bg-blue-50 min-w-[100px]">
                       <div className="text-center">
@@ -1773,6 +2399,7 @@ const StudentGradeCell = ({
   const [isEditing, setIsEditing] = useState(false);
   const [allowSavedEdit, setAllowSavedEdit] = useState(false);
   const [editTimeout, setEditTimeout] = useState<NodeJS.Timeout | null>(null);
+  const gradeInputRef = useRef<HTMLInputElement | null>(null);
   const [localValue, setLocalValue] = useState<string>(
     grade?.value?.toString() || ""
   );
@@ -1859,6 +2486,21 @@ const StudentGradeCell = ({
                         setEditTimeout(timeout);
                       };
 
+                      const triggerDoubleClickEdit = () => {
+                        const inputElement = gradeInputRef.current;
+                        if (!inputElement) return;
+
+                        if (isLockedSavedGrade && !allowSavedEdit) {
+                          setAllowSavedEdit(true);
+                          setTimeout(() => {
+                            startEditingSession(inputElement, true);
+                          }, 0);
+                          return;
+                        }
+
+                        startEditingSession(inputElement);
+                      };
+
 
 
 
@@ -1924,20 +2566,11 @@ const StudentGradeCell = ({
                       };
 
                       const handleDoubleClick = (
-                        e: React.MouseEvent<HTMLInputElement>
+                        e: React.MouseEvent<HTMLElement>
                       ) => {
-                        const inputElement =
-                          e.currentTarget as HTMLInputElement;
-
-                        if (isLockedSavedGrade && !allowSavedEdit) {
-                          setAllowSavedEdit(true);
-                          setTimeout(() => {
-                            startEditingSession(inputElement, true);
-                          }, 0);
-                          return;
-                        }
-
-                        startEditingSession(inputElement);
+                        e.preventDefault();
+                        e.stopPropagation();
+                        triggerDoubleClickEdit();
                       };
 
                       const handleChange = (
@@ -2023,8 +2656,9 @@ const StudentGradeCell = ({
       className="px-3 py-2 border-b border-gray-200"
     >
       <div className="flex flex-col gap-1">
-        <div className="relative">
+        <div className="relative" onDoubleClick={handleDoubleClick}>
           <input
+            ref={gradeInputRef}
             type="number"
             min="0"
             max={activity.maxScore}
@@ -2071,7 +2705,6 @@ const StudentGradeCell = ({
                     currentSheet.isPublished ? "\n\n⚠️ Published sheet" : ""
                   }`
             }
-            onDoubleClick={handleDoubleClick}
             onKeyDown={handleKeyDown}
           />
 
@@ -2172,7 +2805,7 @@ const StudentGradeCell = ({
                     };
 
                     return (
-                      <tr key={student.studentId} className="hover:bg-blue-50/10">
+                      <tr key={student.studentId} className="hover:bg-slate-50/80">
                         <td className="sticky left-0 z-10 bg-white border-r border-gray-200 px-3 py-3">
                           <div className="flex items-center gap-3">
                             <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
@@ -2252,8 +2885,8 @@ const StudentGradeCell = ({
               </table>
             </div>
 
-            <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 gs-metric-grid">
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
                 <div className="text-xs font-semibold text-blue-600 mb-1">
                   Overall average
                 </div>
@@ -2269,7 +2902,7 @@ const StudentGradeCell = ({
                 </div>
               </div>
 
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
                 <div className="text-xs font-semibold text-blue-600 mb-1">
                   Students Completeds
                 </div>
@@ -2282,7 +2915,7 @@ const StudentGradeCell = ({
                 </div>
               </div>
 
-              <div className="bg-gray-100 border border-gray-200 rounded-xl p-4">
+              <div className="bg-gray-100 border border-gray-200 rounded-xl p-3">
                 <div className="text-xs font-semibold text-gray-700 mb-1">
                   Activities to grade
                 </div>
@@ -2299,7 +2932,7 @@ const StudentGradeCell = ({
               </div>
             </div>
 
-            <div className="mt-6 p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
+            <div className="mt-4 p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
               <div className="flex items-center gap-2 text-sm text-blue-700 mb-2">
                 <Save className="h-4 w-4" />
                 <span className="font-medium">
@@ -2313,7 +2946,7 @@ const StudentGradeCell = ({
             </div>
           </div>
         )}
-        <div className="modern-card">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           {isLoading ? (
             <div className="text-center py-8">
               <div className="inline-block animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mb-2"></div>
@@ -2343,10 +2976,10 @@ const StudentGradeCell = ({
               </button>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full table-modern">
+            <div className="overflow-x-auto gs-table-scroll">
+              <table className="w-full table-modern gs-table">
                 <thead>
-                  <tr className="bg-blue-50/10">
+                  <tr className="bg-slate-50/80">
                     <th className="py-3 px-4 text-left font-bold text-gray-900 tracking-wide">
                       Title
                     </th>
@@ -2368,142 +3001,179 @@ const StudentGradeCell = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredGradeSheets.map((sheet) => (
-                    <tr
-                      key={sheet.id}
-                      className="hover:bg-blue-50/10 cursor-pointer transition-colors"
-                      onClick={() => setCurrentSheet(sheet)}
-                    >
-                      <td className="py-2 px-2">
-                        <div className="flex items-center gap-3">
-                          <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
-                            <FileSpreadsheet className="h-4 w-4 text-blue-600" />
-                          </div>
-                          <div>
-                            <span className="font-medium text-gray-900 block">
-                              {sheet.title}
-                            </span>
-                            <span className="text-sm text-gray-500">
-                              {sheet.courseName}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
+                  {groupedFilteredGradeSheets.map((group) => {
+                    const isCollapsed = collapsedTermGroups[group.term] ?? false;
+                    return (
+                      <Fragment key={group.term}>
+                        <tr className="bg-slate-50/70">
+                          <td colSpan={6} className="px-2 py-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleTermDropdown(group.term)}
+                              className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-left transition hover:bg-slate-50"
+                            >
+                              <div className="flex items-center gap-2">
+                                <ChevronDown
+                                  className={cn(
+                                    "h-4 w-4 text-slate-500 transition-transform",
+                                    isCollapsed && "-rotate-90",
+                                  )}
+                                />
+                                <span className="text-sm font-semibold text-slate-800">
+                                  {group.term}
+                                </span>
+                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                                  {group.sheets.length} sheets
+                                </span>
+                              </div>
+                              <span className="text-xs text-slate-500">
+                                {
+                                  group.sheets.filter((sheet) => sheet.isPublished)
+                                    .length
+                                }{" "}
+                                published
+                              </span>
+                            </button>
+                          </td>
+                        </tr>
 
-                      <td className="py-2 px-2">
-                        <span
-                          className={cn(
-                            "inline-flex items-center px-2 py-1 rounded-full text-xs font-bold",
-                            sheet.gradingPeriod === "1st Term"
-                              ? "bg-blue-100 text-blue-700"
-                              : sheet.gradingPeriod === "2nd Term"
-                              ? "bg-blue-100 text-blue-700"
-                              : "bg-blue-100 text-blue-700"
-                          )}
-                        >
-                          {sheet.gradingPeriod}
-                        </span>
-                      </td>
-                      <td className="py-2 px-2">
-                        <div className="flex items-center gap-2">
-                          <Users className="h-3 w-3 text-gray-400" />
-                          <span className="text-sm font-medium text-gray-900">
-                            {sheet.students.length}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="py-2 px-2">
-                        <span
-                          className={cn(
-                            "inline-flex items-center px-3 py-1 rounded-full text-xs font-bold",
-                            sheet.isPublished
-                              ? "bg-blue-100 text-blue-700"
-                              : "bg-gray-100 text-gray-700"
-                          )}
-                        >
-                          {sheet.isPublished ? "Published" : "Draft"}
-                        </span>
-                      </td>
-                      <td className="py-2 px-2">
-                        <span className="text-sm text-gray-600">
-                          {sheet.updatedAt.toLocaleDateString("en-US", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                          })}
-                        </span>
-                      </td>
-                      <td className="py-2 px-2">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCurrentSheet(sheet);
-                            }}
-                            className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors hover:scale-110"
-                            title="Open sheet"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (currentSheet?.id === sheet.id) {
-                                exportToCSV();
-                              } else {
-                                setCurrentSheet(sheet);
-                                setTimeout(() => exportToCSV(), 100);
-                              }
-                            }}
-                            className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors hover:scale-110"
-                            title="Export CSV"
-                          >
-                            <Download className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={(e) => deleteGradeSheet(sheet.id, e)}
-                            className="p-2 text-gray-700 hover:text-gray-800 hover:bg-red-50 rounded-lg transition-colors hover:scale-110"
-                            title="Delete sheet"
-                          >
-                            <Trash2 className="h-4 w-4 text-red-600" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        {!isCollapsed &&
+                          group.sheets.map((sheet) => (
+                            <tr
+                              key={sheet.id}
+                              className="cursor-pointer transition-colors hover:bg-slate-50/80"
+                              onClick={() => openSheetDetails(sheet)}
+                            >
+                              <td className="px-2 py-2">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100">
+                                    <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                                  </div>
+                                  <div>
+                                    <span className="block font-medium text-gray-900">
+                                      {sheet.title}
+                                    </span>
+                                    <span className="text-sm text-gray-500">
+                                      {sheet.courseName}
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+
+                              <td className="px-2 py-2">
+                                <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-1 text-xs font-bold text-indigo-700">
+                                  {sheet.gradingPeriod}
+                                </span>
+                              </td>
+                              <td className="px-2 py-2">
+                                <div className="flex items-center gap-2">
+                                  <Users className="h-3 w-3 text-gray-400" />
+                                  <span className="text-sm font-medium text-gray-900">
+                                    {sheet.students.length}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-2 py-2">
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center rounded-full px-3 py-1 text-xs font-bold",
+                                    sheet.isPublished
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : "bg-gray-100 text-gray-700",
+                                  )}
+                                >
+                                  {sheet.isPublished ? "Published" : "Draft"}
+                                </span>
+                              </td>
+                              <td className="px-2 py-2">
+                                <span className="text-sm text-gray-600">
+                                  {sheet.updatedAt.toLocaleDateString("en-US", {
+                                    day: "2-digit",
+                                    month: "short",
+                                    year: "numeric",
+                                  })}
+                                </span>
+                              </td>
+                              <td className="px-2 py-2">
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openSheetDetails(sheet);
+                                    }}
+                                    className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-700"
+                                    title="Open sheet"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (currentSheet?.id === sheet.id) {
+                                        exportToCSV();
+                                      } else {
+                                        openSheetDetails(sheet, false);
+                                        setTimeout(() => exportToCSV(), 100);
+                                      }
+                                    }}
+                                    className="rounded-lg p-2 text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-700"
+                                    title="Export CSV"
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => deleteGradeSheet(sheet.id, e)}
+                                    className="rounded-lg p-2 text-gray-700 transition-colors hover:bg-red-50 hover:text-gray-800"
+                                    title="Delete sheet"
+                                  >
+                                    <Trash2 className="h-4 w-4 text-red-600" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
         {showNewSheetModal && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="modern-card w-full max-w-2xl max-h-[90vh] overflow-y-auto border-0 shadow-2xl">
-              <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px] gs-modal-overlay"
+            onClick={() => setShowNewSheetModal(false)}
+          >
+            <div
+              className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)] gs-modal gs-modal-lg"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3">
                 <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <Plus className="h-4 w-4 text-blue-600" />
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100">
+                    <Plus className="h-4 w-4 text-sky-600" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-lg text-gray-900">
+                    <h3 className="text-base font-bold text-slate-900">
                       Create new grade sheet
                     </h3>
-                    <p className="text-sm text-gray-500 mt-1">
+                    <p className="mt-0.5 text-xs text-slate-500">
                       Fill in the details to create a new sheet
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={() => setShowNewSheetModal(false)}
-                  className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-4 w-4" />
                 </button>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                     Sheet title *
                   </label>
                   <input
@@ -2513,13 +3183,13 @@ const StudentGradeCell = ({
                       setNewSheet({ ...newSheet, title: e.target.value })
                     }
                     placeholder="Ex: Math grades Q1"
-                    className="input-modern w-full"
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     required
                   />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Course *
                     </label>
                     <select
@@ -2534,7 +3204,7 @@ const StudentGradeCell = ({
                           courseName: course?.name || "",
                         });
                       }}
-                      className="input-modern w-full"
+                      className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                       required
                     >
                       <option value="">Select a course</option>
@@ -2547,7 +3217,7 @@ const StudentGradeCell = ({
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Period *
                     </label>
                     <select
@@ -2558,66 +3228,68 @@ const StudentGradeCell = ({
                           gradingPeriod: e.target.value as any,
                         })
                       }
-                      className="input-modern w-full"
+                      className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                       required
                     >
                       <option value="1st Term">First Term</option>
                       <option value="2nd Term">Second Term</option>
+                      <option value="3rd Term">Third Term</option>
+                      <option value="4th Term">Fourth Term</option>
                       <option value="Final">Final</option>
                     </select>
                   </div>
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="mb-3 flex items-center justify-between">
                     <div>
-                      <h4 className="font-medium text-gray-900">
-                        Assessment activities
+                      <h4 className="text-sm font-semibold text-slate-900">
+                        Assessment activities (optional)
                       </h4>
-                      <p className="text-sm text-gray-500">
+                      <p className="text-xs text-slate-500">
                         Add the activities that will be graded
                       </p>
                     </div>
-                    <span className="text-sm font-medium text-gray-900">
+                    <span className="text-xs font-semibold text-slate-700">
                       {newSheet.activities.length} activities
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4 p-4 bg-gray-100 rounded-xl">
+                  <div className="mb-3 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-5">
                     <div className="md:col-span-3">
-                      <label className="block text-xs font-medium text-gray-700 mb-2">
+                      <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                         Name *
                       </label>
                       <input
                         type="text"
                         value={newActivityForModal.name}
                         onChange={(e) =>
-                          setNewActivityForModal({
-                            ...newActivityForModal,
-                            name: e.target.value,
-                          })
-                        }
-                        placeholder="Midterm exam"
-                        className="input-modern text-sm w-full"
-                        required
-                      />
+                        setNewActivityForModal({
+                          ...newActivityForModal,
+                          name: e.target.value,
+                        })
+                      }
+                      placeholder="Midterm exam"
+                      className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      required
+                    />
                     </div>
 
                     <div className="md:col-span-1">
-                      <label className="block text-xs font-medium text-700 mb-2 ">
+                      <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                         Type
                       </label>
                       <select
                         value={newActivityForModal.type}
                         onChange={(e) =>
-                          setNewActivityForModal({
-                            ...newActivityForModal,
-                            type: e.target.value as any,
-                          })
-                        }
-                        className="input-modern text-sm w-full"
-                        required
-                      >
+                        setNewActivityForModal({
+                          ...newActivityForModal,
+                          type: e.target.value as any,
+                        })
+                      }
+                      className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      required
+                    >
                         <option value="exam">Exam</option>
                         <option value="quiz">Quiz</option>
                         <option value="homework">Homework</option>
@@ -2634,7 +3306,7 @@ const StudentGradeCell = ({
                       <button
                         onClick={addActivityToNewSheet}
                         disabled={!newActivityForModal.name.trim()}
-                        className="btn-modern-outline inline-flex items-center justify-center w-full h-10 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.02]"
+                        className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-sky-200 bg-white text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
                         title={
                           !newActivityForModal.name.trim()
                             ? "Activity name is required"
@@ -2651,18 +3323,18 @@ const StudentGradeCell = ({
                       {newSheet.activities.map((activity) => (
                         <div
                           key={activity.id}
-                          className="flex items-center justify-between p-4 bg-blue-50/50 border border-blue-100 rounded-xl"
+                          className="flex items-center justify-between rounded-xl border border-sky-100 bg-sky-50/40 p-3"
                         >
                           <div className="flex-1">
                             <div className="flex items-center gap-3">
-                              <span className="font-medium text-gray-900">
-                                {activity.name}
+                              <span className="text-sm font-semibold text-slate-900">
+                                {toPlainText(activity.name, "Untitled activity")}
                               </span>
-                              <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 font-medium">
+                              <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
                                 {activity.type}
                               </span>
                             </div>
-                            <div className="text-sm text-gray-600 mt-1">
+                            <div className="mt-0.5 text-xs text-slate-600">
                               Max score: {activity.maxScore}
                             </div>
                           </div>
@@ -2670,9 +3342,9 @@ const StudentGradeCell = ({
                             onClick={() =>
                               removeActivityFromNewSheet(activity.id)
                             }
-                            className="p-2 text-gray-700 hover:text-gray-800 hover:bg-red-50 rounded-lg transition-colors"
+                            className="rounded-lg p-2 text-slate-500 transition hover:bg-rose-50 hover:text-rose-700"
                           >
-                            <Trash2 className="h-4 w-4 text-red-600" />
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
                       ))}
@@ -2680,11 +3352,11 @@ const StudentGradeCell = ({
                   )}
                 </div>
 
-                <div className="flex items-center justify-end gap-4 pt-6 border-t border-gray-200">
+                <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
                   <button
                     type="button"
                     onClick={() => setShowNewSheetModal(false)}
-                    className="px-5 py-2.5 text-gray-700 hover:text-gray-900 hover:bg-gray-50 font-medium transition-all duration-300 rounded-xl border border-gray-300"
+                    className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     Cancel
                   </button>
@@ -2692,14 +3364,13 @@ const StudentGradeCell = ({
                     onClick={createNewGradeSheet}
                     disabled={
                       isSaving ||
-                      newSheet.activities.length === 0 ||
                       !newSheet.courseId
                     }
-                    className="btn-modern-outline px-6 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-sky-300 bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isSaving ? (
                       <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        <div className="mr-1.5 h-3.5 w-3.5 animate-spin rounded-full border-b-2 border-white" />
                         Creating...
                       </>
                     ) : (
@@ -2712,18 +3383,32 @@ const StudentGradeCell = ({
           </div>
         )}
         {showAddActivityModal && currentSheet && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="modern-card w-full max-w-lg max-h-[90vh] overflow-y-auto border-0 shadow-2xl">
-              <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px] gs-modal-overlay"
+            onClick={() => {
+              setShowAddActivityModal(false);
+              setNewActivityForCurrentSheet({
+                name: "",
+                maxScore: 5.0,
+                type: "quiz",
+                description: "",
+              });
+            }}
+          >
+            <div
+              className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)] gs-modal"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3">
                 <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <Plus className="h-4 w-4 text-blue-600" />
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100">
+                    <Plus className="h-4 w-4 text-sky-600" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-lg text-gray-900">
+                    <h3 className="text-base font-bold text-slate-900">
                       Add activity to {currentSheet.title}
                     </h3>
-                    <p className="text-sm text-gray-500 mt-1">
+                    <p className="mt-0.5 text-xs text-slate-500">
                       Define a new assessment activity
                     </p>
                   </div>
@@ -2738,15 +3423,15 @@ const StudentGradeCell = ({
                       description: "",
                     });
                   }}
-                  className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-lg transition-colors"
+                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-4 w-4" />
                 </button>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                     Activity name *
                   </label>
                   <input
@@ -2759,25 +3444,25 @@ const StudentGradeCell = ({
                       })
                     }
                     placeholder="Ex: Final presentation"
-                    className="input-modern w-full"
+                    className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     required
                   />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Activity type
                     </label>
                     <select
                       value={newActivityForCurrentSheet.type}
                       onChange={(e) =>
-                        setNewActivityForCurrentSheet({
-                          ...newActivityForCurrentSheet,
-                          type: e.target.value as any,
-                        })
-                      }
-                      className="input-modern w-full"
+                      setNewActivityForCurrentSheet({
+                        ...newActivityForCurrentSheet,
+                        type: e.target.value as any,
+                      })
+                    }
+                      className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     >
                       <option value="exam">Exam</option>
                       <option value="quiz">Quiz</option>
@@ -2792,7 +3477,7 @@ const StudentGradeCell = ({
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                       Max score
                     </label>
                     <div className="relative">
@@ -2808,9 +3493,9 @@ const StudentGradeCell = ({
                             maxScore: parseFloat(e.target.value) || 5.0,
                           })
                         }
-                        className="input-modern w-full pl-3 pr-12"
+                        className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-3 pr-12 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                       />
-                      <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-gray-500">
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">
                         /5.0
                       </span>
                     </div>
@@ -2818,7 +3503,7 @@ const StudentGradeCell = ({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                     Description (optional)
                   </label>
                   <textarea
@@ -2830,20 +3515,20 @@ const StudentGradeCell = ({
                       })
                     }
                     placeholder="Ex: This activity evaluates the ability to present arguments clearly and structurally..."
-                    className="input-modern w-full min-h-[100px] resize-none"
+                    className="input-modern min-h-[96px] w-full resize-none text-sm"
                     rows={4}
                     maxLength={100}
                   />
-                  <div className="flex justify-between items-center mt-1">
-                    <p className="text-xs text-gray-500">
+                  <div className="mt-1 flex items-center justify-between">
+                    <p className="text-xs text-slate-500">
                       Maximum 100 characters
                     </p>
                     <span
                       className={`text-xs ${
                         (newActivityForCurrentSheet.description?.length || 0) >
                         95
-                          ? "text-gray-700"
-                          : "text-gray-500"
+                          ? "text-rose-700"
+                          : "text-slate-500"
                       }`}
                     >
                       {newActivityForCurrentSheet.description?.length || 0}/100
@@ -2851,7 +3536,7 @@ const StudentGradeCell = ({
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-4 pt-6 border-t border-gray-200">
+                <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -2863,16 +3548,16 @@ const StudentGradeCell = ({
                         description: "",
                       }); 
                     }}
-                    className="px-5 py-2.5 text-gray-700 hover:text-gray-900 hover:bg-gray-50 font-medium transition-all duration-300 rounded-xl border border-gray-300"
+                    className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     Cancel
                   </button> 
                   <button
                     onClick={addActivityToCurrentSheet}
                     disabled={!newActivityForCurrentSheet.name.trim()}
-                    className="btn-modern-outline px-6 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-sky-300 bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <Plus className="h-4 w-4 mr-2" />
+                    <Plus className="h-3.5 w-3.5" />
                     Add activity
                   </button>
                 </div>
@@ -2880,6 +3565,8 @@ const StudentGradeCell = ({
             </div>
           </div>
         )}
+          </div>
+        </div>
       </div>
     </DashboardLayout>
   );
