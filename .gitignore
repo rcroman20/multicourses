@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Firebase build artifacts
+.firebase/
+
+# Office temporary files
+~$*
