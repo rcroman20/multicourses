@@ -1,8 +1,10 @@
-import { collection, getDocs, limit, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, query, setDoc, where } from "firebase/firestore";
 import { firebaseDB } from "@/lib/firebase";
 
 const OWNER_ADMIN_EMAIL = "rcroman20@gmail.com";
 const ADMIN_EMAILS_STORAGE_KEY = "multicourses:extra-admin-emails";
+const ADMIN_ACCESS_DOC_PATH = ["adminConfig", "access"] as const;
+export const ADMIN_EMAILS_CHANGED_EVENT = "admin-emails-changed";
 
 export function normalizeAdminEmail(value?: string | null): string {
   return (value || "").trim().toLowerCase();
@@ -36,6 +38,7 @@ function readExtraAdminEmails(): string[] {
 function writeExtraAdminEmails(emails: string[]): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(ADMIN_EMAILS_STORAGE_KEY, JSON.stringify(emails));
+  window.dispatchEvent(new CustomEvent(ADMIN_EMAILS_CHANGED_EVENT));
 }
 
 export function getOwnerAdminEmail(): string {
@@ -121,4 +124,38 @@ export async function getAdminUserIds(): Promise<string[]> {
   }
 
   return Array.from(foundIds);
+}
+
+export async function hydrateAdminEmailsFromFirestore(): Promise<string[]> {
+  try {
+    const snap = await getDoc(doc(firebaseDB, ...ADMIN_ACCESS_DOC_PATH));
+    if (!snap.exists()) return getAdminEmails();
+
+    const data = (snap.data() || {}) as Record<string, unknown>;
+    const extraAdminEmails = Array.isArray(data.extraAdminEmails)
+      ? data.extraAdminEmails
+          .map((value) => normalizeAdminEmail(String(value)))
+          .filter((email) => email.length > 0 && email !== OWNER_ADMIN_EMAIL)
+      : [];
+
+    writeExtraAdminEmails(Array.from(new Set(extraAdminEmails)));
+    return getAdminEmails();
+  } catch {
+    return getAdminEmails();
+  }
+}
+
+export async function persistAdminEmailsToFirestore(): Promise<void> {
+  const extraAdminEmails = readExtraAdminEmails();
+  const delegatedAdminUserIds = await getAdminUserIds();
+
+  await setDoc(
+    doc(firebaseDB, ...ADMIN_ACCESS_DOC_PATH),
+    {
+      extraAdminEmails,
+      delegatedAdminUserIds: delegatedAdminUserIds.filter((userId) => userId.trim().length > 0),
+      updatedAt: new Date(),
+    },
+    { merge: true },
+  );
 }

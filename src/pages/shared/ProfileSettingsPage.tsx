@@ -435,7 +435,7 @@ export default function ProfileSettingsPage() {
 
         <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="relative mx-auto w-full max-w-[1400px] space-y-4 pb-2">
-        <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm lg:p-5">
+        <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-white to-sky-50 p-4 shadow-sm lg:p-5">
           <div className="pointer-events-none absolute -left-10 top-0 h-28 w-28 rounded-full bg-sky-100/70 blur-sm" />
           <div className="pointer-events-none absolute -bottom-12 -right-8 h-36 w-36 rounded-full bg-indigo-100/60 blur-sm" />
 
@@ -614,7 +614,7 @@ export default function ProfileSettingsPage() {
                 </div>
                 <h2 className="mt-4 text-base font-bold text-slate-900">{name || "Your Name"}</h2>
                 <p className="mt-1 w-full break-all text-sm text-slate-500">{user?.email || "No email"}</p>
-                <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-600">
+                <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600">
                   <Award className="h-3.5 w-3.5 text-sky-600" />
                   {roleLabel} since {memberSinceLabel}
                 </div>
@@ -648,7 +648,7 @@ export default function ProfileSettingsPage() {
                     )}
                   </div>
                 ) : (
-                  <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  <p className="rounded-lg border border-dashed border-slate-300 bg-white/90 px-3 py-2 text-xs text-slate-500">
                     Add website or Instagram to show quick links here.
                   </p>
                 )}
@@ -784,7 +784,7 @@ export default function ProfileSettingsPage() {
                 </div>
               </div>
 
-              <div className="flex flex-col items-center rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-col items-center rounded-xl border border-slate-200 bg-white/90 p-4">
                 <div className="flex h-36 w-36 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                   {hasImageAvatar ? (
                     <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
@@ -882,7 +882,7 @@ export default function ProfileSettingsPage() {
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
                   <p className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
                     <Bell className="h-3.5 w-3.5" />
                     Notifications & Sound
@@ -923,7 +923,7 @@ export default function ProfileSettingsPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
                   <p className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
                     <LayoutPanelLeft className="h-3.5 w-3.5" />
                     Appearance

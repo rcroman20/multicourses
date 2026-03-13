@@ -8,7 +8,8 @@ import {
 } from 'firebase/auth';
 import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where, limit, serverTimestamp } from 'firebase/firestore';
 import { firebaseAuth, firebaseDB } from '@/lib/firebase';
-import { isAdminEmail } from '@/lib/services/adminAccessService';
+import { hydrateAdminEmailsFromFirestore, isAdminEmail } from '@/lib/services/adminAccessService';
+import { hydrateDelegatedAdminPermissionsFromFirestore } from '@/lib/services/adminPermissionsService';
 import {
   isAccountMarkedDeleted,
   processDueAccountDeletionRequests,
@@ -161,6 +162,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Cargar información adicional del usuario desde Firestore
   const loadUserData = async (firebaseUser: FirebaseUser): Promise<User> => {
     try {
+      await Promise.allSettled([
+        hydrateAdminEmailsFromFirestore(),
+        hydrateDelegatedAdminPermissionsFromFirestore(),
+      ]);
+
       const [userDoc, studentDoc] = await Promise.all([
         getDoc(doc(firebaseDB, 'usuarios', firebaseUser.uid)),
         getDoc(doc(firebaseDB, 'estudiantes', firebaseUser.uid)),
@@ -209,6 +215,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isKnownAdmin) {
         resolvedRole = "admin";
       }
+      const fallbackRole: UserRole = resolvedRole || (isKnownAdmin ? "admin" : "estudiante");
+
+      if (!userDoc.exists()) {
+        try {
+          await setDoc(
+            doc(firebaseDB, "usuarios", firebaseUser.uid),
+            {
+              id: firebaseUser.uid,
+              email: firebaseUser.email || "",
+              name:
+                userData?.name ||
+                studentData?.name ||
+                firebaseUser.displayName ||
+                "Usuario",
+              role: fallbackRole,
+              requestedRole: fallbackRole === "admin" ? "admin" : fallbackRole,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        } catch {
+          // Keep auth flow alive even if profile bootstrap fails.
+        }
+      }
+
       let teacherApprovalStatus: TeacherApprovalStatus | undefined;
       if (resolvedRole !== "admin") {
         if (
@@ -270,7 +302,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (userData || studentData) {
-        const finalRole = resolvedRole || 'estudiante';
+        const finalRole = fallbackRole;
         const planIdRaw =
           typeof userData?.teacherPlanId === "string"
             ? userData.teacherPlanId

@@ -18,19 +18,24 @@ import {
 import { firebaseDB } from "@/lib/firebase";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { calculateCourseRealStats } from "@/utils/gradeCalculations";
-import type { Assessment, Grade, Course, CourseClassSchedule } from "@/types/academic";
+import type { Assessment, Grade, Course, CourseClassSchedule, Slide, Unit } from "@/types/academic";
+import { unitService } from "@/lib/unitService";
 import { enrollmentService, deleteCourseCompletely , courseService} from "@/lib/firestore";
 import { fileService } from '@/lib/services/fileService';
 import type { CourseFile } from '@/lib/services/fileService';
+import { assessmentService } from "@/lib/services/assessmentService";
 import { courseBackupService } from "@/lib/services/courseBackupService";
 import { isTeacherPlanExpired } from "@/lib/services/teacherPlanAccessService";
 import { isAdminEmail } from "@/lib/services/adminAccessService";
+import { appendAdminAuditLog } from "@/lib/services/adminAuditLogService";
+import { getAccessibleCoursesForUser, getCourseEnrollmentIds, getTeacherOwnedCourses } from "@/lib/courseAccess";
 import {
   TEACHER_ONBOARDING_COURSE_CODE,
   TEACHER_ONBOARDING_DURATION_MONTHS,
 } from "@/lib/services/teacherOnboardingService";
 
 import {
+  ArchiveRestore,
   ArrowLeft, GraduationCap, ArrowRight, School,
   BookOpen,
   CreditCard,
@@ -97,6 +102,207 @@ function getPlainTextFromHtml(content: string): string {
     .trim();
 }
 
+const normalizeMatchText = (value: unknown): string =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+const normalizeIdentityValue = (value: unknown): string =>
+  String(value || "").trim().toLowerCase();
+
+const isCourseOwnedByAdmin = (
+  course: Course,
+  adminUserId?: string | null,
+): boolean => {
+  const normalizedAdminId = normalizeIdentityValue(adminUserId);
+  if (!normalizedAdminId) return false;
+
+  const courseRecord = course as unknown as Record<string, unknown>;
+  const ownerCandidates = [
+    course.teacherId,
+    courseRecord.createdBy,
+    courseRecord.createdById,
+    courseRecord.createdByUserId,
+    courseRecord.ownerId,
+    courseRecord.adminId,
+  ];
+
+  return ownerCandidates.some(
+    (candidate) => normalizeIdentityValue(candidate) === normalizedAdminId,
+  );
+};
+
+const parseLooseNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed.replace(/\s+/g, "").replace(/,/g, "."));
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const isPublishedSheet = (sheet: any): boolean => {
+  const raw = sheet?.isPublished ?? sheet?.published ?? sheet?.status ?? sheet?.estado;
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "number") return raw === 1;
+  const normalized = normalizeIdentityValue(raw);
+  return (
+    normalized === "true" ||
+    normalized === "1" ||
+    normalized === "published" ||
+    normalized === "publicado" ||
+    normalized === "active" ||
+    normalized === "activo"
+  );
+};
+
+const findStudentInSheet = (students: any[], studentId: string) => {
+  const target = normalizeIdentityValue(studentId);
+  return (students || []).find((student: any) => {
+    const aliases = [
+      student?.studentId,
+      student?.studentID,
+      student?.student_id,
+      student?.userId,
+      student?.userID,
+      student?.user_id,
+      student?.uid,
+      student?.id,
+      student?.email,
+      student?.studentEmail,
+      student?.correo,
+      student?.mail,
+    ]
+      .map(normalizeIdentityValue)
+      .filter(Boolean);
+    return aliases.includes(target);
+  });
+};
+
+const sheetMatchesCourse = (sheet: any, courseEntry: Course): boolean => {
+  const sheetCourseId = String(sheet?.courseId || "").trim();
+  const courseId = String(courseEntry.id || "").trim();
+  if (sheetCourseId && courseId && sheetCourseId === courseId) return true;
+
+  const sheetCourseCode = normalizeMatchText(sheet?.courseCode || sheet?.course_code || sheet?.codigoCurso);
+  const courseCode = normalizeMatchText(courseEntry.code);
+  if (sheetCourseCode && courseCode && sheetCourseCode === courseCode) return true;
+
+  const sheetCourseName = normalizeMatchText(sheet?.courseName || sheet?.course_name || sheet?.nombreCurso);
+  const courseName = normalizeMatchText(courseEntry.name);
+  if (sheetCourseName && courseName && sheetCourseName === courseName) return true;
+
+  return false;
+};
+
+const calculateStudentAverageFromSheets = (
+  studentId: string,
+  sheets: any[],
+): { average: number | null; evaluatedPercentage: number } => {
+  const evaluatedSheets: Array<{ score: number; weight: number | null }> = [];
+  let gradedActivities = 0;
+  let totalActivities = 0;
+
+  sheets.forEach((sheet) => {
+    const studentData = findStudentInSheet(sheet?.students || [], studentId);
+    if (!studentData) return;
+
+    const gradeEntries = Object.values(studentData?.grades || {})
+      .map((entry: any) =>
+        parseLooseNumber(
+          entry?.value ??
+            entry?.grade ??
+            entry?.score ??
+            entry?.nota ??
+            entry?.total ??
+            entry?.average,
+        ),
+      )
+      .filter((value): value is number => value !== null);
+
+    const activityCount = Array.isArray(sheet?.activities) && sheet.activities.length > 0
+      ? sheet.activities.length
+      : gradeEntries.length;
+
+    if (activityCount > 0) totalActivities += activityCount;
+    if (gradeEntries.length > 0) gradedActivities += gradeEntries.length;
+
+    const totalValue = parseLooseNumber(
+      studentData?.total ??
+        studentData?.grade ??
+        studentData?.finalGrade ??
+        studentData?.average ??
+        studentData?.promedio ??
+        studentData?.notaFinal ??
+        studentData?.nota ??
+        studentData?.score,
+    );
+    const statusText = normalizeIdentityValue(studentData?.status ?? studentData?.estado);
+    const pendingWithoutGrades =
+      gradeEntries.length === 0 &&
+      (statusText === "" ||
+        statusText === "pending" ||
+        statusText === "not_graded" ||
+        statusText === "sin calificar");
+    if (pendingWithoutGrades) return;
+
+    let sheetScore: number | null = null;
+    if (gradeEntries.length > 0) {
+      sheetScore = gradeEntries.reduce((sum, value) => sum + value, 0) / gradeEntries.length;
+    } else if (totalValue !== null) {
+      sheetScore = totalValue;
+    }
+    if (sheetScore === null) return;
+
+    const weight = parseLooseNumber(
+      sheet?.weightPercentage ?? sheet?.weight ?? sheet?.percentage ?? sheet?.porcentaje,
+    );
+    evaluatedSheets.push({
+      score: Math.max(0, Math.min(5, sheetScore)),
+      weight: weight !== null && weight > 0 ? Math.max(0, Math.min(100, weight)) : null,
+    });
+  });
+
+  if (evaluatedSheets.length === 0) {
+    return { average: null, evaluatedPercentage: 0 };
+  }
+
+  const weightedSheets = evaluatedSheets.filter((sheet) => sheet.weight !== null);
+  const hasWeights = weightedSheets.length > 0;
+  const average = hasWeights
+    ? (() => {
+        const evaluatedWeight = weightedSheets.reduce((sum, sheet) => sum + (sheet.weight || 0), 0);
+        if (evaluatedWeight <= 0) {
+          return evaluatedSheets.reduce((sum, sheet) => sum + sheet.score, 0) / evaluatedSheets.length;
+        }
+        const weightedSum = weightedSheets.reduce(
+          (sum, sheet) => sum + sheet.score * ((sheet.weight || 0) / 100),
+          0,
+        );
+        return weightedSum / (evaluatedWeight / 100);
+      })()
+    : evaluatedSheets.reduce((sum, sheet) => sum + sheet.score, 0) / evaluatedSheets.length;
+
+  const evaluatedPercentage = hasWeights
+    ? Math.max(
+        0,
+        Math.min(
+          100,
+          weightedSheets.reduce((sum, sheet) => sum + (sheet.weight || 0), 0),
+        ),
+      )
+    : totalActivities > 0
+      ? Math.max(0, Math.min(100, (gradedActivities / totalActivities) * 100))
+      : Math.max(0, Math.min(100, evaluatedSheets.length * 20));
+
+  return {
+    average: Math.max(0, Math.min(5, average)),
+    evaluatedPercentage,
+  };
+};
+
 const COURSE_COVER_GRADIENTS = [
   "bg-gradient-to-br from-amber-200 to-rose-200",
   "bg-gradient-to-br from-teal-200 to-emerald-200",
@@ -105,6 +311,8 @@ const COURSE_COVER_GRADIENTS = [
   "bg-gradient-to-br from-violet-200 to-teal-200",
   "bg-gradient-to-br from-rose-200 to-amber-200",
 ];
+const MANDATORY_COURSE_COVER_GRADIENT =
+  "bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.16),_transparent_32%),linear-gradient(135deg,_#050505_0%,_#111111_44%,_#1b1b1b_100%)]";
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -202,6 +410,30 @@ const formatScheduleSummary = (schedule: CourseClassSchedule[]) => {
   return `${first} +${schedule.length - 1}`;
 };
 
+const isMandatoryCourseEntry = (course: Course | null | undefined): boolean => {
+  if (!course) return false;
+  const courseData = course as unknown as Record<string, unknown>;
+  return (
+    String(course.code || "").trim().toUpperCase() === TEACHER_ONBOARDING_COURSE_CODE ||
+    Boolean(
+      courseData.isMandatory ||
+        courseData.mandatory ||
+        courseData.required ||
+        courseData.isRequired ||
+        courseData.isMandatoryForTeachers ||
+        courseData.mandatoryForTeachers ||
+        courseData.mandatoryTeacherCourse ||
+        courseData.requiredForTeachers ||
+        courseData.requiredForDocentes ||
+        courseData.obligatorio ||
+        courseData.obligatorioDocentes ||
+        courseData.obligatorioParaDocentes ||
+        courseData.onboarding ||
+        courseData.isOnboarding,
+    )
+  );
+};
+
 const toDateOrNull = (value: unknown): Date | null => {
   if (!value) return null;
   if (value instanceof Date) return value;
@@ -225,6 +457,26 @@ const addMonths = (baseDate: Date, months: number): Date => {
   const next = new Date(baseDate.getTime());
   next.setMonth(next.getMonth() + months);
   return next;
+};
+
+const formatDateInput = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getRemainingDaysLabel = (dueAt: Date | null): string | null => {
+  if (!dueAt) return null;
+
+  const today = new Date();
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dueOnly = new Date(dueAt.getFullYear(), dueAt.getMonth(), dueAt.getDate());
+  const diffDays = Math.ceil((dueOnly.getTime() - todayOnly.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays > 0) return `-${diffDays}`;
+  if (diffDays === 0) return "0";
+  return `+${Math.abs(diffDays)}`;
 };
 
 const getOnboardingProgressMeta = (
@@ -264,7 +516,7 @@ const getOnboardingProgressMeta = (
 export default function CoursesPage() {
   const { courseCode } = useParams<{ courseCode?: string }>();
   const { user } = useAuth();
-  const { courses, assessments, grades, units, loading, refreshCourses } = useAcademic();
+  const { courses, assessments, grades, units, loading, refreshCourses, setSelectedCourseId } = useAcademic();
   const [enrolledStudents, setEnrolledStudents] = useState<any[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [showEnrollModal, setShowEnrollModal] = useState(false);
@@ -305,39 +557,98 @@ export default function CoursesPage() {
   const isTeacherView = isTeacher || isAdmin;
   const isStudentView = !isTeacherView;
   const [teacherOnboardingCourse, setTeacherOnboardingCourse] = useState<Course | null>(null);
+  const [teacherOnboardingCourseId, setTeacherOnboardingCourseId] = useState("");
+  const [teacherOnboardingCourseCode, setTeacherOnboardingCourseCode] = useState("");
   const teacherOwnedCourses = useMemo(() => {
     if (!user?.id) return [];
-    return isAdmin
-      ? [...courses]
-      : isTeacher
-      ? courses.filter((course) => course.teacherId === user.id)
-      : courses.filter((course) => (course.enrolledStudents || []).includes(user.id));
+    return getAccessibleCoursesForUser(courses, user, {
+      includeAllForAdmin: isAdmin,
+      includeEnrolledForTeacher: false,
+    });
   }, [courses, isAdmin, isTeacher, user?.id]);
 
   const userAccessibleCourses = useMemo(() => {
     if (!user?.id) return [] as Course[];
     if (isAdmin) {
-      return [...courses];
+      return courses.filter((course) => isCourseOwnedByAdmin(course, user.id));
     }
     if (!isTeacher) {
-      return courses.filter((course) => (course.enrolledStudents || []).includes(user.id));
+      return getAccessibleCoursesForUser(courses, user, {
+        includeAllForAdmin: false,
+        includeEnrolledForTeacher: false,
+      });
     }
 
-    const ownedCourses = courses.filter((course) => course.teacherId === user.id);
+    const ownedCourses = getTeacherOwnedCourses(courses, user.id);
     if (!teacherOnboardingCourse) return ownedCourses;
     if (ownedCourses.some((course) => course.id === teacherOnboardingCourse.id)) return ownedCourses;
 
     return [teacherOnboardingCourse, ...ownedCourses];
   }, [courses, isAdmin, isTeacher, teacherOnboardingCourse, user?.id]);
+  const userCourses = userAccessibleCourses;
 
-  const course = courseCode ? userAccessibleCourses.find((c) => c.code === courseCode) : null;
+  const course = useMemo(() => {
+    if (!courseCode) return null;
+
+    const normalizedCourseCode = courseCode.trim().toUpperCase();
+    const assignedCourse =
+      teacherOnboardingCourseId.trim().length > 0
+        ? userAccessibleCourses.find(
+            (candidate) =>
+              candidate.id === teacherOnboardingCourseId &&
+              String(candidate.code || "").trim().toUpperCase() === normalizedCourseCode,
+          ) || null
+        : null;
+
+    if (assignedCourse) return assignedCourse;
+
+    return (
+      userAccessibleCourses.find(
+        (candidate) => String(candidate.code || "").trim().toUpperCase() === normalizedCourseCode,
+      ) || null
+    );
+  }, [courseCode, teacherOnboardingCourseId, userAccessibleCourses]);
+
+  useEffect(() => {
+    if (!course?.id) return;
+    setSelectedCourseId(course.id);
+  }, [course?.id, setSelectedCourseId]);
+  const courseRecord = course ? (course as unknown as Record<string, unknown>) : null;
   const isOnboardingCourseContext =
     String(course?.code || "")
       .trim()
       .toUpperCase() === TEACHER_ONBOARDING_COURSE_CODE;
+  const matchesTeacherOnboardingAssignment =
+    (!!course?.id && !!teacherOnboardingCourseId && course.id === teacherOnboardingCourseId) ||
+    (!!course?.code &&
+      !!teacherOnboardingCourseCode &&
+      String(course.code).trim().toUpperCase() === teacherOnboardingCourseCode);
+  const isMandatoryCourse =
+    isOnboardingCourseContext ||
+    matchesTeacherOnboardingAssignment ||
+    Boolean(
+      courseRecord?.isMandatory ||
+        courseRecord?.mandatory ||
+        courseRecord?.required ||
+        courseRecord?.isRequired ||
+        courseRecord?.isMandatoryForTeachers ||
+        courseRecord?.mandatoryForTeachers ||
+        courseRecord?.mandatoryTeacherCourse ||
+        courseRecord?.requiredForTeachers ||
+        courseRecord?.requiredForDocentes ||
+        courseRecord?.obligatorio ||
+        courseRecord?.obligatorioDocentes ||
+        courseRecord?.obligatorioParaDocentes ||
+        courseRecord?.onboarding ||
+        courseRecord?.isOnboarding,
+    );
   const id = course ? course.id : null;
   const [courseFiles, setCourseFiles] = useState<CourseFile[]>([]);
-const [loadingFiles, setLoadingFiles] = useState(false);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [courseUnitsDirect, setCourseUnitsDirect] = useState<Unit[] | null>(null);
+  const [courseAssessmentsDirect, setCourseAssessmentsDirect] = useState<Assessment[] | null>(null);
+  const [courseSlidesDirect, setCourseSlidesDirect] = useState<Slide[] | null>(null);
+  const [assessmentLinkedGrades, setAssessmentLinkedGrades] = useState<Grade[]>([]);
 
   const sampleFiles = [
     {
@@ -370,60 +681,75 @@ const [loadingFiles, setLoadingFiles] = useState(false);
     const loadGradeSheets = async () => {
       if (!user?.id) return;
 
+      const courseIds = Array.from(
+        new Set(
+          userCourses
+            .map((course) => String(course.id || "").trim())
+            .filter((courseId) => courseId.length > 0),
+        ),
+      );
+
+      if (courseIds.length === 0) {
+        setGradeSheets([]);
+        return;
+      }
+
       setLoadingSheets(true);
       try {
         const gradeSheetsRef = collection(firebaseDB, "gradeSheets");
-        const q = query(gradeSheetsRef);
-        const querySnapshot = await getDocs(q);
-
         const sheets: any[] = [];
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
+        const seenSheetIds = new Set<string>();
+        const snapshots = await Promise.all(
+          Array.from({ length: Math.ceil(courseIds.length / 10) }, (_, index) =>
+            getDocs(
+              query(
+                gradeSheetsRef,
+                where("courseId", "in", courseIds.slice(index * 10, index * 10 + 10)),
+              ),
+            ),
+          ),
+        );
 
-          if (isTeacher) {
-            if (!data.isPublished) return;
+        snapshots.forEach((querySnapshot) => {
+          querySnapshot.forEach((doc) => {
+            if (seenSheetIds.has(doc.id)) return;
+            seenSheetIds.add(doc.id);
+
+            const data = doc.data();
+
+            if (!isPublishedSheet(data)) return;
+
+            if (!isTeacherView) {
+              const studentInSheet = findStudentInSheet(data.students || [], user.id);
+              if (!studentInSheet) return;
+            }
 
             sheets.push({
               id: doc.id,
               title: data.title || "Grade Sheet",
               courseId: data.courseId || "",
+              courseCode: data.courseCode || "",
               courseName: data.courseName || "Course",
               gradingPeriod: data.gradingPeriod || "First Term",
-              isPublished: data.isPublished,
+              isPublished: true,
               students: data.students || [],
               updatedAt: data.updatedAt,
+              weightPercentage: data.weightPercentage ?? data.weight ?? data.percentage ?? data.porcentaje,
             });
-          } else {
-            if (!data.isPublished) return;
-
-            const studentInSheet = data.students?.find(
-              (s: any) => s.studentId === user.id,
-            );
-            if (!studentInSheet) return;
-
-            sheets.push({
-              id: doc.id,
-              title: data.title || "Grade Sheet",
-              courseId: data.courseId || "",
-              courseName: data.courseName || "Course",
-              gradingPeriod: data.gradingPeriod || "First Term",
-              isPublished: data.isPublished,
-              students: data.students || [],
-              updatedAt: data.updatedAt,
-            });
-          }
+          });
         });
 
         setGradeSheets(sheets);
       } catch (error) {
         console.error("Error loading grade sheets:", error);
+        setGradeSheets([]);
       } finally {
         setLoadingSheets(false);
       }
     };
 
     if (user?.id) loadGradeSheets();
-  }, [user, isTeacher]);
+  }, [isTeacherView, user?.id, userCourses]);
 
   useEffect(() => {
     if (id && course) {
@@ -439,15 +765,60 @@ const [loadingFiles, setLoadingFiles] = useState(false);
 
   useEffect(() => {
     if (!isTeacher || !user?.id) {
+      setTeacherOnboardingCourseId("");
+      setTeacherOnboardingCourseCode("");
+      return;
+    }
+
+    let active = true;
+
+    const loadTeacherOnboardingAssignment = async () => {
+      try {
+        const studentSnap = await getDoc(doc(firebaseDB, "estudiantes", user.id));
+        const data = (studentSnap.exists() ? studentSnap.data() : {}) as Record<string, unknown>;
+        const courseIdValue =
+          typeof data.teacherOnboardingCourseId === "string"
+            ? data.teacherOnboardingCourseId.trim()
+            : "";
+        const courseCodeValue =
+          typeof data.teacherOnboardingCourseCode === "string"
+            ? data.teacherOnboardingCourseCode.trim().toUpperCase()
+            : "";
+
+        if (!active) return;
+        setTeacherOnboardingCourseId(courseIdValue);
+        setTeacherOnboardingCourseCode(courseCodeValue);
+      } catch {
+        if (!active) return;
+        setTeacherOnboardingCourseId("");
+        setTeacherOnboardingCourseCode("");
+      }
+    };
+
+    void loadTeacherOnboardingAssignment();
+
+    return () => {
+      active = false;
+    };
+  }, [isTeacher, user?.id]);
+
+  useEffect(() => {
+    if (!isTeacher || !user?.id) {
       setTeacherOnboardingCourse(null);
       return;
     }
 
-    const onboardingQuery = query(
-      collection(firebaseDB, "cursos"),
-      where("code", "==", TEACHER_ONBOARDING_COURSE_CODE),
-      limit(1),
-    );
+    const onboardingQuery = teacherOnboardingCourseId
+      ? query(collection(firebaseDB, "cursos"), where("__name__", "==", teacherOnboardingCourseId), limit(1))
+      : query(
+          collection(firebaseDB, "cursos"),
+          where(
+            "code",
+            "==",
+            teacherOnboardingCourseCode || TEACHER_ONBOARDING_COURSE_CODE,
+          ),
+          limit(1),
+        );
 
     const unsubscribe = onSnapshot(
       onboardingQuery,
@@ -470,6 +841,7 @@ const [loadingFiles, setLoadingFiles] = useState(false);
         }
 
         setTeacherOnboardingCourse({
+          ...(data as Record<string, unknown>),
           id: docSnap.id,
           name: data.name || "",
           code: data.code || "",
@@ -483,7 +855,7 @@ const [loadingFiles, setLoadingFiles] = useState(false);
           classSchedule: normalizeCourseSchedule(data.classSchedule),
           enrolledStudents,
           createdAt: data.createdAt?.toDate?.() || new Date(),
-        });
+        } as Course);
       },
       () => {
         setTeacherOnboardingCourse(null);
@@ -491,7 +863,100 @@ const [loadingFiles, setLoadingFiles] = useState(false);
     );
 
     return () => unsubscribe();
-  }, [isTeacher, user?.id]);
+  }, [isTeacher, teacherOnboardingCourseCode, teacherOnboardingCourseId, user?.id]);
+
+  useEffect(() => {
+    if (!isTeacherView) {
+      setAssessmentLinkedGrades([]);
+      return;
+    }
+
+    const courseIds = Array.from(
+      new Set(
+        userCourses
+          .map((course) => String(course.id || "").trim())
+          .filter((courseId) => courseId.length > 0),
+      ),
+    );
+
+    if (courseIds.length === 0) {
+      setAssessmentLinkedGrades([]);
+      return;
+    }
+
+    const assessmentIds = Array.from(
+      new Set(
+        assessments
+          .filter((assessment) => courseIds.includes(String(assessment.courseId || "").trim()))
+          .map((assessment) => String(assessment.id || "").trim())
+          .filter((assessmentId) => assessmentId.length > 0),
+      ),
+    );
+
+    if (assessmentIds.length === 0) {
+      setAssessmentLinkedGrades([]);
+      return;
+    }
+
+    let active = true;
+
+    const loadAssessmentLinkedGrades = async () => {
+      try {
+        const snapshots = await Promise.all(
+          Array.from({ length: Math.ceil(assessmentIds.length / 10) }, (_, index) =>
+            getDocs(
+              query(
+                collection(firebaseDB, "grades"),
+                where("assessmentId", "in", assessmentIds.slice(index * 10, index * 10 + 10)),
+              ),
+            ),
+          ),
+        );
+
+        if (!active) return;
+
+        const byId = new Map<string, Grade>();
+        snapshots.forEach((snapshot) => {
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            byId.set(docSnap.id, {
+              ...(data as Record<string, unknown>),
+              id: docSnap.id,
+              assessmentId: String(data.assessmentId || ""),
+              studentId: String(data.studentId || ""),
+              courseId: String(data.courseId || ""),
+              value: Number(data.value || 0),
+              gradedBy: String(data.gradedBy || ""),
+              comment: typeof data.comment === "string" ? data.comment : undefined,
+              gradedAt: toDateOrNull(data.gradedAt) || new Date(),
+            } as Grade);
+          });
+        });
+
+        setAssessmentLinkedGrades(Array.from(byId.values()));
+      } catch {
+        if (!active) return;
+        setAssessmentLinkedGrades([]);
+      }
+    };
+
+    void loadAssessmentLinkedGrades();
+
+    return () => {
+      active = false;
+    };
+  }, [assessments, isTeacherView, userCourses]);
+
+  const effectiveGrades = useMemo(() => {
+    const merged = new Map<string, Grade>();
+    grades.forEach((grade) => merged.set(grade.id, grade));
+    assessmentLinkedGrades.forEach((grade) => {
+      if (!merged.has(grade.id)) {
+        merged.set(grade.id, grade);
+      }
+    });
+    return Array.from(merged.values());
+  }, [assessmentLinkedGrades, grades]);
 
   // useEffect para filtrado y ordenamiento de estudiantes
   useEffect(() => {
@@ -583,7 +1048,14 @@ const [loadingFiles, setLoadingFiles] = useState(false);
   }, [enrolledStudents, searchTerm, sortOrder, gradeFilter, gradeSheets, id, isOnboardingCourseContext]);
 
   useEffect(() => {
-    if (!user?.id || !isOnboardingCourseContext) {
+    const shouldTrackOnboardingDueDate =
+      Boolean(user?.id) &&
+      (isMandatoryCourse ||
+        Boolean(teacherOnboardingCourse) ||
+        teacherOnboardingCourseId.trim().length > 0 ||
+        teacherOnboardingCourseCode.trim().length > 0);
+
+    if (!shouldTrackOnboardingDueDate) {
       setTeacherOnboardingDueAt(null);
       return;
     }
@@ -596,15 +1068,27 @@ const [loadingFiles, setLoadingFiles] = useState(false);
         const data = (studentSnap.exists() ? studentSnap.data() : {}) as Record<string, unknown>;
         const storedDueAt = toDateOrNull(data.teacherOnboardingDueAt);
         const enrolledAt = toDateOrNull(data.teacherOnboardingEnrolledAt);
-        const fallbackDueAt = enrolledAt
-          ? addMonths(enrolledAt, TEACHER_ONBOARDING_DURATION_MONTHS)
-          : null;
+        const courseRecord = (course || {}) as Record<string, unknown>;
+        const fallbackEnrolledAt =
+          enrolledAt ||
+          toDateOrNull(courseRecord.assignedAt) ||
+          toDateOrNull(courseRecord.enrolledAt) ||
+          new Date();
+        const fallbackDueAt =
+          storedDueAt ||
+          toDateOrNull(courseRecord.dueAt) ||
+          addMonths(fallbackEnrolledAt, TEACHER_ONBOARDING_DURATION_MONTHS);
 
         if (isActive) {
-          setTeacherOnboardingDueAt(storedDueAt || fallbackDueAt);
+          setTeacherOnboardingDueAt(fallbackDueAt);
         }
       } catch {
-        if (isActive) setTeacherOnboardingDueAt(null);
+        if (isActive) {
+          const fallbackEnrolledAt = new Date();
+          setTeacherOnboardingDueAt(
+            addMonths(fallbackEnrolledAt, TEACHER_ONBOARDING_DURATION_MONTHS),
+          );
+        }
       }
     };
 
@@ -613,7 +1097,14 @@ const [loadingFiles, setLoadingFiles] = useState(false);
     return () => {
       isActive = false;
     };
-  }, [isOnboardingCourseContext, user?.id]);
+  }, [
+    course,
+    isMandatoryCourse,
+    teacherOnboardingCourse,
+    teacherOnboardingCourseCode,
+    teacherOnboardingCourseId,
+    user?.id,
+  ]);
 
   useEffect(() => {
     if (!isTeacher || !user?.id || teacherOwnedCourses.length === 0) {
@@ -646,6 +1137,97 @@ const [loadingFiles, setLoadingFiles] = useState(false);
     loadCourseFiles();
   }
 }, [id]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadCourseUnits = async () => {
+      if (!id) {
+        if (active) setCourseUnitsDirect(null);
+        return;
+      }
+
+      try {
+        const units = await unitService.getByCourse(id);
+        if (active) setCourseUnitsDirect(units);
+      } catch {
+        if (active) setCourseUnitsDirect(null);
+      }
+    };
+
+    void loadCourseUnits();
+
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadCourseAssessments = async () => {
+      if (!id) {
+        if (active) setCourseAssessmentsDirect(null);
+        return;
+      }
+
+      try {
+        const directAssessments = await assessmentService.getCourseAssessments(id);
+        if (active) setCourseAssessmentsDirect(directAssessments);
+      } catch {
+        if (active) setCourseAssessmentsDirect(null);
+      }
+    };
+
+    void loadCourseAssessments();
+
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadCourseSlides = async () => {
+      if (!id) {
+        if (active) setCourseSlidesDirect(null);
+        return;
+      }
+
+      try {
+        const slidesSnapshot = await getDocs(
+          query(collection(firebaseDB, "diapositivas"), where("courseId", "==", id)),
+        );
+
+        const directSlides = slidesSnapshot.docs.map((slideDoc) => {
+          const data = slideDoc.data() as Record<string, unknown>;
+          return {
+            id: slideDoc.id,
+            weekId: typeof data.weekId === "string" ? data.weekId : "",
+            title: typeof data.title === "string" ? data.title : "",
+            description: typeof data.description === "string" ? data.description : "",
+            canvaUrl: typeof data.canvaUrl === "string" ? data.canvaUrl : "",
+            order: typeof data.order === "number" ? data.order : 0,
+            createdAt: toDateOrNull(data.createdAt) || new Date(),
+          } as Slide;
+        });
+
+        if (active) {
+          directSlides.sort((a, b) => (a.order || 0) - (b.order || 0));
+          setCourseSlidesDirect(directSlides);
+        }
+      } catch {
+        if (active) setCourseSlidesDirect(null);
+      }
+    };
+
+    void loadCourseSlides();
+
+    return () => {
+      active = false;
+    };
+  }, [id]);
 
   const loadEnrolledStudents = async () => {
     if (!id) return;
@@ -738,6 +1320,16 @@ THIS ACTION CANNOT BE UNDONE!
     const result = await deleteCourseCompletely(id);
     
     if (result.success) {
+      await appendAdminAuditLog({
+        actorEmail: user?.email || "unknown",
+        actorName: user?.name || "User",
+        action: "Deleted course",
+        category: "course",
+        targetType: "course",
+        targetId: id,
+        targetLabel: `${course.code} • ${course.name}`,
+        detail: `Teacher ${course.teacherName || "Unknown"} • full delete`,
+      }).catch(() => undefined);
       alert("✅ Course deleted successfully!");
       navigate("/courses");
     } else {
@@ -766,6 +1358,16 @@ const handleDeleteCourseSimple = async () => {
     const result = await courseService.deleteSimple(id);
     
     if (result.success) {
+      await appendAdminAuditLog({
+        actorEmail: user?.email || "unknown",
+        actorName: user?.name || "User",
+        action: "Deleted course",
+        category: "course",
+        targetType: "course",
+        targetId: id,
+        targetLabel: `${course.code} • ${course.name}`,
+        detail: `Teacher ${course.teacherName || "Unknown"} • simple delete`,
+      }).catch(() => undefined);
       alert("Course deleted successfully!");
       navigate("/courses");
     } else {
@@ -781,33 +1383,145 @@ const handleDeleteCourseSimple = async () => {
 };
 
   const calculateRealCourseGrade = useMemo(() => {
-    return (courseId: string, userId: string) => {
+    return (courseEntry: Course, userId: string) => {
       if (!userId) return null;
 
-      const courseGradeSheets = gradeSheets.filter(
-        (sheet) => sheet.courseId === courseId && sheet.isPublished,
+      const publishedSheets = gradeSheets.filter(
+        (sheet) => isPublishedSheet(sheet) && sheetMatchesCourse(sheet, courseEntry),
       );
+      const fromSheets = calculateStudentAverageFromSheets(userId, publishedSheets);
+      if (fromSheets.average !== null) return fromSheets.average;
 
-      const studentSheets = courseGradeSheets.filter((sheet) => {
-        const studentInSheet = sheet.students.find(
-          (s: any) => s.studentId === userId,
-        );
-        return studentInSheet && studentInSheet.total !== undefined;
+      const courseAssessmentIds = new Set(
+        assessments
+          .filter((assessment) => assessment.courseId === courseEntry.id)
+          .map((assessment) => String(assessment.id || "").trim())
+          .filter(Boolean),
+      );
+      const linkedGrades = effectiveGrades.filter((grade) => {
+        if (String(grade.studentId || "").trim() !== userId) return false;
+        const assessmentId = String(grade.assessmentId || "").trim();
+        if (!assessmentId || !courseAssessmentIds.has(assessmentId)) return false;
+        return parseLooseNumber(grade.value) !== null;
+      });
+      if (linkedGrades.length === 0) return null;
+
+      const assessmentById = new Map(
+        assessments
+          .filter((assessment) => assessment.courseId === courseEntry.id)
+          .map((assessment) => [String(assessment.id || "").trim(), assessment]),
+      );
+      let weightedSum = 0;
+      let evaluatedPercentage = 0;
+
+      linkedGrades.forEach((grade) => {
+        const value = parseLooseNumber(grade.value);
+        if (value === null) return;
+        const assessment = assessmentById.get(String(grade.assessmentId || "").trim());
+        const percentage = parseLooseNumber(assessment?.percentage);
+        const safePercentage = percentage !== null ? Math.max(0, percentage) : 0;
+        weightedSum += value * (safePercentage / 100);
+        evaluatedPercentage += safePercentage;
       });
 
-      if (studentSheets.length === 0) return null;
+      if (evaluatedPercentage > 0) {
+        return Math.max(0, Math.min(5, weightedSum / (evaluatedPercentage / 100)));
+      }
 
-      const average =
-        studentSheets.reduce((sum, sheet) => {
-          const studentData = sheet.students.find(
-            (s: any) => s.studentId === userId,
-          );
-          return sum + (studentData?.total || 0);
-        }, 0) / studentSheets.length;
-
-      return average;
+      return (
+        linkedGrades
+          .map((grade) => parseLooseNumber(grade.value))
+          .filter((value): value is number => value !== null)
+          .reduce((sum, value) => sum + value, 0) / linkedGrades.length
+      );
     };
-  }, [gradeSheets]);
+  }, [assessments, effectiveGrades, gradeSheets]);
+
+  const calculateTeacherCourseAverage = useMemo(() => {
+    return (courseEntry: Course): number | null => {
+      const courseAssessmentIds = new Set(
+        assessments
+          .filter((assessment) => assessment.courseId === courseEntry.id)
+          .map((assessment) => assessment.id),
+      );
+      const normalizedCourseName = normalizeMatchText(courseEntry.name);
+      const normalizedCourseCode = normalizeMatchText(courseEntry.code);
+      const baseStats = calculateCourseRealStats(
+        courseEntry.id,
+        courseEntry.enrolledStudents || [],
+        effectiveGrades,
+        gradeSheets,
+      );
+      if (baseStats.studentsWithGrades > 0) {
+        return baseStats.averageGrade;
+      }
+
+      const publishedSheets = gradeSheets.filter(
+        (sheet) => {
+          if (!sheet.isPublished) return false;
+          const normalizedSheetCourseId = String(sheet.courseId || "").trim();
+          const normalizedSheetCourseCode = normalizeMatchText(
+            (sheet as { courseCode?: string }).courseCode,
+          );
+          const normalizedSheetCourseName = normalizeMatchText(sheet.courseName);
+
+          return (
+            normalizedSheetCourseId === courseEntry.id ||
+            (normalizedCourseCode.length > 0 &&
+              normalizedSheetCourseCode === normalizedCourseCode) ||
+            (normalizedCourseName.length > 0 &&
+              normalizedSheetCourseName === normalizedCourseName)
+          );
+        },
+      );
+
+      const studentTotalsById = new Map<string, number[]>();
+      publishedSheets.forEach((sheet) => {
+        (sheet.students || []).forEach((student: any) => {
+          const studentId = String(student?.studentId || "").trim();
+          const total = Number(student?.total);
+          if (!studentId || !Number.isFinite(total) || total <= 0) return;
+          const existing = studentTotalsById.get(studentId) || [];
+          existing.push(total);
+          studentTotalsById.set(studentId, existing);
+        });
+      });
+
+      const gradeValuesByStudentId = new Map<string, number[]>();
+      effectiveGrades.forEach((grade) => {
+        const matchesCourseDirectly = grade.courseId === courseEntry.id;
+        const matchesThroughAssessment = courseAssessmentIds.has(String(grade.assessmentId || ""));
+        if (!matchesCourseDirectly && !matchesThroughAssessment) return;
+        const studentId = String(grade.studentId || "").trim();
+        const value = Number(grade.value);
+        if (!studentId || !Number.isFinite(value) || value <= 0) return;
+        const existing = gradeValuesByStudentId.get(studentId) || [];
+        existing.push(value);
+        gradeValuesByStudentId.set(studentId, existing);
+      });
+
+      const studentIds = new Set<string>([
+        ...studentTotalsById.keys(),
+        ...gradeValuesByStudentId.keys(),
+      ]);
+
+      if (studentIds.size === 0) return null;
+
+      const studentAverages: number[] = [];
+      studentIds.forEach((studentId) => {
+        const values = [
+          ...(studentTotalsById.get(studentId) || []),
+          ...(gradeValuesByStudentId.get(studentId) || []),
+        ];
+        if (values.length === 0) return;
+        studentAverages.push(values.reduce((sum, value) => sum + value, 0) / values.length);
+      });
+
+      if (studentAverages.length === 0) return null;
+
+      return studentAverages.reduce((sum, value) => sum + value, 0) / studentAverages.length;
+    };
+  }, [assessments, effectiveGrades, gradeSheets]);
 
   const calculateUpcomingActivities = useMemo(() => {
     if (!id) return [];
@@ -825,53 +1539,44 @@ const handleDeleteCourseSimple = async () => {
     const nextWeek = new Date(today);
     nextWeek.setDate(today.getDate() + 7);
 
-    return assessments
-      .filter((assessment) => {
-        if (assessment.courseId !== id) return false;
-        if (!assessment.dueDate) return false;
+    const parseDueDate = (value: string): Date | null => {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [year, month, day] = value.split("-").map(Number);
+        return new Date(year, month - 1, day);
+      }
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
 
-        const dueDateString = String(assessment.dueDate);
-        let dueDate: Date;
+    const resolvedCourseAssessmentsSource = courseAssessmentsDirect ?? assessments;
+    const baseUpcoming = resolvedCourseAssessmentsSource.filter((assessment) => {
+      if (assessment.courseId !== id) return false;
+      if (!assessment.dueDate) return false;
 
-        if (/^\d{4}-\d{2}-\d{2}$/.test(dueDateString)) {
-          const [year, month, day] = dueDateString.split("-").map(Number);
-          dueDate = new Date(year, month - 1, day);
-        } else {
-          dueDate = new Date(dueDateString);
-        }
+      const dueDate = parseDueDate(String(assessment.dueDate));
+      if (!dueDate) return false;
 
-        const dueDateAtMidnight = new Date(
-          dueDate.getFullYear(),
-          dueDate.getMonth(),
-          dueDate.getDate(),
-        );
+      const dueDateAtMidnight = new Date(
+        dueDate.getFullYear(),
+        dueDate.getMonth(),
+        dueDate.getDate(),
+      );
 
-        return dueDateAtMidnight >= today && dueDateAtMidnight <= nextWeek;
-      })
+      return dueDateAtMidnight >= today && dueDateAtMidnight <= nextWeek;
+    });
+
+    return baseUpcoming
       .sort((a, b) => {
-        const dueDateA = String(a.dueDate);
-        const dueDateB = String(b.dueDate);
-
-        let dateA: Date, dateB: Date;
-
-        if (/^\d{4}-\d{2}-\d{2}$/.test(dueDateA)) {
-          const [yearA, monthA, dayA] = dueDateA.split("-").map(Number);
-          dateA = new Date(yearA, monthA - 1, dayA);
-        } else {
-          dateA = new Date(dueDateA);
-        }
-
-        if (/^\d{4}-\d{2}-\d{2}$/.test(dueDateB)) {
-          const [yearB, monthB, dayB] = dueDateB.split("-").map(Number);
-          dateB = new Date(yearB, monthB - 1, dayB);
-        } else {
-          dateB = new Date(dueDateB);
-        }
-
-        return dateA.getTime() - dateB.getTime();
+        const dateA = parseDueDate(String(a.dueDate))?.getTime() ?? 0;
+        const dateB = parseDueDate(String(b.dueDate))?.getTime() ?? 0;
+        return dateA - dateB;
       })
       .slice(0, 3);
-  }, [assessments, id]);
+  }, [
+    assessments,
+    courseAssessmentsDirect,
+    id,
+  ]);
 
   const calculateAssessmentStats = useMemo(() => {
     if (!id) return null;
@@ -991,8 +1696,16 @@ const handleDeleteCourseSimple = async () => {
     grades: Grade[],
     assessments: Assessment[],
   ) => {
+    const courseAssessmentIds = new Set(
+      assessments
+        .map((assessment) => String(assessment.id || "").trim())
+        .filter(Boolean),
+    );
     const studentGrades = grades.filter(
-      (g) => g.studentId === studentId && g.courseId === courseId,
+      (g) =>
+        String(g.studentId || "").trim() === studentId &&
+        (String(g.courseId || "").trim() === courseId ||
+          courseAssessmentIds.has(String(g.assessmentId || "").trim())),
     );
 
     if (studentGrades.length === 0) {
@@ -1005,18 +1718,47 @@ const handleDeleteCourseSimple = async () => {
       };
     }
 
-    const totalGrade = studentGrades.reduce((sum, g) => sum + g.value, 0);
-    const currentGrade = totalGrade / studentGrades.length;
+    const assessmentById = new Map(
+      assessments.map((assessment) => [String(assessment.id || "").trim(), assessment]),
+    );
+    let weightedSum = 0;
+    let evaluatedPercentage = 0;
+    let simpleSum = 0;
+    let simpleCount = 0;
+
+    studentGrades.forEach((grade) => {
+      const value = parseLooseNumber(grade.value);
+      if (value === null) return;
+
+      simpleSum += value;
+      simpleCount += 1;
+
+      const assessment = assessmentById.get(String(grade.assessmentId || "").trim());
+      const percentage = parseLooseNumber(assessment?.percentage);
+      if (percentage !== null && percentage > 0) {
+        weightedSum += value * (percentage / 100);
+        evaluatedPercentage += percentage;
+      }
+    });
+
+    const currentGrade =
+      evaluatedPercentage > 0
+        ? weightedSum / (evaluatedPercentage / 100)
+        : simpleCount > 0
+          ? simpleSum / simpleCount
+          : 0;
+    const normalizedCurrentGrade = Math.max(0, Math.min(5, currentGrade));
+    const normalizedEvaluatedPercentage = Math.max(0, Math.min(100, evaluatedPercentage || simpleCount * 20));
 
     return {
-      currentGrade,
-      evaluatedPercentage: Math.min(100, studentGrades.length * 20),
-      remainingPercentage: Math.max(0, 100 - studentGrades.length * 20),
-      minGradeToPass: Math.max(0, (3.0 - currentGrade) / 0.2),
+      currentGrade: normalizedCurrentGrade,
+      evaluatedPercentage: normalizedEvaluatedPercentage,
+      remainingPercentage: Math.max(0, 100 - normalizedEvaluatedPercentage),
+      minGradeToPass: Math.max(0, (3.0 - normalizedCurrentGrade) / 0.2),
       status:
-        currentGrade >= 3.5
+        normalizedCurrentGrade >= 3.5
           ? "passing"
-          : currentGrade >= 3.0
+          : normalizedCurrentGrade >= 3.0
             ? "at-risk"
             : "failing",
     };
@@ -1081,15 +1823,11 @@ const handleDeleteCourseSimple = async () => {
   const teacherManagedStudentIdsForEnrollment = useMemo(() => {
     if (!isTeacher || !user?.id) return new Set<string>();
     const managedIds = new Set<string>();
-    courses
-      .filter((courseItem) => courseItem.teacherId === user.id)
-      .forEach((courseItem) => {
-        (courseItem.enrolledStudents || []).forEach((studentId) => {
-          if (typeof studentId === "string" && studentId.trim().length > 0) {
-            managedIds.add(studentId);
-          }
-        });
+    getTeacherOwnedCourses(courses, user.id).forEach((courseItem) => {
+      getCourseEnrollmentIds(courseItem).forEach((studentId) => {
+        managedIds.add(studentId);
       });
+    });
     return managedIds;
   }, [courses, isTeacher, user?.id]);
   const hasReachedTeacherStudentQuotaForEnrollment =
@@ -1353,13 +2091,16 @@ const handleDeleteCourseSimple = async () => {
   }
 
   if (courseCode && course) {
-    const courseAssessments = assessments.filter((a) => a.courseId === id);
-    const courseUnits = units.filter((u) => u.courseId === id);
+    const courseAssessmentsSource = courseAssessmentsDirect ?? assessments;
+    const courseAssessments = courseAssessmentsSource.filter((a) => a.courseId === id);
+    const courseUnits = courseUnitsDirect ?? units.filter((u) => u.courseId === id);
+    const standaloneSlides = courseSlidesDirect ?? [];
     const courseSchedule = normalizeCourseSchedule(course.classSchedule);
     const effectiveCourseSchedule = isOnboardingCourseContext ? [] : courseSchedule;
-    const onboardingCompletionText = teacherOnboardingDueAt
+    const onboardingDurationText = `Within ${TEACHER_ONBOARDING_DURATION_MONTHS} months`;
+    const onboardingCompletionTargetText = teacherOnboardingDueAt
       ? formatDateForColombia(teacherOnboardingDueAt)
-      : `Within ${TEACHER_ONBOARDING_DURATION_MONTHS} months`;
+      : "Start over";
     const courseContentItems = courseUnits
       .flatMap((unit) =>
         unit.weeks.map((week) => ({
@@ -1367,6 +2108,29 @@ const handleDeleteCourseSimple = async () => {
         })),
       )
       .slice(0, 5);
+    const fallbackSlideItems =
+      courseUnits.length === 0
+        ? standaloneSlides
+            .slice(0, 5)
+            .map((slide, index) => ({
+              id: slide.id,
+              title: slide.title || `Slide ${index + 1}`,
+              description: slide.description || "Mandatory course slide",
+              slideCountLabel: "Standalone slide",
+            }))
+        : [];
+    const buildSlidesWorkspaceHref = (options?: {
+      weekId?: string;
+      slideId?: string;
+    }) => {
+      const params = new URLSearchParams();
+      params.set("courseId", id);
+
+      if (options?.weekId) params.set("weekId", options.weekId);
+      if (options?.slideId) params.set("slideId", options.slideId);
+
+      return `/slides?${params.toString()}`;
+    };
 
     const studentProgress =
       user && isStudentView
@@ -1375,9 +2139,14 @@ const handleDeleteCourseSimple = async () => {
     const gradeSheetsForCourse = gradeSheets.filter((sheet) => sheet.courseId === id);
     const publishedGradeSheetsForCourse = gradeSheetsForCourse.filter((sheet) => sheet.isPublished);
     const canViewTeacherClassroomSection =
-      isTeacherView && (!isOnboardingCourseContext || isCurrentUserAdmin);
+      isTeacherView && (!isMandatoryCourse || isCurrentUserAdmin);
+    const canManageCourseActions =
+      isAdmin ||
+      (isTeacher && course.teacherId === user?.id && !isMandatoryCourse);
     const showClassroomHeader =
       !isTeacherView || canViewTeacherClassroomSection;
+    const hasGradeSheetStats =
+      Boolean(calculateGradeSheetStats) && calculateGradeSheetStats.totalSheets > 0;
 
     const courseStats = isTeacherView
       ? calculateCourseRealStats(
@@ -1442,7 +2211,7 @@ const handleDeleteCourseSimple = async () => {
                             {isOnboardingCourseContext && (
                               <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">
                                 <CalendarDays className="h-4 w-4" />
-                                <span>Finish by {onboardingCompletionText}</span>
+                                <span>Finish by {onboardingDurationText}</span>
                               </div>
                             )}
                           </div>
@@ -1456,7 +2225,7 @@ const handleDeleteCourseSimple = async () => {
                       </div>
                     </div>
 
-                    {isTeacher && (
+                    {canManageCourseActions && (
                       <div className="lg:w-80 flex flex-col justify-center">
                         <div className="flex flex-wrap gap-2 justify-start sm:justify-end ml-auto">
                           <Link
@@ -1480,6 +2249,25 @@ const handleDeleteCourseSimple = async () => {
                                 <FileText className="h-4 w-4" />
                                 Manage Grades
                               </Link>
+                              {isAdmin ? (
+                                <>
+                                  <div className="border-t border-slate-100 my-1"></div>
+                                  <Link
+                                    to="/admin/backups"
+                                    className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 w-full"
+                                  >
+                                    <ArchiveRestore className="h-4 w-4" />
+                                    Admin Backups
+                                  </Link>
+                                  <Link
+                                    to="/admin/reports"
+                                    className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 w-full"
+                                  >
+                                    <FileBarChart className="h-4 w-4" />
+                                    Admin Reports
+                                  </Link>
+                                </>
+                              ) : null}
                               <div className="border-t border-slate-100 my-1"></div>
                               <button
                                 onClick={handleDeleteCourseSimple}
@@ -1614,7 +2402,7 @@ const handleDeleteCourseSimple = async () => {
                       </p>
                       {isOnboardingCourseContext && (
                         <p className="text-xs font-semibold text-sky-700">
-                          Completion target: {onboardingCompletionText}
+                          Completion target: {onboardingCompletionTargetText}
                         </p>
                       )}
                     </div>
@@ -1633,10 +2421,12 @@ const handleDeleteCourseSimple = async () => {
                 </div>
               </div>
 
-              <div className="px-1 pt-1">
-                <p className="text-base font-bold text-slate-900">Academic Tracking</p>
-                <p className="text-sm text-slate-600">Performance, upcoming work, and evaluations</p>
-              </div>
+              {!(isTeacher && isMandatoryCourse) && (
+                <div className="px-1 pt-1">
+                  <p className="text-base font-bold text-slate-900">Academic Tracking</p>
+                  <p className="text-sm text-slate-600">Performance, upcoming work, and evaluations</p>
+                </div>
+              )}
 
               {/* Stats Cards */}
               {courseStats && !isOnboardingCourseContext && (
@@ -1694,9 +2484,11 @@ const handleDeleteCourseSimple = async () => {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
-                        {courseUnits.length} term{courseUnits.length === 1 ? "" : "s"}
+                        {courseUnits.length > 0
+                          ? `${courseUnits.length} term${courseUnits.length === 1 ? "" : "s"}`
+                          : `${fallbackSlideItems.length} slide${fallbackSlideItems.length === 1 ? "" : "s"}`}
                       </span>
-                      {isTeacher ? (
+                      {canManageCourseActions ? (
                         <Link
                           to={"/slides"}
                           className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
@@ -1708,22 +2500,29 @@ const handleDeleteCourseSimple = async () => {
                     </div>
                   </div>
 
-                  {courseUnits.length === 0 ? (
+                  {courseUnits.length === 0 && fallbackSlideItems.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
                       <FolderOpen className="h-12 w-12 mx-auto text-slate-400 mb-3" />
                       <p className="text-sm font-semibold text-slate-700">
                         No content available yet
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
-                        {isTeacher
+                        {canManageCourseActions
                           ? "Create your first unit to organize your course materials"
                           : "The teacher will upload content soon"}
                       </p>
                     </div>
-                  ) : (
+                  ) : courseUnits.length > 0 ? (
                     <div className="space-y-1.5">
                       {courseContentItems.map(({ week }, contentIndex) => (
-                        <div key={week.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                        <Link
+                          key={week.id}
+                          to={buildSlidesWorkspaceHref({
+                            weekId: week.id,
+                            slideId: week.slides?.[0]?.id,
+                          })}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 transition hover:border-sky-200 hover:bg-sky-50/40"
+                        >
                           <div className="min-w-0 flex items-center gap-3">
                             <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 overflow-hidden">
                               <Presentation className="h-4 w-4" />
@@ -1738,24 +2537,53 @@ const handleDeleteCourseSimple = async () => {
                               </p>
                             </div>
                           </div>
-                          {week.slides.length === 0 && isTeacher ? (
-                            <Link
-                              to={`/slides/create?week=${week.id}`}
-                              className="text-sm text-slate-600 hover:text-slate-800 font-medium"
-                            >
+                          {week.slides.length === 0 && canManageCourseActions ? (
+                            <span className="text-sm font-medium text-slate-600">
                               Add
-                            </Link>
+                            </span>
                           ) : (
                             <ChevronRight className="h-4 w-4 text-slate-400" />
                           )}
-                        </div>
+                        </Link>
                       ))}
 
                       <Link
-                        to={`/courses/${course.code}/assessments`}
+                        to={buildSlidesWorkspaceHref()}
                         className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:gap-3"
                       >
-                        View all activities
+                        View all slides
+                        <ChevronRight className="h-4 w-4" />
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {fallbackSlideItems.map((slide) => (
+                        <Link
+                          key={slide.id}
+                          to={buildSlidesWorkspaceHref({ slideId: slide.id })}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3"
+                        >
+                          <div className="min-w-0 flex items-center gap-3">
+                            <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 overflow-hidden">
+                              <Presentation className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-900">{slide.title}</p>
+                              <p className="truncate text-xs text-slate-500">
+                                {slide.slideCountLabel}
+                                {slide.description ? ` • ${slide.description}` : ""}
+                              </p>
+                            </div>
+                          </div>
+                          <ChevronRight className="h-4 w-4 text-slate-400" />
+                        </Link>
+                      ))}
+
+                      <Link
+                        to={"/slides"}
+                        className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:gap-3"
+                      >
+                        View all slides
                         <ChevronRight className="h-4 w-4" />
                       </Link>
                     </div>
@@ -1778,7 +2606,7 @@ const handleDeleteCourseSimple = async () => {
                       <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
                         {courseFiles.length} files
                       </span>
-                      {isTeacher && (
+                      {canManageCourseActions && (
                         <Link
                           to={`/courses/${course.code}/files`}
                           className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
@@ -1799,7 +2627,7 @@ const handleDeleteCourseSimple = async () => {
                       <FolderOpen className="h-12 w-12 mx-auto text-slate-400 mb-3" />
                       <p className="text-sm font-semibold text-slate-700">No documents available yet</p>
                       <p className="mt-1 text-xs text-slate-500">
-                        {isTeacher
+                        {canManageCourseActions
                           ? "Upload your first document to share with students"
                           : "Documents will appear here when available"}
                       </p>
@@ -1911,7 +2739,11 @@ const handleDeleteCourseSimple = async () => {
               </div>
 
               {/* Upcoming Activities & Stats Section */}
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+              <div
+                className={`grid grid-cols-1 gap-4 ${
+                  hasGradeSheetStats ? "xl:grid-cols-3" : "xl:grid-cols-2"
+                }`}
+              >
                 {/* Upcoming Activities */}
                 <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ">
                   <div className="mb-3 flex items-center justify-between gap-2">
@@ -1978,19 +2810,23 @@ const handleDeleteCourseSimple = async () => {
                           );
 
                           return (
-                            <div key={activity.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                              <div>
+                            <Link
+                              key={activity.id}
+                              to={`/courses/${course.code}/assessments/${activity.id}`}
+                              className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 transition hover:border-sky-200 hover:bg-sky-50/40"
+                            >
+                              <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-semibold text-slate-900">
                                   {activity.name}
                                 </p>
-                                <p className="truncate text-xs text-slate-500 text-slate-500">
+                                <p className="mt-0.5 line-clamp-2 break-words text-xs text-slate-500">
                                   {activityDescription || "No description provided"}
                                 </p>
                               </div>
-                              <span className={`inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 ${diffDays === 0 ? "border-slate-200 bg-slate-100 text-slate-600" : ""}`}>
+                              <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 ${diffDays === 0 ? "border-slate-200 bg-slate-100 text-slate-600" : ""}`}>
                                 {diffDays === 0 ? "Today" : relativeDate}
                               </span>
-                            </div>
+                            </Link>
                           );
                         })}
                       </div>
@@ -2049,7 +2885,7 @@ const handleDeleteCourseSimple = async () => {
                 )}
 
                 {/* Grade Sheets Stats */}
-                {calculateGradeSheetStats && calculateGradeSheetStats.totalSheets > 0 && (
+                {hasGradeSheetStats && (
                   <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ">
                     <div className="mb-3 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-3 min-w-0">
@@ -2381,30 +3217,14 @@ const handleDeleteCourseSimple = async () => {
                         ) : (
                           filteredStudents.map((student) => {
                             const studentGradeSheets = gradeSheets.filter(
-                              (sheet) => sheet.courseId === id && sheet.isPublished,
+                              (sheet) => isPublishedSheet(sheet) && sheetMatchesCourse(sheet, course),
                             );
-
-                            let studentAverage = 0;
-                            let hasGrades = false;
-                            const studentTotals: number[] = [];
-
-                            studentGradeSheets.forEach((sheet) => {
-                              const studentInSheet = sheet.students?.find(
-                                (s: any) => s.studentId === student.id,
-                              );
-                              if (studentInSheet?.total !== undefined && studentInSheet.total !== null) {
-                                studentTotals.push(studentInSheet.total);
-                                hasGrades = true;
-                              }
-                            });
-
-                            if (hasGrades && studentTotals.length > 0) {
-                              studentAverage =
-                                studentTotals.reduce((sum, total) => sum + total, 0) /
-                                studentTotals.length;
-                            }
-
-                            const avgGrade = hasGrades ? studentAverage : 0;
+                            const studentMetrics = calculateStudentAverageFromSheets(
+                              student.id,
+                              studentGradeSheets,
+                            );
+                            const hasGrades = studentMetrics.average !== null;
+                            const avgGrade = hasGrades ? studentMetrics.average || 0 : 0;
                             const gradeStatus = avgGrade >= 3.5 ? 'passing' : 
                                               avgGrade >= 3.0 ? 'at-risk' : 
                                               avgGrade > 0 ? 'failing' : 'no-grades';
@@ -2610,7 +3430,6 @@ const handleDeleteCourseSimple = async () => {
   }
 
   // Courses List View
-  const userCourses = userAccessibleCourses;
   const teacherManagedCourses = isTeacher
     ? userCourses.filter((course) => course.teacherId === user?.id)
     : userCourses;
@@ -2645,8 +3464,9 @@ const handleDeleteCourseSimple = async () => {
     ? Math.max(0, teacherPlanStudentLimit - usedStudentQuota)
     : null;
   const canCreateCourse =
-    !isTeacherPlanBlocked &&
-    (!teacherPlanCourseLimit || teacherManagedCourses.length < teacherPlanCourseLimit);
+    isAdmin ||
+    (!isTeacherPlanBlocked &&
+      (!teacherPlanCourseLimit || teacherManagedCourses.length < teacherPlanCourseLimit));
   const courseGradientMap = buildCourseGradientMap(userCourses);
 
   const userCourseIdSet = new Set(userCourses.map((course) => course.id));
@@ -2744,7 +3564,7 @@ const handleDeleteCourseSimple = async () => {
                       Join another course
                     </button>
                   )}
-                  {isTeacher && (
+                  {(isTeacher || isAdmin) && (
                     canCreateCourse ? (
                       <Link to="/courses/create" className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap">
                         <Plus className="h-4 w-4" />
@@ -2958,20 +3778,27 @@ const handleDeleteCourseSimple = async () => {
                 const lessonsCount = units.filter((unit) => unit.courseId === course.id).length;
                 const courseSchedule = normalizeCourseSchedule(course.classSchedule);
                 const coverUrl = course.coverUrl?.trim() || "";
+                const isMandatoryCard = isMandatoryCourseEntry(course);
                 const courseAverage = isTeacher
-                  ? (() => {
-                      const stats = calculateCourseRealStats(
-                        course.id,
-                        course.enrolledStudents || [],
-                        grades,
-                        gradeSheets,
-                      );
-                      return stats.studentsWithGrades > 0 ? stats.averageGrade : null;
-                    })()
+                  ? calculateTeacherCourseAverage(course)
                   : user?.id
-                    ? calculateRealCourseGrade(course.id, user.id)
+                    ? calculateRealCourseGrade(course, user.id)
                     : null;
-                const badgeText = courseAverage !== null ? courseAverage.toFixed(1) : "N/A";
+                const isTeacherMandatoryAssignment =
+                  isMandatoryCard &&
+                  ((teacherOnboardingCourseId.trim().length > 0 &&
+                    course.id === teacherOnboardingCourseId) ||
+                    (teacherOnboardingCourseCode.trim().length > 0 &&
+                      String(course.code || "").trim().toUpperCase() === teacherOnboardingCourseCode) ||
+                    String(course.code || "").trim().toUpperCase() === TEACHER_ONBOARDING_COURSE_CODE);
+                const mandatoryRemainingDaysLabel = isTeacherMandatoryAssignment
+                  ? getRemainingDaysLabel(teacherOnboardingDueAt)
+                  : null;
+                const badgeText =
+                  courseAverage !== null
+                    ? courseAverage.toFixed(1)
+                    : mandatoryRemainingDaysLabel || "N/A";
+                const showCourseBadge = !isAdmin;
                 const descriptionText = course.description
                   ? getPlainTextFromHtml(course.description)
                   : "No description";
@@ -3002,8 +3829,16 @@ const handleDeleteCourseSimple = async () => {
                     ? `${course.credits} Credits`
                     : "No credits";
                 const courseGradient =
-                  courseGradientMap.get(getCourseGradientSeed(course, courseIndex)) ||
-                  COURSE_COVER_GRADIENTS[0];
+                  isMandatoryCard
+                    ? MANDATORY_COURSE_COVER_GRADIENT
+                    : courseGradientMap.get(getCourseGradientSeed(course, courseIndex)) ||
+                      COURSE_COVER_GRADIENTS[0];
+                const infoPillClass = isMandatoryCard
+                  ? "border border-sky-100 bg-sky-50 text-sky-800"
+                  : "border border-slate-200 bg-slate-100 text-slate-700";
+                const statsPillClass = isMandatoryCard
+                  ? "border border-indigo-100 bg-indigo-50 text-indigo-800"
+                  : "border border-slate-200 bg-slate-100 text-slate-700";
 
                 return (
                   <Link
@@ -3023,41 +3858,72 @@ const handleDeleteCourseSimple = async () => {
                           className={`h-full w-full ${courseGradient}`}
                         />
                       )}
-                      <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-slate-900/25" />
+                      {isMandatoryCard ? (
+                        <>
+                          <div className="pointer-events-none absolute inset-0 opacity-70">
+                            <BookOpen className="absolute left-[12%] top-[18%] h-3.5 w-3.5 text-white/10" />
+                            <Presentation className="absolute left-[24%] top-[52%] h-4 w-4 text-white/10" />
+                            <FileText className="absolute left-[48%] top-[28%] h-3.5 w-3.5 text-white/10" />
+                            <Sparkles className="absolute left-[62%] top-[64%] h-3.5 w-3.5 text-white/10" />
+                            <Users className="absolute left-[78%] top-[22%] h-4 w-4 text-white/10" />
+                            <Zap className="absolute left-[84%] top-[58%] h-3.5 w-3.5 text-white/10" />
+                            <Target className="absolute left-[38%] top-[76%] h-3.5 w-3.5 text-white/10" />
+                          </div>
+                          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.04)_0%,rgba(0,0,0,0.14)_100%)]" />
+                        </>
+                      ) : (
+                        <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-slate-900/25" />
+                      )}
 
                       <div className="absolute left-2 top-2 right-2 flex items-center gap-1.5 min-w-0">
-                        <span className="inline-flex max-w-[72%] items-center truncate rounded-full bg-slate-900/80 px-2 py-0.5 text-xs font-bold text-slate-50">
+                        <span className={`inline-flex max-w-[72%] items-center truncate rounded-full px-2 py-0.5 text-xs font-bold ${
+                          isMandatoryCard ? "bg-slate-900/80 text-white" : "bg-slate-900/80 text-slate-50"
+                        }`}>
                           {course.code || "Course"}
                         </span>
                         {course.semester && (
-                          <span className="ml-auto inline-flex max-w-[45%] items-center truncate rounded-full bg-slate-50/90 px-2 py-0.5 text-xs font-semibold text-slate-900">
+                          <span className={`ml-auto inline-flex max-w-[45%] items-center truncate rounded-full px-2 py-0.5 text-xs font-semibold ${
+                            isMandatoryCard ? "bg-white text-slate-950" : "bg-white text-slate-900"
+                          }`}>
                             {course.semester}
                           </span>
                         )}
                       </div>
 
-                      <div className="absolute bottom-2 right-2">
-                        <div
-                          className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-slate-900/85 text-white shadow-[0_12px_18px_rgba(15,23,42,0.26)]"
-                          title={courseAverage !== null ? "Average grade" : "No grades yet"}
-                        >
-                          <span className="text-[15px] font-bold leading-none">{badgeText}</span>
+                      {showCourseBadge && (
+                        <div className="absolute bottom-2 right-2">
+                          <div
+                            className={`inline-flex h-14 w-14 items-center justify-center rounded-full shadow-[0_12px_18px_rgba(15,23,42,0.26)] ${
+                              isMandatoryCard ? "bg-white/12 text-white ring-1 ring-white/10 backdrop-blur-sm" : "bg-slate-900/85 text-white"
+                            }`}
+                            title={
+                              courseAverage !== null
+                                ? "Average grade"
+                                : mandatoryRemainingDaysLabel
+                                  ? "Days remaining to finish the mandatory course"
+                                  : "No grades yet"
+                            }
+                          >
+                            <span className="text-[15px] font-bold leading-none">{badgeText}</span>
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
 
                     <div className="flex min-w-0 flex-col gap-2">
-                      <p className="m-0 truncate text-[11px] font-semibold leading-[0.95rem] text-slate-700">
+                      <p className={`m-0 truncate text-[11px] font-semibold leading-[0.95rem] ${
+                        isMandatoryCard ? "text-slate-800" : "text-slate-700"
+                      }`}>
                         {course.teacherName || "Instructor"}
                         {course.group ? ` • Group ${course.group}` : ""}
                       </p>
 
                       <div className="flex flex-wrap gap-1.5">
-                        <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${infoPillClass}`}>
                           <CalendarDays className="h-3 w-3" />
                           {upcomingCourseCount} upcoming
                         </span>
-                        <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600 max-w-full">
+                        <span className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${infoPillClass}`}>
                           <Clock className="h-3 w-3" />
                           <span className="truncate">{formatScheduleSummary(courseSchedule)}</span>
                         </span>
@@ -3072,17 +3938,17 @@ const handleDeleteCourseSimple = async () => {
                       </p>
 
                       <div className="mt-0.5 flex flex-wrap gap-1.5">
-                        <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold leading-3 text-slate-700">
+                        <div className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold leading-3 ${statsPillClass}`}>
                           <FileBarChart className="h-3 w-3 shrink-0 text-slate-700" />
                           <span className="whitespace-nowrap">
                             {courseAssessments.length} Assessments
                           </span>
                         </div>
-                        <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold leading-3 text-slate-700">
+                        <div className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold leading-3 ${statsPillClass}`}>
                           <BookOpen className="h-3 w-3 shrink-0 text-slate-700" />
                           <span className="whitespace-nowrap">{lessonsCount} Lessons</span>
                         </div>
-                        <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold leading-3 text-slate-700">
+                        <div className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold leading-3 ${statsPillClass}`}>
                           <Users className="h-3 w-3 shrink-0 text-slate-700" />
                           <span className="whitespace-nowrap">{enrolledCount} Students</span>
                         </div>

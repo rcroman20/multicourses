@@ -3,9 +3,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { firebaseDB } from "@/lib/firebase";
+import { getCourseEnrollmentIds } from "@/lib/courseAccess";
 import {
   collection,
   getDocs,
+  getDoc,
+  doc,
   addDoc,
   query,
   where,
@@ -43,6 +46,10 @@ import { deleteUserByAdmin } from "@/lib/services/adminUserDeletionService";
 import { isTeacherPlanExpired } from "@/lib/services/teacherPlanAccessService";
 import { isAdminEmail } from "@/lib/services/adminAccessService";
 import {
+  getUserStoredInstitution,
+  isInstitutionMissing,
+} from "@/lib/services/institutionProfileService";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -61,9 +68,48 @@ const studentSchema = z.object({
   role: z.enum(["estudiante", "docente"]).default("estudiante"),
 });
 
-type UserRole = "estudiante" | "docente";
+type UserRole = "estudiante" | "docente" | "admin";
+type RequestedRole = "estudiante" | "docente";
 type TeacherApprovalStatus = "pending" | "approved" | "rejected";
-type StudentRoleDisplay = "student" | "teacher" | "teacher_pending" | "teacher_rejected";
+type StudentRoleDisplay = "student" | "teacher" | "teacher_pending" | "teacher_rejected" | "admin";
+type RoleFilter = "all" | "estudiante" | "docente" | "admin";
+
+const INSTITUTION_FILTER_FIELDS = [
+  "teacherInstitutionName",
+  "institutionName",
+  "institution",
+  "schoolName",
+  "organizationName",
+  "organization",
+  "companyName",
+  "cohortInstitutionName",
+  "cohortInstitution",
+] as const;
+
+const normalizeInstitutionValue = (value: unknown): string => {
+  if (typeof value !== "string") return "";
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+};
+
+const isTeacherRecord = (data: Record<string, unknown>): boolean => {
+  const role = normalizeUserRole(data.role);
+  const requestedRole = normalizeRequestedRole(data.requestedRole);
+  const approval = normalizeTeacherApprovalStatus(data.teacherApprovalStatus);
+  return role === "docente" || (requestedRole === "docente" && approval === "approved");
+};
+
+const recordMatchesInstitution = (
+  data: Record<string, unknown>,
+  institutionKey: string,
+): boolean =>
+  INSTITUTION_FILTER_FIELDS.some(
+    (field) => normalizeInstitutionValue(data[field]) === institutionKey,
+  );
 
 const normalizeUserRole = (value: unknown): UserRole | null => {
   if (typeof value !== "string") return null;
@@ -88,6 +134,20 @@ const normalizeUserRole = (value: unknown): UserRole | null => {
     return "estudiante";
   }
 
+  if (
+    normalized === "admin" ||
+    normalized === "administrator" ||
+    normalized === "administrador"
+  ) {
+    return "admin";
+  }
+
+  return null;
+};
+
+const normalizeRequestedRole = (value: unknown): RequestedRole | null => {
+  const normalized = normalizeUserRole(value);
+  if (normalized === "docente" || normalized === "estudiante") return normalized;
   return null;
 };
 
@@ -111,8 +171,8 @@ interface Student {
   idNumber: string;
   email: string;
   name: string;
-  role: "estudiante" | "docente";
-  requestedRole?: UserRole;
+  role: UserRole;
+  requestedRole?: RequestedRole;
   teacherApprovalStatus?: TeacherApprovalStatus;
   whatsApp: string;
   avatarUrl?: string;
@@ -125,6 +185,7 @@ interface Student {
 const getStudentRoleDisplay = (
   student: Pick<Student, "role" | "requestedRole" | "teacherApprovalStatus">,
 ): StudentRoleDisplay => {
+  if (student.role === "admin") return "admin";
   if (student.role === "docente") return "teacher";
   if (student.requestedRole !== "docente") return "student";
   if (student.teacherApprovalStatus === "pending") return "teacher_pending";
@@ -135,7 +196,14 @@ const getStudentRoleDisplay = (
 
 const isTeacherDisplay = (
   student: Pick<Student, "role" | "requestedRole" | "teacherApprovalStatus">,
-): boolean => getStudentRoleDisplay(student) !== "student";
+): boolean => {
+  const roleDisplay = getStudentRoleDisplay(student);
+  return (
+    roleDisplay === "teacher" ||
+    roleDisplay === "teacher_pending" ||
+    roleDisplay === "teacher_rejected"
+  );
+};
 
 export default function StudentsPage() {
   const { user } = useAuth();
@@ -147,9 +215,7 @@ export default function StudentsPage() {
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
-  const [roleFilter, setRoleFilter] = useState<
-    "all" | "estudiante" | "docente"
-  >("all");
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [showAddForm, setShowAddForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeletingStudent, setIsDeletingStudent] = useState(false);
@@ -164,8 +230,10 @@ export default function StudentsPage() {
   const [myTeacherCourseIds, setMyTeacherCourseIds] = useState<Set<string>>(
     new Set(),
   );
+  const [sameInstitutionTeacherIds, setSameInstitutionTeacherIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [teacherCourseCount, setTeacherCourseCount] = useState(0);
-  const [showOnlyMyStudents, setShowOnlyMyStudents] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
   const [sortBy, setSortBy] = useState<
@@ -221,11 +289,12 @@ export default function StudentsPage() {
       querySnapshot.forEach((doc) => {
         ownedCourseIds.add(doc.id);
         const data = doc.data() as Record<string, any>;
-        if (data.enrolledStudents && Array.isArray(data.enrolledStudents)) {
-          data.enrolledStudents.forEach((studentId: string) => {
-            allStudentIds.add(studentId);
-          });
-        }
+        getCourseEnrollmentIds({
+          id: doc.id,
+          enrolledStudents: Array.isArray(data.enrolledStudents) ? data.enrolledStudents : [],
+        }).forEach((studentId) => {
+          allStudentIds.add(studentId);
+        });
       });
 
       setMyTeacherCourseIds(ownedCourseIds);
@@ -239,53 +308,173 @@ export default function StudentsPage() {
   const fetchStudents = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [studentsSnapshot, usersSnapshot, coursesSnapshot] = await Promise.all([
-        getDocs(collection(firebaseDB, "estudiantes")),
-        getDocs(collection(firebaseDB, "usuarios")),
-        getDocs(collection(firebaseDB, "cursos")),
-      ]);
-
       const usersById = new Map<string, Record<string, any>>();
-      usersSnapshot.forEach((userDoc) => {
-        usersById.set(userDoc.id, userDoc.data() as Record<string, any>);
-      });
-
       const studentsById = new Map<string, Record<string, any>>();
-      studentsSnapshot.forEach((studentDoc) => {
-        studentsById.set(studentDoc.id, studentDoc.data() as Record<string, any>);
-      });
-
-      const validCourseIds = new Set<string>(
-        coursesSnapshot.docs.map((courseDoc) => courseDoc.id),
-      );
-
+      const validCourseIds = new Set<string>();
       const coursesByUserId = new Map<string, Set<string>>();
       const teacherIds = new Set<string>();
-      coursesSnapshot.forEach((courseDoc) => {
-        const courseData = courseDoc.data() as Record<string, any>;
-        const courseId = courseDoc.id;
+      const userIds = new Set<string>();
+      const matchedInstitutionTeacherIds = new Set<string>();
+      const usersWithAnyCourse = new Set<string>();
 
-        const teacherId = typeof courseData.teacherId === "string" ? courseData.teacherId : "";
-        if (teacherId) {
-          teacherIds.add(teacherId);
-          if (!coursesByUserId.has(teacherId)) coursesByUserId.set(teacherId, new Set());
-          coursesByUserId.get(teacherId)?.add(courseId);
-        }
+      if (isTeacher && user?.id && !isAdmin) {
+        const [ownedCoursesSnapshot, allCoursesSnapshot] = await Promise.all([
+          getDocs(
+            query(collection(firebaseDB, "cursos"), where("teacherId", "==", user.id)),
+          ),
+          getDocs(collection(firebaseDB, "cursos")),
+        ]);
 
-        const enrolled = Array.isArray(courseData.enrolledStudents) ? courseData.enrolledStudents : [];
-        enrolled.forEach((entry) => {
-          const userId = typeof entry === "string" ? entry : entry?.id;
-          if (!userId || typeof userId !== "string") return;
-          if (!coursesByUserId.has(userId)) coursesByUserId.set(userId, new Set());
-          coursesByUserId.get(userId)?.add(courseId);
+        allCoursesSnapshot.forEach((courseDoc) => {
+          const courseData = courseDoc.data() as Record<string, any>;
+          const teacherId = typeof courseData.teacherId === "string" ? courseData.teacherId : "";
+          if (teacherId) {
+            usersWithAnyCourse.add(teacherId);
+          }
+          const enrolled = Array.isArray(courseData.enrolledStudents)
+            ? courseData.enrolledStudents
+            : [];
+          enrolled.forEach((entry) => {
+            const enrolledId = typeof entry === "string" ? entry : entry?.id;
+            if (!enrolledId || typeof enrolledId !== "string") return;
+            usersWithAnyCourse.add(enrolledId);
+          });
         });
-      });
 
-      const userIds = new Set<string>([
-        ...Array.from(usersById.keys()),
-        ...Array.from(studentsById.keys()),
-        ...Array.from(coursesByUserId.keys()),
-      ]);
+        const targetStudentIds = new Set<string>();
+        ownedCoursesSnapshot.forEach((courseDoc) => {
+          const courseData = courseDoc.data() as Record<string, any>;
+          const courseId = courseDoc.id;
+          validCourseIds.add(courseId);
+
+          const teacherId = typeof courseData.teacherId === "string" ? courseData.teacherId : "";
+          if (teacherId) {
+            teacherIds.add(teacherId);
+            if (!coursesByUserId.has(teacherId)) coursesByUserId.set(teacherId, new Set());
+            coursesByUserId.get(teacherId)?.add(courseId);
+          }
+
+          const enrolled = Array.isArray(courseData.enrolledStudents)
+            ? courseData.enrolledStudents
+            : [];
+          enrolled.forEach((entry) => {
+            const enrolledId = typeof entry === "string" ? entry : entry?.id;
+            if (!enrolledId || typeof enrolledId !== "string") return;
+            targetStudentIds.add(enrolledId);
+            if (!coursesByUserId.has(enrolledId)) coursesByUserId.set(enrolledId, new Set());
+            coursesByUserId.get(enrolledId)?.add(courseId);
+          });
+        });
+
+        const studentEntries = await Promise.all(
+          Array.from(targetStudentIds).map(async (studentId) => {
+            const [userDoc, studentDoc] = await Promise.all([
+              getDoc(doc(firebaseDB, "usuarios", studentId)),
+              getDoc(doc(firebaseDB, "estudiantes", studentId)),
+            ]);
+            return { studentId, userDoc, studentDoc };
+          }),
+        );
+
+        studentEntries.forEach(({ studentId, userDoc, studentDoc }) => {
+          userIds.add(studentId);
+          if (userDoc.exists()) {
+            usersById.set(studentId, userDoc.data() as Record<string, any>);
+          }
+          if (studentDoc.exists()) {
+            studentsById.set(studentId, studentDoc.data() as Record<string, any>);
+          }
+        });
+
+        const studentsSnapshot = await getDocs(collection(firebaseDB, "estudiantes"));
+        studentsSnapshot.forEach((studentDoc) => {
+          const studentId = studentDoc.id;
+          if (userIds.has(studentId)) return;
+          if (usersWithAnyCourse.has(studentId)) return;
+
+          const data = studentDoc.data() as Record<string, unknown>;
+          if (isTeacherRecord(data)) return;
+
+          userIds.add(studentId);
+          studentsById.set(studentId, data as Record<string, any>);
+        });
+
+        const teacherInstitution = await getUserStoredInstitution(user.id, "docente");
+        const teacherInstitutionKey = normalizeInstitutionValue(teacherInstitution);
+        if (teacherInstitutionKey && !isInstitutionMissing(teacherInstitution)) {
+          const [allUsersSnapshot, allStudentsSnapshot] = await Promise.all([
+            getDocs(collection(firebaseDB, "usuarios")),
+            getDocs(collection(firebaseDB, "estudiantes")),
+          ]);
+
+          allUsersSnapshot.forEach((matchedDoc) => {
+            const matchedId = matchedDoc.id;
+            const data = matchedDoc.data() as Record<string, unknown>;
+            if (!isTeacherRecord(data)) return;
+            if (!recordMatchesInstitution(data, teacherInstitutionKey)) return;
+
+            userIds.add(matchedId);
+            usersById.set(matchedId, data as Record<string, any>);
+            if (matchedId !== user.id) {
+              matchedInstitutionTeacherIds.add(matchedId);
+            }
+          });
+
+          allStudentsSnapshot.forEach((matchedDoc) => {
+            const matchedId = matchedDoc.id;
+            const data = matchedDoc.data() as Record<string, unknown>;
+            if (!isTeacherRecord(data)) return;
+            if (!recordMatchesInstitution(data, teacherInstitutionKey)) return;
+
+            userIds.add(matchedId);
+            if (!studentsById.has(matchedId)) {
+              studentsById.set(matchedId, data as Record<string, any>);
+            }
+            if (matchedId !== user.id) {
+              matchedInstitutionTeacherIds.add(matchedId);
+            }
+          });
+        }
+      } else {
+        const [studentsSnapshot, usersSnapshot, coursesSnapshot] = await Promise.all([
+          getDocs(collection(firebaseDB, "estudiantes")),
+          getDocs(collection(firebaseDB, "usuarios")),
+          getDocs(collection(firebaseDB, "cursos")),
+        ]);
+
+        usersSnapshot.forEach((userDoc) => {
+          usersById.set(userDoc.id, userDoc.data() as Record<string, any>);
+        });
+        studentsSnapshot.forEach((studentDoc) => {
+          studentsById.set(studentDoc.id, studentDoc.data() as Record<string, any>);
+        });
+        coursesSnapshot.forEach((courseDoc) => {
+          const courseData = courseDoc.data() as Record<string, any>;
+          const courseId = courseDoc.id;
+          validCourseIds.add(courseId);
+
+          const teacherId = typeof courseData.teacherId === "string" ? courseData.teacherId : "";
+          if (teacherId) {
+            teacherIds.add(teacherId);
+            if (!coursesByUserId.has(teacherId)) coursesByUserId.set(teacherId, new Set());
+            coursesByUserId.get(teacherId)?.add(courseId);
+          }
+
+          const enrolled = Array.isArray(courseData.enrolledStudents)
+            ? courseData.enrolledStudents
+            : [];
+          enrolled.forEach((entry) => {
+            const enrolledId = typeof entry === "string" ? entry : entry?.id;
+            if (!enrolledId || typeof enrolledId !== "string") return;
+            if (!coursesByUserId.has(enrolledId)) coursesByUserId.set(enrolledId, new Set());
+            coursesByUserId.get(enrolledId)?.add(courseId);
+          });
+        });
+
+        usersById.forEach((_, id) => userIds.add(id));
+        studentsById.forEach((_, id) => userIds.add(id));
+        coursesByUserId.forEach((_, id) => userIds.add(id));
+      }
 
       const studentList: Student[] = Array.from(userIds).map((id) => {
         const userData = usersById.get(id) || {};
@@ -294,15 +483,20 @@ export default function StudentsPage() {
           normalizeUserRole(userData.role) ||
           normalizeUserRole(studentData.role);
         const requestedRole =
-          normalizeUserRole(userData.requestedRole) ||
-          normalizeUserRole(studentData.requestedRole) ||
+          normalizeRequestedRole(userData.requestedRole) ||
+          normalizeRequestedRole(studentData.requestedRole) ||
           undefined;
         const teacherApprovalStatus =
           normalizeTeacherApprovalStatus(userData.teacherApprovalStatus) ||
           normalizeTeacherApprovalStatus(studentData.teacherApprovalStatus) ||
           undefined;
+        const isKnownAdmin =
+          roleFromData === "admin" ||
+          isAdminEmail(userData.email || studentData.email);
         const inferredRole =
-          roleFromData
+          isKnownAdmin
+            ? "admin"
+            : roleFromData
             ? roleFromData
             : requestedRole === "docente" && teacherApprovalStatus === "approved"
               ? "docente"
@@ -332,7 +526,7 @@ export default function StudentsPage() {
             "",
           email: studentData.email || userData.email || "",
           name: studentData.name || userData.name || "Unknown user",
-          role: inferredRole as "docente" | "estudiante",
+          role: inferredRole as UserRole,
           requestedRole,
           teacherApprovalStatus,
           whatsApp:
@@ -352,14 +546,16 @@ export default function StudentsPage() {
 
       studentList.sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
       setStudents(studentList);
+      setSameInstitutionTeacherIds(matchedInstitutionTeacherIds);
       setError("");
     } catch {
       setError("Error loading students");
       toast.error("Error loading students");
+      setSameInstitutionTeacherIds(new Set());
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isAdmin, isTeacher, user?.id]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -381,6 +577,12 @@ export default function StudentsPage() {
     return () => window.clearTimeout(timer);
   }, [searchTerm]);
 
+  useEffect(() => {
+    if (isTeacher && roleFilter === "admin") {
+      setRoleFilter("docente");
+    }
+  }, [isTeacher, roleFilter]);
+
   const studentsWithCourses = useMemo(
     () =>
       students.filter(
@@ -398,18 +600,18 @@ export default function StudentsPage() {
         (!student.courses || student.courses.length === 0),
     );
 
-    if (isTeacher && showOnlyMyStudents) {
-      return [];
-    }
+    if (isTeacher) return withoutCourses;
 
-    if (isAdmin || isTeacher) return withoutCourses;
+    if (isAdmin) return withoutCourses;
     return [];
-  }, [students, isTeacher, isAdmin, showOnlyMyStudents]);
+  }, [students, isTeacher, isAdmin]);
 
   const baseStudents = useMemo(() => {
-    if (isTeacher && showOnlyMyStudents) {
+    if (isTeacher) {
       return students.filter((student) => {
-        if (isTeacherDisplay(student)) return false;
+        if (isTeacherDisplay(student)) {
+          return sameInstitutionTeacherIds.has(student.id);
+        }
         if (!myCourseStudentIds.has(student.id)) return false;
 
         const courseIds = Array.isArray(student.courses) ? student.courses : [];
@@ -418,16 +620,15 @@ export default function StudentsPage() {
       });
     }
     if (isAdmin) return studentsWithCourses;
-    if (isTeacher) return studentsWithCourses;
     return studentsWithCourses.filter((student) => student.id === user?.id);
   }, [
     students,
     studentsWithCourses,
     isAdmin,
     isTeacher,
-    showOnlyMyStudents,
     myCourseStudentIds,
     myTeacherCourseIds,
+    sameInstitutionTeacherIds,
     user?.id,
   ]);
 
@@ -435,11 +636,11 @@ export default function StudentsPage() {
     let list = [...baseStudents];
 
     if (roleFilter !== "all") {
-      list = list.filter((student) =>
-        roleFilter === "docente"
-          ? isTeacherDisplay(student)
-          : !isTeacherDisplay(student),
-      );
+      list = list.filter((student) => {
+        if (roleFilter === "docente") return isTeacherDisplay(student);
+        if (roleFilter === "admin") return getStudentRoleDisplay(student) === "admin";
+        return !isTeacherDisplay(student) && getStudentRoleDisplay(student) !== "admin";
+      });
     }
 
     if (debouncedSearchTerm) {
@@ -485,7 +686,7 @@ export default function StudentsPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchTerm, roleFilter, sortBy, sortOrder, showOnlyMyStudents]);
+  }, [debouncedSearchTerm, roleFilter, sortBy, sortOrder]);
 
   const totalPages = Math.max(1, Math.ceil(filteredStudents.length / pageSize));
   const paginatedStudents = useMemo(
@@ -525,6 +726,15 @@ export default function StudentsPage() {
 
   const renderStudentRoleBadge = (student: Student) => {
     const roleDisplay = getStudentRoleDisplay(student);
+
+    if (roleDisplay === "admin") {
+      return (
+        <span className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-xs font-bold text-violet-700">
+          <Shield className="h-3 w-3" />
+          Admin
+        </span>
+      );
+    }
 
     if (roleDisplay === "teacher") {
       return (
@@ -709,8 +919,11 @@ export default function StudentsPage() {
       : students.filter((s) => s.id === user?.id).length;
 
   const studentCountByRole = {
-    estudiante: filteredStudents.filter((s) => !isTeacherDisplay(s)).length,
+    estudiante: filteredStudents.filter(
+      (s) => getStudentRoleDisplay(s) === "student",
+    ).length,
     docente: filteredStudents.filter((s) => isTeacherDisplay(s)).length,
+    admin: filteredStudents.filter((s) => getStudentRoleDisplay(s) === "admin").length,
   };
   const teacherPlanCourseLimit =
     typeof user?.teacherPlanCourseLimit === "number" && user.teacherPlanCourseLimit > 0
@@ -814,9 +1027,11 @@ export default function StudentsPage() {
 
         <div
           className={`grid grid-cols-1 gap-2 sm:grid-cols-2 ${
-            isTeacher && (teacherPlanCourseLimit || teacherPlanStudentLimit)
-              ? "lg:grid-cols-5"
-              : "lg:grid-cols-4"
+            isTeacher
+              ? teacherPlanCourseLimit || teacherPlanStudentLimit
+                ? "lg:grid-cols-5"
+                : "lg:grid-cols-4"
+              : "lg:grid-cols-5"
           }`}
         >
           <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
@@ -865,10 +1080,29 @@ export default function StudentsPage() {
                 <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Teachers</p>
               </div>
               <div className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700">
-                Staff
+                {isTeacher ? "Institution" : "Staff"}
               </div>
             </div>
           </div>
+
+          {!isTeacher && (
+            <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
+                      <Shield className="h-4 w-4" />
+                    </div>
+                    <p className="text-lg font-extrabold leading-5 text-slate-900">{studentCountByRole.admin}</p>
+                  </div>
+                  <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Admins</p>
+                </div>
+                <div className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] font-semibold text-violet-700">
+                  Platform
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
             <div className="flex items-center justify-between">
@@ -945,32 +1179,19 @@ export default function StudentsPage() {
                 <select
                   value={roleFilter}
                   onChange={(e) =>
-                    setRoleFilter(
-                      e.target.value as "all" | "estudiante" | "docente",
-                    )
+                    setRoleFilter(e.target.value as RoleFilter)
                   }
                   className="h-10 appearance-none rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-8 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 >
                   <option value="all">All Roles</option>
                   <option value="estudiante">Students</option>
-                  <option value="docente">Teachers</option>
+                  <option value="docente">
+                    {isTeacher ? "Teachers (same institution)" : "Teachers"}
+                  </option>
+                  {!isTeacher && <option value="admin">Admins</option>}
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               </div>
-
-              {isTeacher && (
-                <button
-                  onClick={() => setShowOnlyMyStudents((prev) => !prev)}
-                  className={cn(
-                    "h-10 rounded-xl border px-3 text-sm font-semibold transition",
-                    showOnlyMyStudents
-                      ? "border-sky-300 bg-sky-50 text-sky-700"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
-                  )}
-                >
-                  {showOnlyMyStudents ? "Only My Students" : "All Students"}
-                </button>
-              )}
 
               <button
                 onClick={() => setShowAddForm(true)}
@@ -994,9 +1215,7 @@ export default function StudentsPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-slate-900">
-                      {isTeacher && showOnlyMyStudents
-                        ? "My Students"
-                        : "Registered Users"}
+                      {isTeacher ? "My Students" : "Registered Users"}
                     </h3>
                     <p className="mt-0.5 text-sm text-slate-500">
                       {filteredStudents.length} users with courses

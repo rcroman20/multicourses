@@ -4,14 +4,18 @@ import { useAuth } from './AuthContext';
 import { firebaseDB } from '@/lib/firebase';
 import { 
   collection, 
+  doc,
+  getDoc,
   query, 
   where, 
   orderBy, 
   onSnapshot,
-  getDocs
+  getDocs,
+  limit
 } from 'firebase/firestore';
 import { unitService, weekService, slideService } from '@/lib/unitService';
 import { assessmentService } from '@/lib/services/assessmentService';
+import { TEACHER_ONBOARDING_COURSE_CODE } from '@/lib/services/teacherOnboardingService';
 import type { 
   Course, 
   Assessment, 
@@ -187,6 +191,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
   const userId = user?.id ?? '';
   const userRole = user?.role;
   const [courses, setCourses] = useState<Course[]>([]);
+  const [teacherOnboardingCourse, setTeacherOnboardingCourse] = useState<Course | null>(null);
   const [selectedCourseId, setSelectedCourseIdState] = useState<string>('');
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
@@ -200,7 +205,8 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     units: false,
   });
 
-  const selectedCourseStorageKey = userId ? `global:selectedCourse:${userId}` : null;
+  const selectedCourseStorageKey =
+    userId && userRole ? `global:selectedCourse:${userRole}:${userId}` : null;
 
   const selectedCourse = useMemo(
     () => courses.find((course) => course.id === selectedCourseId) || null,
@@ -209,8 +215,15 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
 
   const setSelectedCourseId = useCallback((courseId: string) => {
     const next = courseId || '';
+    if (selectedCourseStorageKey) {
+      if (next) {
+        localStorage.setItem(selectedCourseStorageKey, next);
+      } else {
+        localStorage.removeItem(selectedCourseStorageKey);
+      }
+    }
     setSelectedCourseIdState((prev) => (prev === next ? prev : next));
-  }, []);
+  }, [selectedCourseStorageKey]);
 
   const setLoadingFlag = useCallback((key: keyof LoadingState, value: boolean) => {
     setLoading((prev) => (prev[key] === value ? prev : { ...prev, [key]: value }));
@@ -218,6 +231,26 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
 
   const setCoursesSafely = useCallback((nextCourses: Course[]) => {
     setCourses((prevCourses) => (areCoursesEqual(prevCourses, nextCourses) ? prevCourses : nextCourses));
+  }, []);
+
+  const buildCourseFromSnapshot = useCallback((docSnap: { id: string; data: () => any }): Course => {
+    const data = docSnap.data();
+    return {
+      ...(data as Record<string, unknown>),
+      id: docSnap.id,
+      name: data.name || '',
+      code: data.code || '',
+      semester: data.semester || '',
+      group: data.group || '',
+      credits: data.credits || 0,
+      teacherId: data.teacherId || '',
+      teacherName: data.teacherName || '',
+      description: data.description || '',
+      coverUrl: data.coverUrl || '',
+      classSchedule: normalizeClassSchedule(data.classSchedule),
+      enrolledStudents: data.enrolledStudents || [],
+      createdAt: data.createdAt?.toDate() || new Date(),
+    } as Course;
   }, []);
 
   // NUEVA FUNCIÓN: refreshCourses - Recargar cursos manualmente
@@ -258,6 +291,36 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             createdAt: data.createdAt?.toDate() || new Date(),
           });
         });
+        if (teacherOnboardingCourse && !coursesData.some((course) => course.id === teacherOnboardingCourse.id)) {
+          coursesData.unshift(teacherOnboardingCourse);
+        }
+        const enrolledQuery = query(
+          coursesRef,
+          where('enrolledStudents', 'array-contains', userId),
+        );
+        const enrolledSnapshot = await getDocs(enrolledQuery);
+        enrolledSnapshot.forEach((doc) => {
+          const data = doc.data();
+          const courseEntry: Course = {
+            id: doc.id,
+            name: data.name || '',
+            code: data.code || '',
+            semester: data.semester || '',
+            group: data.group || '',
+            credits: data.credits || 0,
+            teacherId: data.teacherId || '',
+            teacherName: data.teacherName || '',
+            description: data.description || '',
+            coverUrl: data.coverUrl || '',
+            classSchedule: normalizeClassSchedule(data.classSchedule),
+            enrolledStudents: data.enrolledStudents || [],
+            createdAt: data.createdAt?.toDate() || new Date(),
+          };
+          if (!coursesData.some((course) => course.id === courseEntry.id)) {
+            coursesData.push(courseEntry);
+          }
+        });
+        coursesData.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
       } else if (userRole === 'estudiante') {
         // Para estudiantes
         const q = query(
@@ -288,7 +351,10 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
         // Ordenar manualmente
         coursesData.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
       } else if (userRole === 'admin') {
-        const q = query(coursesRef, orderBy('createdAt', 'desc'));
+        const q = query(
+          coursesRef,
+          orderBy('createdAt', 'desc'),
+        );
         const querySnapshot = await getDocs(q);
 
         querySnapshot.forEach((doc) => {
@@ -320,7 +386,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoadingFlag('courses', false);
     }
-  }, [setCoursesSafely, setLoadingFlag, userId, userRole]);
+  }, [setCoursesSafely, setLoadingFlag, teacherOnboardingCourse, userId, userRole]);
 
   // Cargar evaluaciones para todos los cursos del usuario
   useEffect(() => {
@@ -370,7 +436,10 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
           // Para estudiantes, cargar todas sus calificaciones
           for (const course of courses) {
             try {
-              const courseGrades = await assessmentService.getStudentGrades(userId, course.id);
+              const courseGrades = await assessmentService.getStudentGrades(userId, course.id, {
+                courseCode: course.code,
+                courseName: course.name,
+              });
               userGrades = [...userGrades, ...courseGrades];
             } catch (error) {
             }
@@ -520,6 +589,67 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     };
   }, [courses, setLoadingFlag, userId]);
 
+  useEffect(() => {
+    if (!userId || userRole !== 'docente') {
+      setTeacherOnboardingCourse(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadTeacherOnboardingCourse = async () => {
+      try {
+        const studentSnap = await getDoc(doc(firebaseDB, 'estudiantes', userId));
+        const data = (studentSnap.exists() ? studentSnap.data() : {}) as Record<string, unknown>;
+        const status = String(data.teacherOnboardingStatus || '').trim().toLowerCase();
+
+        if (!status || status === 'completed' || status === 'closed') {
+          if (!cancelled) setTeacherOnboardingCourse(null);
+          return;
+        }
+
+        const courseIdRaw = data.teacherOnboardingCourseId;
+        const courseId = typeof courseIdRaw === 'string' ? courseIdRaw.trim() : '';
+        let courseSnap: { id: string; data: () => any } | undefined;
+
+        if (courseId) {
+          const directSnap = await getDoc(doc(firebaseDB, 'cursos', courseId));
+          if (directSnap.exists()) {
+            courseSnap = directSnap as unknown as { id: string; data: () => any };
+          }
+        }
+
+        if (!courseSnap) {
+          const onboardingSnap = await getDocs(
+            query(
+              collection(firebaseDB, 'cursos'),
+              where('code', '==', TEACHER_ONBOARDING_COURSE_CODE),
+              limit(1),
+            ),
+          );
+          courseSnap = onboardingSnap.docs[0] as unknown as { id: string; data: () => any } | undefined;
+        }
+
+        if (!courseSnap) {
+          if (!cancelled) setTeacherOnboardingCourse(null);
+          return;
+        }
+
+        if (!cancelled) {
+          setTeacherOnboardingCourse(buildCourseFromSnapshot(courseSnap));
+        }
+      } catch {
+        if (!cancelled) setTeacherOnboardingCourse(null);
+      }
+    };
+
+    void loadTeacherOnboardingCourse();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [buildCourseFromSnapshot, userId, userRole]);
+
   // Cargar cursos en tiempo real
   useEffect(() => {
     if (!userId) {
@@ -532,41 +662,63 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
 
     if (userRole === 'docente') {
       try {
-        const q = query(
-          collection(firebaseDB, 'cursos'), 
+        const coursesRef = collection(firebaseDB, 'cursos');
+        let teacherCourses: Course[] = [];
+        let enrolledCourses: Course[] = [];
+
+        const mergeAndSetCourses = () => {
+          const mergedMap = new Map<string, Course>();
+          teacherCourses.forEach((course) => mergedMap.set(course.id, course));
+          enrolledCourses.forEach((course) => mergedMap.set(course.id, course));
+
+          if (teacherOnboardingCourse && !mergedMap.has(teacherOnboardingCourse.id)) {
+            mergedMap.set(teacherOnboardingCourse.id, teacherOnboardingCourse);
+          }
+
+          const mergedCourses = Array.from(mergedMap.values()).sort(
+            (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+          );
+
+          setCoursesSafely(mergedCourses);
+          setLoadingFlag('courses', false);
+        };
+
+        const teacherQuery = query(
+          coursesRef,
           where('teacherId', '==', userId),
-          orderBy('createdAt', 'desc')
+          orderBy('createdAt', 'desc'),
         );
-        
-        unsubscribe = onSnapshot(q, 
+        const enrolledQuery = query(
+          coursesRef,
+          where('enrolledStudents', 'array-contains', userId),
+        );
+
+        const unsubscribeTeacher = onSnapshot(
+          teacherQuery,
           (snapshot) => {
-            const coursesData: Course[] = [];
-            snapshot.forEach((doc) => {
-              const data = doc.data();
-              coursesData.push({
-                id: doc.id,
-                name: data.name || '',
-                code: data.code || '',
-                semester: data.semester || '',
-                group: data.group || '',
-                credits: data.credits || 0,
-                teacherId: data.teacherId || '',
-                teacherName: data.teacherName || '',
-                description: data.description || '',
-                coverUrl: data.coverUrl || '',
-                classSchedule: normalizeClassSchedule(data.classSchedule),
-                enrolledStudents: data.enrolledStudents || [],
-                createdAt: data.createdAt?.toDate() || new Date(),
-              });
-            });
-            
-            setCoursesSafely(coursesData);
+            teacherCourses = snapshot.docs.map(buildCourseFromSnapshot);
+            mergeAndSetCourses();
+          },
+          () => {
             setLoadingFlag('courses', false);
           },
-          (error) => {
-            setLoadingFlag('courses', false);
-          }
         );
+
+        const unsubscribeEnrolled = onSnapshot(
+          enrolledQuery,
+          (snapshot) => {
+            enrolledCourses = snapshot.docs.map(buildCourseFromSnapshot);
+            mergeAndSetCourses();
+          },
+          () => {
+            setLoadingFlag('courses', false);
+          },
+        );
+
+        unsubscribe = () => {
+          unsubscribeTeacher();
+          unsubscribeEnrolled();
+        };
       } catch (error) {
         setLoadingFlag('courses', false);
       }
@@ -617,7 +769,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
       try {
         const q = query(
           collection(firebaseDB, 'cursos'),
-          orderBy('createdAt', 'desc')
+          orderBy('createdAt', 'desc'),
         );
 
         unsubscribe = onSnapshot(q,
@@ -661,7 +813,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [setCoursesSafely, setLoadingFlag, userId, userRole]);
+  }, [buildCourseFromSnapshot, setCoursesSafely, setLoadingFlag, teacherOnboardingCourse, userId, userRole]);
 
   // FUNCIONES IMPLEMENTADAS
   const addAssessment = async (assessmentData: Omit<Assessment, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {

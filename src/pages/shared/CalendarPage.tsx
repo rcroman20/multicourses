@@ -1,8 +1,17 @@
 import { type ComponentType, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { collection, getDocs } from "firebase/firestore";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAcademic } from "@/contexts/AcademicContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { getAccessibleCoursesForUser } from "@/lib/courseAccess";
+import { firebaseDB } from "@/lib/firebase";
+import { getPendingAccountDeletionRequests } from "@/lib/services/accountDeletionService";
+import { getAdminAuditLogEntries } from "@/lib/services/adminAuditLogService";
+import { getContactMessages } from "@/lib/services/contactMessageService";
+import { getPricingContactRequests } from "@/lib/services/pricingContactService";
+import { getTeacherApprovalRequests } from "@/lib/services/teacherApprovalService";
+import { getTeacherPlanExpiryDate, resolveTeacherPlanId } from "@/lib/services/teacherPlanService";
 import {
   AlertCircle,
   BookOpen,
@@ -15,12 +24,34 @@ import {
   Filter,
   GraduationCap,
   MapPin,
-  Sparkles,
   X,
 } from "lucide-react";
 
 type CalendarMode = "upcoming" | "all" | "past";
-type CalendarEventType = "start" | "due" | "class";
+type AdminActivitySort = "priority" | "chronological";
+type AdminTimelineFilter =
+  | "all"
+  | "courses"
+  | "accounts"
+  | "approvals"
+  | "plans"
+  | "inbox"
+  | "backups"
+  | "account_deletions"
+  | "course_deletions";
+type CalendarEventType =
+  | "start"
+  | "due"
+  | "class"
+  | "course_created"
+  | "account_created"
+  | "teacher_approval_request"
+  | "plan_purchased"
+  | "plan_expiring"
+  | "inbox_request"
+  | "deletion_request"
+  | "backup_created"
+  | "course_deleted";
 
 interface CalendarEvent {
   id: string;
@@ -33,7 +64,23 @@ interface CalendarEvent {
   date: Date;
   endDate?: Date;
   location?: string;
-}
+  detail?: string;
+  actorName?: string;
+  navigationPath?: string | null;
+};
+
+type AdminAccountRow = {
+  id: string;
+  email: string;
+  name: string;
+  role: "docente" | "estudiante" | "admin" | "";
+  createdAt: Date | null;
+  teacherPlanLabel: string;
+  teacherPlanId: string;
+  teacherPlanAssignedAt: Date | null;
+  teacherPlanExpiresAt: Date | null;
+  teacherPlanStatus: string;
+};
 
 function toDate(value: unknown): Date | null {
   if (!value) return null;
@@ -130,28 +177,233 @@ function formatEventTime(event: CalendarEvent): string {
   });
 }
 
-function getEventIcon(type: CalendarEventType): ComponentType<{ className?: string }> {
-  if (type === "due") return Clock3;
-  if (type === "start") return CalendarDays;
+function isUrgentPlanExpiry(event: CalendarEvent): boolean {
+  if (event.type !== "plan_expiring") return false;
+  const diffMs = event.date.getTime() - Date.now();
+  return diffMs >= 0 && diffMs <= 30 * 24 * 60 * 60 * 1000;
+}
+
+function getAdminEventPriority(event: CalendarEvent): number {
+  if (event.type === "teacher_approval_request") return 0;
+  if (event.type === "inbox_request") return 1;
+  if (event.type === "plan_expiring") return isUrgentPlanExpiry(event) ? 2 : 4;
+  if (event.type === "deletion_request") return 3;
+  if (event.type === "course_deleted") return 5;
+  if (event.type === "plan_purchased") return 6;
+  if (event.type === "account_created") return 7;
+  if (event.type === "course_created") return 8;
+  if (event.type === "backup_created") return 9;
+  return 10;
+}
+
+function getEventIcon(event: CalendarEvent): ComponentType<{ className?: string }> {
+  if (event.type === "due") return Clock3;
+  if (event.type === "start") return CalendarDays;
+  if (event.type === "course_created") return BookOpen;
+  if (event.type === "account_created") return CheckCircle2;
+  if (event.type === "teacher_approval_request") return GraduationCap;
+  if (event.type === "plan_purchased") return AlertCircle;
+  if (event.type === "plan_expiring") return Clock3;
+  if (event.type === "inbox_request") return AlertCircle;
+  if (event.type === "deletion_request") return X;
+  if (event.type === "backup_created") return CheckCircle2;
+  if (event.type === "course_deleted") return X;
   return GraduationCap;
 }
 
-function getEventTypeLabel(type: CalendarEventType): string {
-  if (type === "due") return "Due date";
-  if (type === "start") return "Start date";
+function getEventTypeLabel(event: CalendarEvent): string {
+  if (event.type === "due") return "Due date";
+  if (event.type === "start") return "Start date";
+  if (event.type === "course_created") return "Course created";
+  if (event.type === "account_created") return "Account created";
+  if (event.type === "teacher_approval_request") return "Teacher approval";
+  if (event.type === "plan_purchased") return "Plan activated";
+  if (event.type === "plan_expiring") return "Plan expires";
+  if (event.type === "inbox_request") return "Inbox request";
+  if (event.type === "deletion_request") return "Deletion request";
+  if (event.type === "backup_created") return "Backup snapshot";
+  if (event.type === "course_deleted") return "Course deleted";
   return "Class session";
 }
 
-function getTypeTone(type: CalendarEventType): string {
-  if (type === "due") return "border-amber-200 bg-amber-50 text-amber-700";
-  if (type === "start") return "border-sky-200 bg-sky-50 text-sky-700";
+function getTypeTone(event: CalendarEvent): string {
+  if (event.type === "due") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (event.type === "start") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (event.type === "course_created") return "border-indigo-200 bg-indigo-50 text-indigo-700";
+  if (event.type === "account_created") return "border-cyan-200 bg-cyan-50 text-cyan-700";
+  if (event.type === "teacher_approval_request") return "border-teal-200 bg-teal-50 text-teal-700";
+  if (event.type === "plan_purchased") return "border-violet-200 bg-violet-50 text-violet-700";
+  if (event.type === "plan_expiring") {
+    return isUrgentPlanExpiry(event)
+      ? "border-rose-200 bg-rose-50 text-rose-700"
+      : "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700";
+  }
+  if (event.type === "inbox_request") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (event.type === "deletion_request") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (event.type === "backup_created") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (event.type === "course_deleted") return "border-rose-200 bg-rose-50 text-rose-700";
   return "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
-function getTypeIconTone(type: CalendarEventType): string {
-  if (type === "due") return "bg-amber-100 text-amber-700";
-  if (type === "start") return "bg-sky-100 text-sky-700";
+function getTypeIconTone(event: CalendarEvent): string {
+  if (event.type === "due") return "bg-amber-100 text-amber-700";
+  if (event.type === "start") return "bg-sky-100 text-sky-700";
+  if (event.type === "course_created") return "bg-indigo-100 text-indigo-700";
+  if (event.type === "account_created") return "bg-cyan-100 text-cyan-700";
+  if (event.type === "teacher_approval_request") return "bg-teal-100 text-teal-700";
+  if (event.type === "plan_purchased") return "bg-violet-100 text-violet-700";
+  if (event.type === "plan_expiring") {
+    return isUrgentPlanExpiry(event)
+      ? "bg-rose-100 text-rose-700"
+      : "bg-fuchsia-100 text-fuchsia-700";
+  }
+  if (event.type === "inbox_request") return "bg-amber-100 text-amber-700";
+  if (event.type === "deletion_request") return "bg-rose-100 text-rose-700";
+  if (event.type === "backup_created") return "bg-emerald-100 text-emerald-700";
+  if (event.type === "course_deleted") return "bg-rose-100 text-rose-700";
   return "bg-emerald-100 text-emerald-700";
+}
+
+function getEventDotTone(event: CalendarEvent): string {
+  if (event.type === "due") return "bg-amber-500";
+  if (event.type === "start") return "bg-sky-500";
+  if (event.type === "course_created") return "bg-indigo-500";
+  if (event.type === "account_created") return "bg-cyan-500";
+  if (event.type === "teacher_approval_request") return "bg-teal-500";
+  if (event.type === "plan_purchased") return "bg-violet-500";
+  if (event.type === "plan_expiring") return isUrgentPlanExpiry(event) ? "bg-rose-500" : "bg-fuchsia-500";
+  if (event.type === "inbox_request") return "bg-amber-500";
+  if (event.type === "deletion_request") return "bg-rose-500";
+  if (event.type === "backup_created") return "bg-emerald-500";
+  if (event.type === "course_deleted") return "bg-rose-500";
+  return "bg-emerald-500";
+}
+
+function getAdminFilterTheme(filter: AdminTimelineFilter) {
+  if (filter === "courses") {
+    return {
+      badge: "border-indigo-200 bg-indigo-50 text-indigo-700",
+      leftGlow: "bg-indigo-300/25",
+      rightGlow: "bg-violet-300/20",
+      primaryIcon: "bg-indigo-100 text-indigo-700",
+      secondaryIcon: "bg-violet-100 text-violet-700",
+    };
+  }
+  if (filter === "accounts") {
+    return {
+      badge: "border-cyan-200 bg-cyan-50 text-cyan-700",
+      leftGlow: "bg-cyan-300/25",
+      rightGlow: "bg-sky-300/20",
+      primaryIcon: "bg-cyan-100 text-cyan-700",
+      secondaryIcon: "bg-sky-100 text-sky-700",
+    };
+  }
+  if (filter === "plans") {
+    return {
+      badge: "border-violet-200 bg-violet-50 text-violet-700",
+      leftGlow: "bg-violet-300/25",
+      rightGlow: "bg-amber-300/20",
+      primaryIcon: "bg-violet-100 text-violet-700",
+      secondaryIcon: "bg-amber-100 text-amber-700",
+    };
+  }
+  if (filter === "approvals") {
+    return {
+      badge: "border-teal-200 bg-teal-50 text-teal-700",
+      leftGlow: "bg-teal-300/25",
+      rightGlow: "bg-cyan-300/20",
+      primaryIcon: "bg-teal-100 text-teal-700",
+      secondaryIcon: "bg-cyan-100 text-cyan-700",
+    };
+  }
+  if (filter === "inbox") {
+    return {
+      badge: "border-amber-200 bg-amber-50 text-amber-700",
+      leftGlow: "bg-amber-300/25",
+      rightGlow: "bg-orange-300/20",
+      primaryIcon: "bg-amber-100 text-amber-700",
+      secondaryIcon: "bg-orange-100 text-orange-700",
+    };
+  }
+  if (filter === "backups") {
+    return {
+      badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      leftGlow: "bg-emerald-300/25",
+      rightGlow: "bg-teal-300/20",
+      primaryIcon: "bg-emerald-100 text-emerald-700",
+      secondaryIcon: "bg-teal-100 text-teal-700",
+    };
+  }
+  if (filter === "account_deletions" || filter === "course_deletions") {
+    return {
+      badge: "border-rose-200 bg-rose-50 text-rose-700",
+      leftGlow: "bg-rose-300/25",
+      rightGlow: "bg-amber-300/20",
+      primaryIcon: "bg-rose-100 text-rose-700",
+      secondaryIcon: "bg-amber-100 text-amber-700",
+    };
+  }
+  return {
+    badge: "border-sky-200 bg-sky-50 text-sky-700",
+    leftGlow: "bg-sky-300/25",
+    rightGlow: "bg-violet-300/20",
+    primaryIcon: "bg-sky-100 text-sky-700",
+    secondaryIcon: "bg-indigo-100 text-indigo-700",
+  };
+}
+
+function normalizeAdminRole(value: unknown): AdminAccountRow["role"] {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["docente", "teacher", "profesor", "instructor"].includes(normalized)) return "docente";
+  if (["estudiante", "student", "alumno", "learner"].includes(normalized)) return "estudiante";
+  if (["admin", "administrador", "administrator"].includes(normalized)) return "admin";
+  return "";
+}
+
+function mergeAdminAccountRow(
+  map: Map<string, AdminAccountRow>,
+  id: string,
+  raw: Record<string, unknown>,
+) {
+  const email = String(raw.email || "").trim().toLowerCase();
+  const key = email || id;
+  const existing = map.get(key) || {
+    id,
+    email,
+    name: "",
+    role: "",
+    createdAt: null,
+    teacherPlanLabel: "",
+    teacherPlanId: "",
+    teacherPlanAssignedAt: null,
+    teacherPlanExpiresAt: null,
+    teacherPlanStatus: "",
+  };
+
+  const createdAt = toDate(raw.createdAt);
+  const nextCreatedAt =
+    !existing.createdAt || (createdAt && createdAt.getTime() < existing.createdAt.getTime())
+      ? createdAt || existing.createdAt
+      : existing.createdAt;
+
+  map.set(key, {
+    id: existing.id || id,
+    email: existing.email || email,
+    name: String(raw.name || existing.name || "").trim() || "User",
+    role:
+      existing.role ||
+      normalizeAdminRole(raw.role) ||
+      normalizeAdminRole(raw.requestedRole) ||
+      normalizeAdminRole(raw.userRole),
+    createdAt: nextCreatedAt,
+    teacherPlanLabel:
+      String(raw.teacherPlanName || raw.teacherPlanLabel || existing.teacherPlanLabel || "").trim(),
+    teacherPlanId: String(raw.teacherPlanId || existing.teacherPlanId || "").trim(),
+    teacherPlanAssignedAt: toDate(raw.teacherPlanAssignedAt) || existing.teacherPlanAssignedAt,
+    teacherPlanExpiresAt: toDate(raw.teacherPlanExpiresAt) || existing.teacherPlanExpiresAt,
+    teacherPlanStatus:
+      String(raw.teacherPlanStatus || existing.teacherPlanStatus || "").trim().toLowerCase(),
+  });
 }
 
 export default function CalendarPage() {
@@ -166,15 +418,18 @@ export default function CalendarPage() {
   const [selectedDateKey, setSelectedDateKey] = useState(() => dayKey(new Date()));
   const [showDayModal, setShowDayModal] = useState(false);
   const [dayModalClassOnly, setDayModalClassOnly] = useState(false);
+  const [adminTimelineFilter, setAdminTimelineFilter] = useState<AdminTimelineFilter>("all");
+  const [adminActivitySort, setAdminActivitySort] = useState<AdminActivitySort>("priority");
+  const [adminOperationalEvents, setAdminOperationalEvents] = useState<CalendarEvent[]>([]);
+  const [adminOperationalWarning, setAdminOperationalWarning] = useState("");
+  const isAdminView = user?.role === "admin";
 
   const availableCourses = useMemo(() => {
     if (!user) return [];
-    if (user.role === "docente") {
-      return courses.filter((course) => course.teacherId === user.id);
-    }
-    return courses.filter((course) =>
-      (course.enrolledStudents || []).some((entry) => entry === user.id),
-    );
+    return getAccessibleCoursesForUser(courses, user, {
+      includeAllForAdmin: user.role === "admin",
+      includeEnrolledForTeacher: false,
+    });
   }, [courses, user]);
 
   const courseById = useMemo(() => {
@@ -185,7 +440,272 @@ export default function CalendarPage() {
     return map;
   }, [availableCourses]);
 
+  useEffect(() => {
+    if (user?.role !== "admin") {
+      setAdminOperationalEvents([]);
+      setAdminOperationalWarning("");
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadAdminOperationalEvents = async () => {
+      const [usersResult, studentsResult, auditResult, approvalsResult, deletionRequestsResult, contactResult, pricingResult, backupsResult] = await Promise.allSettled([
+        getDocs(collection(firebaseDB, "usuarios")),
+        getDocs(collection(firebaseDB, "estudiantes")),
+        getAdminAuditLogEntries(500),
+        getTeacherApprovalRequests(),
+        getPendingAccountDeletionRequests(),
+        getContactMessages(),
+        getPricingContactRequests(),
+        getDocs(collection(firebaseDB, "courseBackups")),
+      ]);
+
+      if (!isMounted) return;
+
+      const warnings: string[] = [];
+      if (usersResult.status === "rejected") warnings.push("accounts");
+      if (studentsResult.status === "rejected") warnings.push("students");
+      if (auditResult.status === "rejected") warnings.push("course deletions");
+      if (approvalsResult.status === "rejected") warnings.push("teacher approvals");
+      if (deletionRequestsResult.status === "rejected") warnings.push("deletion requests");
+      if (contactResult.status === "rejected") warnings.push("contact inbox");
+      if (pricingResult.status === "rejected") warnings.push("pricing inbox");
+      if (backupsResult.status === "rejected") warnings.push("backups");
+
+      const accountMap = new Map<string, AdminAccountRow>();
+
+      if (usersResult.status === "fulfilled") {
+        usersResult.value.docs.forEach((docSnap) => {
+          mergeAdminAccountRow(accountMap, docSnap.id, (docSnap.data() || {}) as Record<string, unknown>);
+        });
+      }
+      if (studentsResult.status === "fulfilled") {
+        studentsResult.value.docs.forEach((docSnap) => {
+          mergeAdminAccountRow(accountMap, docSnap.id, (docSnap.data() || {}) as Record<string, unknown>);
+        });
+      }
+
+      const events: CalendarEvent[] = availableCourses
+        .filter((course) => course.createdAt instanceof Date && !Number.isNaN(course.createdAt.getTime()))
+        .map((course) => ({
+          id: `course-created:${course.id}`,
+          courseId: course.id,
+          courseName: course.name || "Course",
+          courseCode: course.code || "N/A",
+          title: `${course.code || "N/A"} created`,
+          type: "course_created" as const,
+          date: course.createdAt,
+          detail: `${course.name || "Course"} • created by ${course.teacherName || "Unknown teacher"}`,
+          actorName: course.teacherName || "Unknown teacher",
+          navigationPath: `/courses/view/${course.code}`,
+        }));
+
+      accountMap.forEach((entry) => {
+        if (!entry.createdAt) return;
+        events.push({
+          id: `account-created:${entry.email || entry.id}`,
+          courseId: "__admin__",
+          courseName: "Admin operations",
+          courseCode: "OPS",
+          title: `${entry.name} account created`,
+          type: "account_created",
+          date: entry.createdAt,
+          detail: `${
+            entry.role === "docente" ? "Teacher" : entry.role === "estudiante" ? "Student" : "Admin"
+          } • ${entry.email || "No email"}`,
+          actorName: entry.name,
+          navigationPath: "/admin/users",
+        });
+
+        if (
+          entry.role === "docente" &&
+          entry.teacherPlanAssignedAt &&
+          entry.teacherPlanStatus !== "pending_payment"
+        ) {
+          const resolvedPlanId = resolveTeacherPlanId(entry.teacherPlanId);
+          const planExpiresAt =
+            entry.teacherPlanExpiresAt ||
+            (resolvedPlanId ? getTeacherPlanExpiryDate(resolvedPlanId, entry.teacherPlanAssignedAt) : null);
+          events.push({
+            id: `plan-purchased:${entry.email || entry.id}`,
+            courseId: "__admin__",
+            courseName: "Billing",
+            courseCode: "BILL",
+            title: `${entry.name} plan activated`,
+            type: "plan_purchased",
+            date: entry.teacherPlanAssignedAt,
+            detail: `${entry.teacherPlanLabel || "Teacher plan"} • ${entry.email || "No email"}`,
+            actorName: entry.name,
+            navigationPath: "/admin/billing",
+          });
+          if (planExpiresAt) {
+            events.push({
+              id: `plan-expiring:${entry.email || entry.id}`,
+              courseId: "__admin__",
+              courseName: "Billing",
+              courseCode: "BILL",
+              title: `${entry.name} plan expires`,
+              type: "plan_expiring",
+              date: planExpiresAt,
+              detail: `${entry.teacherPlanLabel || "Teacher plan"} • ${entry.email || "No email"}`,
+              actorName: entry.name,
+              navigationPath: "/admin/billing",
+            });
+          }
+        }
+      });
+
+      if (approvalsResult.status === "fulfilled") {
+        approvalsResult.value.forEach((entry) => {
+          if (!entry.requestedAt) return;
+          const planLabel = entry.interestedPlan || entry.teacherPlanId || "Plan not selected";
+          events.push({
+            id: `teacher-approval:${entry.userId}`,
+            courseId: "__admin__",
+            courseName: "Teacher approvals",
+            courseCode: "APPR",
+            title: `${entry.name || entry.email} requested teacher access`,
+            type: "teacher_approval_request",
+            date: entry.requestedAt,
+            detail: `${entry.status} • ${planLabel}${entry.institutionName ? ` • ${entry.institutionName}` : ""}`,
+            actorName: entry.name || entry.email,
+            navigationPath: "/admin/teacher-approvals",
+          });
+        });
+      }
+
+      if (deletionRequestsResult.status === "fulfilled") {
+        deletionRequestsResult.value.forEach((entry) => {
+          if (!entry.requestedAt) return;
+          events.push({
+            id: `deletion-request:${entry.userId}`,
+            courseId: "__admin__",
+            courseName: "Deletion requests",
+            courseCode: "DEL",
+            title: `${entry.name || entry.email} requested account deletion`,
+            type: "deletion_request",
+            date: entry.requestedAt,
+            detail: `${entry.role === "docente" ? "Teacher" : "Student"}${
+              entry.scheduledDeletionAt
+                ? ` • scheduled ${entry.scheduledDeletionAt.toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}`
+                : ""
+            }`,
+            actorName: entry.name || entry.email,
+            navigationPath: "/admin/deletions",
+          });
+        });
+      }
+
+      if (contactResult.status === "fulfilled") {
+        contactResult.value.forEach((entry) => {
+          if (!entry.createdAt || entry.status !== "new") return;
+          events.push({
+            id: `contact-message:${entry.id}`,
+            courseId: "__admin__",
+            courseName: "Admin inbox",
+            courseCode: "INBOX",
+            title: entry.subject || `${entry.name || entry.email} sent a contact message`,
+            type: "inbox_request",
+            date: entry.createdAt,
+            detail: `Contact form • ${entry.status} • ${entry.email}`,
+            actorName: entry.name || entry.email,
+            navigationPath: "/admin/inbox",
+          });
+        });
+      }
+
+      if (pricingResult.status === "fulfilled") {
+        pricingResult.value.forEach((entry) => {
+          if (!entry.createdAt || entry.status !== "new") return;
+          const demandLabel =
+            entry.desiredCourses > 0 || entry.desiredStudents > 0
+              ? ` • ${entry.desiredCourses} courses / ${entry.desiredStudents} students`
+              : "";
+          events.push({
+            id: `pricing-request:${entry.id}`,
+            courseId: "__admin__",
+            courseName: "Admin inbox",
+            courseCode: "INBOX",
+            title: `${entry.name || entry.email} requested pricing`,
+            type: "inbox_request",
+            date: entry.createdAt,
+            detail: `Pricing intake • ${entry.status}${demandLabel}`,
+            actorName: entry.name || entry.email,
+            navigationPath: "/admin/inbox",
+          });
+        });
+      }
+
+      if (backupsResult.status === "fulfilled") {
+        backupsResult.value.docs.forEach((docSnap) => {
+          const data = (docSnap.data() || {}) as Record<string, unknown>;
+          const createdAt = toDate(data.createdAt);
+          if (!createdAt) return;
+          events.push({
+            id: `backup-created:${docSnap.id}`,
+            courseId: "__admin__",
+            courseName: "Backups",
+            courseCode: "BKP",
+            title: `${String(data.courseCode || "N/A")} backup snapshot created`,
+            type: "backup_created",
+            date: createdAt,
+            detail: `${String(data.courseName || "Course")} • ${String(data.teacherName || "Unknown teacher")}`,
+            actorName: String(data.teacherName || "").trim(),
+            navigationPath: "/admin/backups",
+          });
+        });
+      }
+
+      if (auditResult.status === "fulfilled") {
+        auditResult.value.forEach((entry) => {
+          if (
+            entry.action.trim().toLowerCase() !== "deleted course" &&
+            entry.targetType.trim().toLowerCase() !== "course"
+          ) {
+            return;
+          }
+          if (!entry.createdAt) return;
+          events.push({
+            id: `course-deleted:${entry.id}`,
+            courseId: "__admin__",
+            courseName: "Audit log",
+            courseCode: "AUDIT",
+            title: entry.targetLabel || "Course deleted",
+            type: "course_deleted",
+            date: entry.createdAt,
+            detail: `${entry.actorName || "Unknown user"} • ${entry.detail || "Course removal logged"}`,
+            actorName: entry.actorName,
+            navigationPath: "/admin/audit-log",
+          });
+        });
+      }
+
+      events.sort((a, b) => a.date.getTime() - b.date.getTime());
+      setAdminOperationalEvents(events);
+      setAdminOperationalWarning(
+        warnings.length > 0
+          ? `Some admin activity sources could not be loaded: ${warnings.join(", ")}.`
+          : "",
+      );
+    };
+
+    void loadAdminOperationalEvents();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [availableCourses, isAdminView, user]);
+
   const events = useMemo(() => {
+    if (isAdminView) {
+      return [...adminOperationalEvents].sort((a, b) => a.date.getTime() - b.date.getTime());
+    }
+
     const all: CalendarEvent[] = [];
 
     assessments.forEach((assessment) => {
@@ -264,21 +784,54 @@ export default function CalendarPage() {
 
     all.sort((a, b) => a.date.getTime() - b.date.getTime());
     return all;
-  }, [assessments, availableCourses, courseById, monthCursor]);
+  }, [adminOperationalEvents, assessments, availableCourses, courseById, isAdminView, monthCursor]);
 
   const courseScopedEvents = useMemo(() => {
+    if (isAdminView) return events;
     if (courseFilter === "all") return events;
+    if (courseFilter === "__admin__") {
+      return events.filter((event) => event.courseId === "__admin__");
+    }
     return events.filter((event) => event.courseId === courseFilter);
-  }, [courseFilter, events]);
+  }, [courseFilter, events, isAdminView]);
+
+  const adminScopedEvents = useMemo(() => {
+    if (!isAdminView) return courseScopedEvents;
+    if (adminTimelineFilter === "all") return courseScopedEvents;
+    if (adminTimelineFilter === "courses") {
+      return courseScopedEvents.filter((event) => event.type === "course_created");
+    }
+    if (adminTimelineFilter === "accounts") {
+      return courseScopedEvents.filter((event) => event.type === "account_created");
+    }
+    if (adminTimelineFilter === "approvals") {
+      return courseScopedEvents.filter((event) => event.type === "teacher_approval_request");
+    }
+    if (adminTimelineFilter === "plans") {
+      return courseScopedEvents.filter(
+        (event) => event.type === "plan_purchased" || event.type === "plan_expiring",
+      );
+    }
+    if (adminTimelineFilter === "inbox") {
+      return courseScopedEvents.filter((event) => event.type === "inbox_request");
+    }
+    if (adminTimelineFilter === "backups") {
+      return courseScopedEvents.filter((event) => event.type === "backup_created");
+    }
+    if (adminTimelineFilter === "account_deletions") {
+      return courseScopedEvents.filter((event) => event.type === "deletion_request");
+    }
+    return courseScopedEvents.filter((event) => event.type === "course_deleted");
+  }, [adminTimelineFilter, courseScopedEvents, isAdminView]);
 
   const filteredEvents = useMemo(() => {
     const nowTs = Date.now();
-    return courseScopedEvents.filter((event) => {
+    return adminScopedEvents.filter((event) => {
       if (mode === "upcoming") return event.date.getTime() >= nowTs;
       if (mode === "past") return event.date.getTime() < nowTs;
       return true;
     });
-  }, [courseScopedEvents, mode]);
+  }, [adminScopedEvents, mode]);
 
   const monthDays = useMemo(() => getMonthGrid(monthCursor), [monthCursor]);
 
@@ -297,13 +850,13 @@ export default function CalendarPage() {
 
   const scopedEventsByDay = useMemo(() => {
     const map: Record<string, CalendarEvent[]> = {};
-    courseScopedEvents.forEach((event) => {
+    adminScopedEvents.forEach((event) => {
       const key = dayKey(event.date);
       if (!map[key]) map[key] = [];
       map[key].push(event);
     });
     return map;
-  }, [courseScopedEvents]);
+  }, [adminScopedEvents]);
 
   const selectedDayEvents = useMemo(() => eventsByDay[selectedDateKey] || [], [eventsByDay, selectedDateKey]);
   const selectedDayModalEvents = useMemo(
@@ -316,22 +869,26 @@ export default function CalendarPage() {
 
   const nowTs = Date.now();
   const upcomingCount = useMemo(
-    () => courseScopedEvents.filter((event) => event.date.getTime() >= nowTs).length,
-    [courseScopedEvents, nowTs],
+    () => adminScopedEvents.filter((event) => event.date.getTime() >= nowTs).length,
+    [adminScopedEvents, nowTs],
   );
-  const pastCount = Math.max(0, courseScopedEvents.length - upcomingCount);
+  const pastCount = Math.max(0, adminScopedEvents.length - upcomingCount);
 
   const modeButtonOptions = [
     { key: "upcoming" as const, label: "Upcoming", count: upcomingCount, icon: CalendarClock },
-    { key: "all" as const, label: "All", count: courseScopedEvents.length, icon: CalendarDays },
+    { key: "all" as const, label: "All", count: adminScopedEvents.length, icon: CalendarDays },
     { key: "past" as const, label: "Past", count: pastCount, icon: Clock3 },
   ];
 
   const monthLabel = monthCursor.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 
   const selectedCourseCode =
-    courseFilter === "all"
+    isAdminView
+      ? "OPS"
+      : courseFilter === "all"
       ? "ALL"
+      : courseFilter === "__admin__"
+        ? "OPS"
       : availableCourses.find((course) => course.id === courseFilter)?.code || "N/A";
 
   const selectedDate = useMemo(() => parseDayKey(selectedDateKey), [selectedDateKey]);
@@ -344,10 +901,19 @@ export default function CalendarPage() {
   const todayKey = dayKey(new Date());
   const todayEventsCount = scopedEventsByDay[todayKey]?.length ?? 0;
 
-  const classSessionCount = courseScopedEvents.filter((event) => event.type === "class").length;
+  const classSessionCount = adminScopedEvents.filter((event) => event.type === "class").length;
+  const accountCreatedCount = adminScopedEvents.filter((event) => event.type === "account_created").length;
+  const approvalRequestCount = adminScopedEvents.filter((event) => event.type === "teacher_approval_request").length;
+  const planActivatedCount = adminScopedEvents.filter((event) => event.type === "plan_purchased").length;
+  const planExpiryCount = adminScopedEvents.filter((event) => event.type === "plan_expiring").length;
+  const inboxRequestCount = adminScopedEvents.filter((event) => event.type === "inbox_request").length;
+  const deletionRequestCount = adminScopedEvents.filter((event) => event.type === "deletion_request").length;
+  const backupCreatedCount = adminScopedEvents.filter((event) => event.type === "backup_created").length;
+  const courseCreatedCount = adminScopedEvents.filter((event) => event.type === "course_created").length;
+  const courseDeletedCount = adminScopedEvents.filter((event) => event.type === "course_deleted").length;
   const selectedDayClassCount = selectedDayEvents.filter((event) => event.type === "class").length;
   const visibleCourseCount = useMemo(
-    () => new Set(filteredEvents.map((event) => event.courseId)).size,
+    () => new Set(filteredEvents.map((event) => event.courseId).filter((id) => id !== "__admin__")).size,
     [filteredEvents],
   );
   const busyDaysInMonth = useMemo(
@@ -366,18 +932,89 @@ export default function CalendarPage() {
           acc[event.type] += 1;
           return acc;
         },
-        { due: 0, start: 0, class: 0 } as Record<CalendarEventType, number>,
+        {
+          due: 0,
+          start: 0,
+          class: 0,
+          course_created: 0,
+          account_created: 0,
+          teacher_approval_request: 0,
+          plan_purchased: 0,
+          plan_expiring: 0,
+          inbox_request: 0,
+          deletion_request: 0,
+          backup_created: 0,
+          course_deleted: 0,
+        } as Record<CalendarEventType, number>,
       ),
     [filteredEvents],
   );
-
   const upcomingEvents = useMemo(
     () =>
-      courseScopedEvents
+      adminScopedEvents
         .filter((event) => event.date.getTime() >= Date.now())
-        .sort((a, b) => a.date.getTime() - b.date.getTime())
+        .sort((a, b) => {
+          if (isAdminView && adminActivitySort === "priority") {
+            const priorityDiff = getAdminEventPriority(a) - getAdminEventPriority(b);
+            if (priorityDiff !== 0) return priorityDiff;
+          }
+          return a.date.getTime() - b.date.getTime();
+        })
         .slice(0, 6),
+    [adminActivitySort, adminScopedEvents, isAdminView],
+  );
+
+  const adminFilterOptions = useMemo(
+    () => [
+      { key: "all" as const, label: "All", count: courseScopedEvents.length },
+      {
+        key: "courses" as const,
+        label: "Courses",
+        count: courseScopedEvents.filter((event) => event.type === "course_created").length,
+      },
+      {
+        key: "accounts" as const,
+        label: "Accounts",
+        count: courseScopedEvents.filter((event) => event.type === "account_created").length,
+      },
+      {
+        key: "approvals" as const,
+        label: "Approvals",
+        count: courseScopedEvents.filter((event) => event.type === "teacher_approval_request").length,
+      },
+      {
+        key: "plans" as const,
+        label: "Plans",
+        count: courseScopedEvents.filter(
+          (event) => event.type === "plan_purchased" || event.type === "plan_expiring",
+        ).length,
+      },
+      {
+        key: "inbox" as const,
+        label: "Inbox",
+        count: courseScopedEvents.filter((event) => event.type === "inbox_request").length,
+      },
+      {
+        key: "backups" as const,
+        label: "Backups",
+        count: courseScopedEvents.filter((event) => event.type === "backup_created").length,
+      },
+      {
+        key: "account_deletions" as const,
+        label: "Account deletions",
+        count: courseScopedEvents.filter((event) => event.type === "deletion_request").length,
+      },
+      {
+        key: "course_deletions" as const,
+        label: "Course deletions",
+        count: courseScopedEvents.filter((event) => event.type === "course_deleted").length,
+      },
+    ],
     [courseScopedEvents],
+  );
+  const adminFilterTheme = useMemo(
+    () => getAdminFilterTheme(adminTimelineFilter),
+    [adminTimelineFilter],
   );
 
   const dayQueryParam = searchParams.get("day");
@@ -406,7 +1043,8 @@ export default function CalendarPage() {
     setSearchParams(nextParams, { replace: true });
   }, [dayQueryParam, focusQueryParam, openQueryParam, querySnapshot, setSearchParams]);
 
-  const getEventTarget = (event: CalendarEvent) => {
+  const getEventTarget = (event: CalendarEvent): string | null => {
+    if (event.navigationPath !== undefined) return event.navigationPath;
     if (event.type === "class" || !event.assessmentId) {
       return `/courses/view/${event.courseCode}`;
     }
@@ -423,25 +1061,27 @@ export default function CalendarPage() {
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div className="flex flex-col gap-4">
               <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
-                <div className="pointer-events-none absolute -left-[70px] -top-[90px] h-[180px] w-[180px] rounded-full bg-sky-300/25" />
-                <div className="pointer-events-none absolute -right-[90px] -bottom-[90px] h-[200px] w-[200px] rounded-full bg-violet-300/20" />
+                <div className={`pointer-events-none absolute -left-[70px] -top-[90px] h-[180px] w-[180px] rounded-full ${adminFilterTheme.leftGlow}`} />
+                <div className={`pointer-events-none absolute -right-[90px] -bottom-[90px] h-[200px] w-[200px] rounded-full ${adminFilterTheme.rightGlow}`} />
 
                 <div className="relative z-10">
-                  <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-                    <Sparkles className="h-3.5 w-3.5" />
+                  <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${adminFilterTheme.badge}`}>
+                    <CalendarDays className="h-3.5 w-3.5" />
                     Calendar Workspace
                   </div>
                   <h2 className="mt-3 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
-                    Academic Calendar Center
+                    {isAdminView ? "Operational Activity Calendar" : "Academic Calendar Center"}
                   </h2>
                   <p className="mt-1.5 text-sm text-slate-600">
-                    Track classes, starts and due dates in one timeline with live filters.
+                    {isAdminView
+                      ? "Track platform events that matter to admins: course creation, registrations, teacher approvals, plan lifecycle, inbox demand, and deletion workflows."
+                      : "Track classes, starts and due dates in one timeline with live filters."}
                   </p>
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
                   <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
-                    <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                    <div className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${adminFilterTheme.primaryIcon}`}>
                       <CalendarDays className="h-4 w-4" />
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Scoped events</p>
@@ -449,7 +1089,7 @@ export default function CalendarPage() {
                   </div>
 
                   <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
-                    <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
+                    <div className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${adminFilterTheme.secondaryIcon}`}>
                       <CalendarClock className="h-4 w-4" />
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Upcoming</p>
@@ -460,16 +1100,24 @@ export default function CalendarPage() {
                     <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
                       <GraduationCap className="h-4 w-4" />
                     </div>
-                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Class sessions</p>
-                    <p className="text-lg font-extrabold leading-5 text-slate-900">{classSessionCount}</p>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">
+                      {isAdminView ? "Accounts + approvals" : "Class sessions"}
+                    </p>
+                    <p className="text-lg font-extrabold leading-5 text-slate-900">
+                      {isAdminView ? accountCreatedCount + approvalRequestCount : classSessionCount}
+                    </p>
                   </div>
 
                   <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
                     <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
                       <CheckCircle2 className="h-4 w-4" />
                     </div>
-                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Today</p>
-                    <p className="text-lg font-extrabold leading-5 text-slate-900">{todayEventsCount}</p>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">
+                      {isAdminView ? "Inbox + deletions" : "Today"}
+                    </p>
+                    <p className="text-lg font-extrabold leading-5 text-slate-900">
+                      {isAdminView ? inboxRequestCount + deletionRequestCount + courseDeletedCount : todayEventsCount}
+                    </p>
                   </div>
                 </div>
               </section>
@@ -479,25 +1127,46 @@ export default function CalendarPage() {
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Filters</p>
-                      <p className="text-xs text-slate-500">Choose timeline mode and course scope.</p>
+                      <p className="text-xs text-slate-500">
+                        {isAdminView ? "Choose timeline mode and operational category." : "Choose timeline mode and course scope."}
+                      </p>
                     </div>
 
-                    <div className="relative inline-flex w-full items-center lg:w-auto">
+                    {!isAdminView ? (
+                      <div className="relative inline-flex w-full items-center lg:w-auto">
+                        <Filter className="pointer-events-none absolute left-3 h-4 w-4 text-slate-400" />
+                        <select
+                          value={courseFilter}
+                          onChange={(event) => setCourseFilter(event.target.value)}
+                          className="h-10 rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                        >
+                          <option value="all">All courses</option>
+                          {availableCourses.map((course) => (
+                            <option key={course.id} value={course.id}>
+                              {course.code} - {course.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {user?.role === "admin" ? (
+                    <div className="relative inline-flex w-full items-center">
                       <Filter className="pointer-events-none absolute left-3 h-4 w-4 text-slate-400" />
                       <select
-                        value={courseFilter}
-                        onChange={(event) => setCourseFilter(event.target.value)}
-                        className="h-10 rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                        value={adminTimelineFilter}
+                        onChange={(event) => setAdminTimelineFilter(event.target.value as AdminTimelineFilter)}
+                        className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                       >
-                        <option value="all">All courses</option>
-                        {availableCourses.map((course) => (
-                          <option key={course.id} value={course.id}>
-                            {course.code} - {course.name}
+                        {adminFilterOptions.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.label} ({option.count})
                           </option>
                         ))}
                       </select>
                     </div>
-                  </div>
+                  ) : null}
 
                   <div className="grid grid-cols-3 gap-2">
                     {modeButtonOptions.map((option) => {
@@ -533,7 +1202,11 @@ export default function CalendarPage() {
                       <p className="text-lg font-bold text-slate-900">{monthLabel}</p>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      {selectedCourseCode === "ALL" ? "All course timelines" : `Course scope: ${selectedCourseCode}`}
+                      {isAdminView
+                        ? "Platform events timeline"
+                        : selectedCourseCode === "ALL"
+                          ? "All course timelines"
+                          : `Course scope: ${selectedCourseCode}`}
                     </p>
                     <button
                       type="button"
@@ -565,26 +1238,77 @@ export default function CalendarPage() {
                 </div>
 
                 <div className="mb-3 flex flex-wrap gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
-                    <span className="h-2 w-2 rounded-full bg-amber-500" />
-                    Due {visibleTypeCounts.due}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
-                    <span className="h-2 w-2 rounded-full bg-sky-500" />
-                    Start {visibleTypeCounts.start}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                    Class {visibleTypeCounts.class}
-                  </span>
+                  {isAdminView ? (
+                    <>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] font-semibold text-teal-700">
+                        <span className="h-2 w-2 rounded-full bg-teal-500" />
+                        Approvals {visibleTypeCounts.teacher_approval_request}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                        <span className="h-2 w-2 rounded-full bg-amber-500" />
+                        Inbox {visibleTypeCounts.inbox_request}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2.5 py-1 text-[11px] font-semibold text-fuchsia-700">
+                        <span className="h-2 w-2 rounded-full bg-fuchsia-500" />
+                        Expiring {visibleTypeCounts.plan_expiring}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700">
+                        <span className="h-2 w-2 rounded-full bg-rose-500" />
+                        Deletion requests {visibleTypeCounts.deletion_request}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
+                        <span className="h-2 w-2 rounded-full bg-violet-500" />
+                        Plans {visibleTypeCounts.plan_purchased + visibleTypeCounts.plan_expiring}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700">
+                        <span className="h-2 w-2 rounded-full bg-cyan-500" />
+                        Accounts {visibleTypeCounts.account_created}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        Backups {visibleTypeCounts.backup_created}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+                        <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                        Course created {visibleTypeCounts.course_created}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700">
+                        <span className="h-2 w-2 rounded-full bg-rose-500" />
+                        Course deleted {visibleTypeCounts.course_deleted}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                        <span className="h-2 w-2 rounded-full bg-amber-500" />
+                        Due {visibleTypeCounts.due}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+                        <span className="h-2 w-2 rounded-full bg-sky-500" />
+                        Start {visibleTypeCounts.start}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        Class {visibleTypeCounts.class}
+                      </span>
+                    </>
+                  )}
                 </div>
+
+                {adminOperationalWarning ? (
+                  <div className="mb-3 rounded-xl border border-dashed border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+                    {adminOperationalWarning}
+                  </div>
+                ) : null}
 
                 {filteredEvents.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
                     <AlertCircle className="mx-auto h-9 w-9 text-slate-400" />
                     <p className="mt-2 text-sm font-semibold text-slate-700">No calendar events found</p>
                     <p className="mt-1 text-xs text-slate-500">
-                      Adjust filters or add dated assessments and class schedules.
+                      {isAdminView
+                        ? "No admin operational events match the current filter."
+                        : "Adjust filters or add dated assessments and class schedules."}
                     </p>
                   </div>
                 ) : (
@@ -639,14 +1363,12 @@ export default function CalendarPage() {
 
                             <div className="mt-1 hidden space-y-1 lg:block">
                               {dayEvents.slice(0, 2).map((event) => {
-                                const Icon = getEventIcon(event.type);
+                                const Icon = getEventIcon(event);
                                 const isPastEvent = event.date.getTime() < Date.now();
                                 return (
                                   <div
                                     key={event.id}
-                                    className={`inline-flex w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${getTypeTone(
-                                      event.type,
-                                    )} ${isPastEvent ? "opacity-60" : ""}`}
+                                    className={`inline-flex w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${getTypeTone(event)} ${isPastEvent ? "opacity-60" : ""}`}
                                     title={`${event.title} (${event.courseCode})`}
                                   >
                                     <Icon className="h-3 w-3 shrink-0" />
@@ -665,13 +1387,9 @@ export default function CalendarPage() {
                               {dayEvents.slice(0, 3).map((event) => (
                                 <span
                                   key={event.id}
-                                  className={`h-1.5 w-1.5 rounded-full ${
-                                    event.type === "due"
-                                      ? "bg-amber-500"
-                                      : event.type === "start"
-                                        ? "bg-sky-500"
-                                        : "bg-emerald-500"
-                                  } ${event.date.getTime() < Date.now() ? "opacity-50" : ""}`}
+                                  className={`h-1.5 w-1.5 rounded-full ${getEventDotTone(event)} ${
+                                    event.date.getTime() < Date.now() ? "opacity-50" : ""
+                                  }`}
                                 />
                               ))}
                               {dayEvents.length > 3 && (
@@ -702,8 +1420,12 @@ export default function CalendarPage() {
                     <p className="mt-1 text-lg font-extrabold leading-none text-slate-900">{pastCount}</p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Courses in view</p>
-                    <p className="mt-1 text-lg font-extrabold leading-none text-slate-900">{visibleCourseCount}</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      {isAdminView ? "Course records" : "Courses in view"}
+                    </p>
+                    <p className="mt-1 text-lg font-extrabold leading-none text-slate-900">
+                      {isAdminView ? courseCreatedCount : visibleCourseCount}
+                    </p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Busy month days</p>
@@ -727,27 +1449,58 @@ export default function CalendarPage() {
                     <CalendarDays className="h-3.5 w-3.5" />
                     {selectedDayLabel}
                   </button>
-                  <button
-                    type="button"
-                    disabled={selectedDayClassCount === 0}
-                    onClick={() => {
-                      setShowDayModal(true);
-                      setDayModalClassOnly(true);
-                    }}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <GraduationCap className="h-3.5 w-3.5" />
-                    Class sessions ({selectedDayClassCount})
-                  </button>
+                  {!isAdminView ? (
+                    <button
+                      type="button"
+                      disabled={selectedDayClassCount === 0}
+                      onClick={() => {
+                        setShowDayModal(true);
+                        setDayModalClassOnly(true);
+                      }}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <GraduationCap className="h-3.5 w-3.5" />
+                      Class sessions ({selectedDayClassCount})
+                    </button>
+                  ) : null}
                 </div>
               </section>
 
               <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <h2 className="text-base font-bold text-slate-900">Next Dates</h2>
-                  <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
-                    {upcomingEvents.length}
-                  </span>
+                <div className="mb-3 space-y-2">
+                  <h2 className="text-base font-bold text-slate-900">{isAdminView ? "Next Activity" : "Next Dates"}</h2>
+
+                  <div className="flex items-center justify-between gap-2">
+                    {isAdminView ? (
+                      <div className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-50 p-1">
+                        <button
+                          type="button"
+                          onClick={() => setAdminActivitySort("priority")}
+                          className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+                            adminActivitySort === "priority"
+                              ? "bg-white text-sky-700 shadow-sm"
+                              : "text-slate-600 hover:text-slate-800"
+                          }`}
+                        >
+                          Priority
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAdminActivitySort("chronological")}
+                          className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+                            adminActivitySort === "chronological"
+                              ? "bg-white text-sky-700 shadow-sm"
+                              : "text-slate-600 hover:text-slate-800"
+                          }`}
+                        >
+                          Chronological
+                        </button>
+                      </div>
+                    ) : <div />}
+                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                      {upcomingEvents.length}
+                    </span>
+                  </div>
                 </div>
                 {upcomingEvents.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
@@ -756,15 +1509,20 @@ export default function CalendarPage() {
                 ) : (
                   <div className="space-y-2">
                     {upcomingEvents.map((event) => {
-                      const Icon = getEventIcon(event.type);
+                      const Icon = getEventIcon(event);
+                      const target = getEventTarget(event);
                       return (
                         <button
                           key={event.id}
                           type="button"
-                          onClick={() => navigate(getEventTarget(event))}
-                          className="flex w-full items-center gap-2 rounded-xl border border-slate-200 bg-white p-2.5 text-left transition hover:border-sky-200 hover:bg-sky-50/40"
+                          onClick={() => {
+                            if (target) navigate(target);
+                          }}
+                          className={`flex w-full items-center gap-2 rounded-xl border border-slate-200 bg-white p-2.5 text-left transition ${
+                            target ? "hover:border-sky-200 hover:bg-sky-50/40" : ""
+                          }`}
                         >
-                          <div className={`inline-flex h-8 w-8 items-center justify-center rounded-lg ${getTypeIconTone(event.type)}`}>
+                          <div className={`inline-flex h-8 w-8 items-center justify-center rounded-lg ${getTypeIconTone(event)}`}>
                             <Icon className="h-4 w-4" />
                           </div>
                           <div className="min-w-0 flex-1">
@@ -772,11 +1530,14 @@ export default function CalendarPage() {
                             <p className="mt-0.5 truncate text-xs text-slate-500">
                               {event.courseCode} • {event.courseName}
                             </p>
+                            {event.detail ? (
+                              <p className="mt-0.5 truncate text-[11px] text-slate-500">{event.detail}</p>
+                            ) : null}
                             <div className="mt-1 flex flex-wrap items-center gap-1.5">
                               <span
-                                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getTypeTone(event.type)}`}
+                                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getTypeTone(event)}`}
                               >
-                                {getEventTypeLabel(event.type)}
+                                {getEventTypeLabel(event)}
                               </span>
                               <span className="inline-flex items-center gap-1 text-[11px] text-slate-600">
                                 {formatEventTime(event)}
@@ -857,21 +1618,24 @@ export default function CalendarPage() {
                 </div>
               ) : (
                 selectedDayModalEvents.map((event) => {
-                  const Icon = getEventIcon(event.type);
+                  const Icon = getEventIcon(event);
                   const isPastEvent = event.date.getTime() < Date.now();
+                  const target = getEventTarget(event);
                   return (
                     <button
                       key={event.id}
                       type="button"
                       onClick={() => {
                         setShowDayModal(false);
-                        navigate(getEventTarget(event));
+                        if (target) navigate(target);
                       }}
-                      className={`flex w-full items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-sky-200 hover:bg-sky-50/40 ${
+                      className={`flex w-full items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition ${
+                        target ? "hover:border-sky-200 hover:bg-sky-50/40" : ""
+                      } ${
                         isPastEvent ? "opacity-70" : ""
                       }`}
                     >
-                      <div className={`inline-flex h-8 w-8 items-center justify-center rounded-lg ${getTypeIconTone(event.type)}`}>
+                      <div className={`inline-flex h-8 w-8 items-center justify-center rounded-lg ${getTypeIconTone(event)}`}>
                         <Icon className="h-4 w-4" />
                       </div>
                       <div className="min-w-0 flex-1">
@@ -882,9 +1646,9 @@ export default function CalendarPage() {
                             {event.courseCode}
                           </span>
                           <span
-                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getTypeTone(event.type)}`}
+                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getTypeTone(event)}`}
                           >
-                            {getEventTypeLabel(event.type)}
+                            {getEventTypeLabel(event)}
                           </span>
                           <span className="inline-flex items-center gap-1 text-[11px] text-slate-600">{formatEventTime(event)}</span>
                           {event.location ? (
@@ -894,6 +1658,9 @@ export default function CalendarPage() {
                             </span>
                           ) : null}
                         </div>
+                        {event.detail ? (
+                          <p className="mt-1 text-xs text-slate-500">{event.detail}</p>
+                        ) : null}
                       </div>
                     </button>
                   );

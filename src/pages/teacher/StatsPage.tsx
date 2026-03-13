@@ -37,7 +37,7 @@ import {
   Legend,
   ReferenceLine,
 } from "recharts";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { firebaseDB } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
 
@@ -52,9 +52,12 @@ interface GradeSheetData {
 interface StudentStats {
   studentId: string;
   name: string;
-  total: number;
+  total?: number;
   status: string;
-  grades?: Record<string, { value: number; comment?: string }>;
+  grades?: Record<
+    string,
+    { value?: number | null; comment?: string } | number | null | undefined
+  >;
 }
 
 interface AssessmentData {
@@ -111,6 +114,121 @@ interface CourseStats {
   assessmentCount?: number;
 }
 
+const chunkArray = <T,>(items: T[], size: number): T[][] => {
+  if (size <= 0) return [items];
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+};
+
+const normalizeMatchText = (value: unknown): string =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+
+const toFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value));
+
+const resolveCourseIdForRecord = (
+  record: { courseId?: unknown; courseCode?: unknown; courseName?: unknown },
+  teacherCourses: Array<{ id: string; code?: string; name?: string }>,
+): string => {
+  const directCourseId = String(record.courseId || "").trim();
+  if (directCourseId && teacherCourses.some((course) => course.id === directCourseId)) {
+    return directCourseId;
+  }
+
+  const normalizedCode = normalizeMatchText(record.courseCode);
+  if (normalizedCode) {
+    const codeMatch = teacherCourses.find(
+      (course) => normalizeMatchText(course.code) === normalizedCode,
+    );
+    if (codeMatch) return codeMatch.id;
+  }
+
+  const normalizedName = normalizeMatchText(record.courseName);
+  if (normalizedName) {
+    const nameMatch = teacherCourses.find(
+      (course) => normalizeMatchText(course.name) === normalizedName,
+    );
+    if (nameMatch) return nameMatch.id;
+  }
+
+  return directCourseId;
+};
+
+const resolveStudentTotal = (
+  student: StudentStats,
+  activities: Array<{ id?: string; maxScore?: unknown }> = [],
+): { total: number | null; hasEvidence: boolean } => {
+  const directTotal = toFiniteNumber(student.total);
+  if (directTotal !== null) {
+    return { total: clamp(directTotal, 0, 5), hasEvidence: true };
+  }
+
+  const gradeRows = student.grades || {};
+  if (!gradeRows || typeof gradeRows !== "object") {
+    return { total: null, hasEvidence: false };
+  }
+
+  let normalizedSum = 0;
+  let gradedCount = 0;
+
+  if (activities.length > 0) {
+    activities.forEach((activity) => {
+      const activityId = String(activity.id || "").trim();
+      if (!activityId) return;
+
+      const gradeRow = gradeRows[activityId];
+      const rawValue =
+        typeof gradeRow === "object" && gradeRow !== null
+          ? toFiniteNumber((gradeRow as { value?: unknown }).value)
+          : toFiniteNumber(gradeRow);
+
+      if (rawValue === null) return;
+
+      const maxScoreRaw = toFiniteNumber(activity.maxScore);
+      const safeMax = maxScoreRaw && maxScoreRaw > 0 ? maxScoreRaw : 5;
+      const normalized = clamp((clamp(rawValue, 0, safeMax) / safeMax) * 5, 0, 5);
+
+      normalizedSum += normalized;
+      gradedCount += 1;
+    });
+  } else {
+    Object.values(gradeRows).forEach((gradeRow) => {
+      const rawValue =
+        typeof gradeRow === "object" && gradeRow !== null
+          ? toFiniteNumber((gradeRow as { value?: unknown }).value)
+          : toFiniteNumber(gradeRow);
+      if (rawValue === null) return;
+      normalizedSum += clamp(rawValue, 0, 5);
+      gradedCount += 1;
+    });
+  }
+
+  if (gradedCount === 0) {
+    return { total: null, hasEvidence: false };
+  }
+
+  return {
+    total: clamp(normalizedSum / gradedCount, 0, 5),
+    hasEvidence: true,
+  };
+};
+
 export default function StatsPage() {
   const { user } = useAuth();
   const { courses, selectedCourseId, setSelectedCourseId } = useAcademic();
@@ -138,16 +256,47 @@ export default function StatsPage() {
   );
   const [selectedStudentId, setSelectedStudentId] = useState<string>("");
 
+  const teacherOwnedCourses = useMemo(
+    () =>
+      courses.filter(
+        (course) =>
+          String(course.teacherId || "").trim() === String(user?.id || "").trim(),
+      ),
+    [courses, user?.id],
+  );
+
   const fetchStudentNames = async () => {
     try {
-      const studentsRef = collection(firebaseDB, "estudiantes");
-      const snapshot = await getDocs(studentsRef);
-      const studentMap = new Map<string, string>();
+      const enrolledStudentIds = Array.from(
+        new Set(
+          teacherOwnedCourses.flatMap((course) =>
+            (course.enrolledStudents || [])
+              .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+              .filter(Boolean),
+          ),
+        ),
+      );
 
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        const name = data.name || "Unknown student";
-        studentMap.set(doc.id, name);
+      if (enrolledStudentIds.length === 0) {
+        setAllStudents(new Map());
+        return;
+      }
+
+      const studentDocs = await Promise.all(
+        enrolledStudentIds.map((studentId) =>
+          getDoc(doc(firebaseDB, "estudiantes", studentId)),
+        ),
+      );
+
+      const studentMap = new Map<string, string>();
+      studentDocs.forEach((studentDoc, index) => {
+        const studentId = enrolledStudentIds[index];
+        if (!studentDoc.exists()) {
+          studentMap.set(studentId, "Unknown student");
+          return;
+        }
+        const data = studentDoc.data();
+        studentMap.set(studentId, data.name || "Unknown student");
       });
 
       setAllStudents(studentMap);
@@ -156,10 +305,10 @@ export default function StatsPage() {
 
   useEffect(() => {
     fetchStudentNames();
-  }, []);
+  }, [teacherOwnedCourses]);
 
   useEffect(() => {
-    const teacherCourses = courses;
+    const teacherCourses = teacherOwnedCourses;
 
     if (teacherCourses.length === 0) {
       setSelectedCourse("all");
@@ -193,7 +342,7 @@ export default function StatsPage() {
     if (selectedCourse !== selectedCourseId) {
       setSelectedCourse(selectedCourseId);
     }
-  }, [courses, selectedCourse, selectedCourseId, setSelectedCourseId]);
+  }, [teacherOwnedCourses, selectedCourse, selectedCourseId, setSelectedCourseId]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -201,7 +350,7 @@ export default function StatsPage() {
 
       setLoading(true);
       try {
-        const teacherCourses = courses;
+        const teacherCourses = teacherOwnedCourses;
         if (teacherCourses.length === 0) {
           setGradeSheets([]);
           setAssessments([]);
@@ -218,64 +367,150 @@ export default function StatsPage() {
           return Array.from(map.values());
         };
 
-        const gradeSnapshots = await Promise.all(
-          courseIds.map((courseId) =>
-            getDocs(
-              query(
-                collection(firebaseDB, "gradeSheets"),
-                where("courseId", "==", courseId),
+        let gradeData: GradeSheetData[] = [];
+        try {
+          const [gradeSnapshotsByCourse, gradeSnapshotsByTeacher] = await Promise.all([
+            Promise.all(
+              courseIds.map((courseId) =>
+                getDocs(
+                  query(
+                    collection(firebaseDB, "gradeSheets"),
+                    where("courseId", "==", courseId),
+                  ),
+                ),
               ),
             ),
-          ),
-        );
-        const gradeData = dedupeById(
-          gradeSnapshots.flatMap((snapshot) =>
-            snapshot.docs.map((doc) => ({
-              id: doc.id,
-              ...doc.data(),
-            })) as GradeSheetData[],
-          ),
-        );
+            getDocs(
+              query(collection(firebaseDB, "gradeSheets"), where("teacherId", "==", user.id)),
+            ),
+          ]);
+          const gradeSnapshots = [...gradeSnapshotsByCourse, gradeSnapshotsByTeacher];
+          gradeData = dedupeById(
+            gradeSnapshots.flatMap((snapshot) =>
+              snapshot.docs.map((doc) => {
+                const data = doc.data() as GradeSheetData;
+                const resolvedCourseId = resolveCourseIdForRecord(
+                  {
+                    courseId: data.courseId,
+                    courseCode: (data as Record<string, unknown>).courseCode,
+                    courseName: data.courseName,
+                  },
+                  teacherCourses,
+                );
+                return {
+                  id: doc.id,
+                  ...data,
+                  courseId: resolvedCourseId || String(data.courseId || ""),
+                };
+              }) as GradeSheetData[],
+            ),
+          );
+        } catch {
+          gradeData = [];
+        }
         setGradeSheets(gradeData);
 
-        const assessmentSnapshots = await Promise.all(
-          courseIds.map((courseId) =>
-            getDocs(
-              query(
-                collection(firebaseDB, "assessments"),
-                where("courseId", "==", courseId),
+        let assessmentData: AssessmentData[] = [];
+        try {
+          const assessmentQueryResults = await Promise.allSettled([
+            ...courseIds.map((courseId) =>
+              getDocs(
+                query(
+                  collection(firebaseDB, "assessments"),
+                  where("courseId", "==", courseId),
+                ),
               ),
             ),
-          ),
-        );
-        const assessmentData = dedupeById(
-          assessmentSnapshots.flatMap((snapshot) =>
-            snapshot.docs.map((doc) => ({
-              id: doc.id,
-              ...doc.data(),
-            })) as AssessmentData[],
-          ),
-        );
+            ...courseIds.map((courseId) =>
+              getDocs(
+                query(
+                  collection(firebaseDB, "evaluaciones"),
+                  where("courseId", "==", courseId),
+                ),
+              ),
+            ),
+          ]);
+
+          const assessmentSnapshots = assessmentQueryResults
+            .filter(
+              (
+                result,
+              ): result is PromiseFulfilledResult<Awaited<ReturnType<typeof getDocs>>> =>
+                result.status === "fulfilled",
+            )
+            .map((result) => result.value);
+
+          assessmentData = dedupeById(
+            assessmentSnapshots.flatMap((snapshot) =>
+              snapshot.docs.map((doc) => {
+                const data = doc.data() as Record<string, unknown>;
+                const resolvedCourseId = resolveCourseIdForRecord(
+                  {
+                    courseId: data.courseId,
+                    courseCode: data.courseCode,
+                    courseName: data.courseName,
+                  },
+                  teacherCourses,
+                );
+
+                return {
+                  id: doc.id,
+                  ...data,
+                  name: String(data.name || data.title || "Untitled assessment"),
+                  type: String(data.type || data.assessmentType || "assessment"),
+                  maxPoints: Number(data.maxPoints || 0),
+                  passingScore: Number(data.passingScore || 0),
+                  dueDate: String(data.dueDate || ""),
+                  status: String(data.status || ""),
+                  description: String(data.description || ""),
+                  createdBy: String(data.createdBy || ""),
+                  courseId: resolvedCourseId || String(data.courseId || ""),
+                } as AssessmentData;
+              }),
+            ),
+          );
+        } catch {
+          assessmentData = [];
+        }
         setAssessments(assessmentData);
 
-        const submissionSnapshots = await Promise.all(
-          courseIds.map((courseId) =>
-            getDocs(
-              query(
-                collection(firebaseDB, "submissions"),
-                where("courseId", "==", courseId),
-              ),
+        let submissionData: SubmissionData[] = [];
+        try {
+          const assessmentIds = assessmentData.map((assessment) => assessment.id).filter(Boolean);
+          const submissionSnapshots =
+            assessmentIds.length > 0
+              ? await Promise.all(
+                  chunkArray(assessmentIds, 10).map((assessmentIdChunk) =>
+                    getDocs(
+                      query(
+                        collection(firebaseDB, "submissions"),
+                        where("assessmentId", "in", assessmentIdChunk),
+                      ),
+                    ),
+                  ),
+                )
+              : [];
+          const assessmentCourseIdById = new Map(
+            assessmentData.map((assessment) => [assessment.id, assessment.courseId]),
+          );
+          submissionData = dedupeById(
+            submissionSnapshots.flatMap((snapshot) =>
+              snapshot.docs.map((doc) => {
+                const data = doc.data() as SubmissionData;
+                const linkedCourseId = assessmentCourseIdById.get(String(data.assessmentId || ""));
+                return {
+                  id: doc.id,
+                  ...data,
+                  courseId:
+                    (linkedCourseId && String(linkedCourseId).trim()) ||
+                    String(data.courseId || "").trim(),
+                };
+              }) as SubmissionData[],
             ),
-          ),
-        );
-        const submissionData = dedupeById(
-          submissionSnapshots.flatMap((snapshot) =>
-            snapshot.docs.map((doc) => ({
-              id: doc.id,
-              ...doc.data(),
-            })) as SubmissionData[],
-          ),
-        );
+          );
+        } catch {
+          submissionData = [];
+        }
         setSubmissions(submissionData);
 
         const stats = teacherCourses.map((course) => {
@@ -291,31 +526,33 @@ export default function StatsPage() {
           courseSheets.forEach((sheet) => {
             if (sheet.students && Array.isArray(sheet.students)) {
               sheet.students.forEach((student: StudentStats) => {
-                if (
-                  (student.status === "completed" ||
-                    student.status === "graded") &&
-                  student.total !== undefined &&
-                  Number.isFinite(student.total)
-                ) {
-                  const existing = studentScores.get(student.studentId) || {
-                    total: 0,
-                    count: 0,
-                    details: [],
-                  };
-                  studentScores.set(student.studentId, {
-                    total: existing.total + student.total,
-                    count: existing.count + 1,
-                    details: [
-                      ...existing.details,
-                      {
-                        sheetId: sheet.id,
-                        sheetTitle: sheet.title,
-                        grade: student.total,
-                        status: student.status,
-                      },
-                    ],
-                  });
-                }
+                const studentId = String(student.studentId || "").trim();
+                if (!studentId) return;
+
+                const computed = resolveStudentTotal(
+                  student,
+                  (sheet.activities || []) as Array<{ id?: string; maxScore?: unknown }>,
+                );
+                if (!computed.hasEvidence || computed.total === null) return;
+
+                const existing = studentScores.get(studentId) || {
+                  total: 0,
+                  count: 0,
+                  details: [],
+                };
+                studentScores.set(studentId, {
+                  total: existing.total + computed.total,
+                  count: existing.count + 1,
+                  details: [
+                    ...existing.details,
+                    {
+                      sheetId: sheet.id,
+                      sheetTitle: sheet.title,
+                      grade: computed.total,
+                      status: String(student.status || "graded"),
+                    },
+                  ],
+                });
               });
             }
           });
@@ -377,7 +614,7 @@ export default function StatsPage() {
     };
 
     fetchData();
-  }, [user, courses]);
+  }, [user, teacherOwnedCourses]);
 
   useEffect(() => {
     if (selectedCourse === "all" || courseStats.length === 0) return;
@@ -526,8 +763,15 @@ export default function StatsPage() {
 
   const selectedCourseSubmissions = useMemo(() => {
     if (selectedCourse === "all") return [];
-    return submissions.filter((s) => s.courseId === selectedCourse);
-  }, [submissions, selectedCourse]);
+    const selectedAssessmentIds = new Set(
+      selectedCourseAssessments.map((assessment) => assessment.id),
+    );
+    return submissions.filter(
+      (submission) =>
+        submission.courseId === selectedCourse ||
+        selectedAssessmentIds.has(submission.assessmentId),
+    );
+  }, [selectedCourse, selectedCourseAssessments, submissions]);
 
   const assessmentById = useMemo(() => {
     const map = new Map<string, AssessmentData>();

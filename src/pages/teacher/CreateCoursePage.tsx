@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
+import { collection, doc, getDocs, query, setDoc, where } from "firebase/firestore";
 import {
   ArrowLeft,
   Loader2,
@@ -18,6 +19,7 @@ import {
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import type { CourseClassSchedule } from '@/types/academic';
 import { createCourseWithPlan } from '@/lib/services/teacherPlanEnforcementService';
+import { firebaseDB } from "@/lib/firebase";
 
 const createCourseSchema = z.object({
   name: z.string().min(3, 'Course name is required'),
@@ -25,7 +27,10 @@ const createCourseSchema = z.object({
   semester: z.string().min(1, 'Semester is required'),
   group: z.string().min(1, 'Group is required'),
   credits: z.number().min(0, 'Credits cannot be negative'),
-  description: z.string().min(10, 'Description must be at least 10 characters'),
+  description: z
+    .string()
+    .min(10, 'Description must be at least 10 characters')
+    .max(100, 'Description must be 100 characters or less'),
 });
 
 const fieldLabelClass = 'mb-2 block text-sm font-semibold text-slate-700';
@@ -46,6 +51,7 @@ const SEMESTER_OPTIONS = Array.from({ length: (2040 - 2026 + 1) * 2 }, (_, index
 export default function CreateCoursePage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const teacherPlanName = (user?.teacherPlanName || "No assigned plan").trim();
   const teacherPlanCourseLimit =
     typeof user?.teacherPlanCourseLimit === "number" && user.teacherPlanCourseLimit > 0
@@ -103,7 +109,7 @@ export default function CreateCoursePage() {
     { title: 'Course Name', subtitle: 'Minimum 3 characters' },
     { title: 'Unique Code', subtitle: 'Format: ABC-123' },
     { title: 'Semester & Group', subtitle: 'Define active period and section' },
-    { title: 'Description', subtitle: 'Minimum 10 characters' },
+    { title: 'Description', subtitle: '10 to 100 characters' },
   ];
 
   const tipItems = [
@@ -157,7 +163,7 @@ export default function CreateCoursePage() {
     e.preventDefault();
     setError('');
     if (!user?.id) {
-      setError('You must be signed in as teacher to create courses.');
+      setError('You must be signed in to create courses.');
       return;
     }
 
@@ -185,22 +191,55 @@ export default function CreateCoursePage() {
     setIsLoading(true);
 
     try {
-      if (
-        teacherPlanExpiresAt &&
-        !Number.isNaN(teacherPlanExpiresAt.getTime()) &&
-        teacherPlanExpiresAt.getTime() < Date.now()
-      ) {
-        setError(
-          `Your ${teacherPlanName} plan has expired. Renew your plan to create new courses.`,
+      if (isAdmin) {
+        const name = courseData.name.trim();
+        const code = courseData.code.trim().toUpperCase();
+        const semester = courseData.semester.trim();
+        const group = courseData.group.trim();
+        const credits = Number(courseData.credits || 0);
+        const description = courseData.description.trim();
+        const existingCodeSnap = await getDocs(
+          query(collection(firebaseDB, "cursos"), where("code", "==", code)),
         );
-        setIsLoading(false);
-        return;
-      }
+        if (!existingCodeSnap.empty) {
+          setError(`Course code "${code}" already exists. Please use a unique code.`);
+          setIsLoading(false);
+          return;
+        }
+        const courseRef = doc(collection(firebaseDB, "cursos"));
+        await setDoc(courseRef, {
+          name,
+          code,
+          semester,
+          group,
+          credits,
+          description,
+          classSchedule: normalizedSchedule,
+          teacherId: user.id,
+          teacherName: user.name || user.email || "Admin",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          status: "active",
+          enrolledStudents: [],
+        });
+      } else {
+        if (
+          teacherPlanExpiresAt &&
+          !Number.isNaN(teacherPlanExpiresAt.getTime()) &&
+          teacherPlanExpiresAt.getTime() < Date.now()
+        ) {
+          setError(
+            `Your ${teacherPlanName} plan has expired. Renew your plan to create new courses.`,
+          );
+          setIsLoading(false);
+          return;
+        }
 
-      await createCourseWithPlan({
-        ...courseData,
-        classSchedule: normalizedSchedule,
-      });
+        await createCourseWithPlan({
+          ...courseData,
+          classSchedule: normalizedSchedule,
+        });
+      }
 
       navigate('/courses');
     } catch (error: any) {
@@ -445,12 +484,16 @@ export default function CreateCoursePage() {
                     onChange={handleChange}
                     className={fieldTextAreaClass}
                     placeholder="Describe course objectives, content, and methodology..."
+                    maxLength={100}
                     required
                   />
                   <div className="mt-2 flex items-start gap-2 text-xs text-slate-500">
                     <Info className="mt-0.5 h-3.5 w-3.5" />
-                    <p>Minimum 10 characters. Describe the course content in detail.</p>
+                    <p>Minimum 10 characters. Max 100 characters.</p>
                   </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {courseData.description.length}/100 characters
+                  </p>
                 </div>
 
                 <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">

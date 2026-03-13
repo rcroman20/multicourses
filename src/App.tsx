@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AdminRoute } from "@/components/auth/AdminRoute";
+import { AdminPermissionRoute } from "@/components/auth/AdminPermissionRoute";
 import { CookieConsentBanner } from "@/components/common/CookieConsentBanner";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 
@@ -43,12 +44,21 @@ const ExerciseQuizStatsPage = lazy(() => import("./pages/teacher/ExerciseQuizSta
 const ProfileSettingsPage = lazy(() => import("./pages/shared/ProfileSettingsPage"));
 const AdminDashboardPage = lazy(() => import("./pages/admin/AdminDashboardPage"));
 const AdminAccessAdminsPage = lazy(() => import("./pages/admin/AdminAccessAdminsPage"));
-const AdminAccessTeacherApprovalsPage = lazy(
-  () => import("./pages/admin/AdminAccessTeacherApprovalsPage"),
-);
+const AdminAccessTeacherApprovalsPage = lazy(() => import("./pages/admin/AdminAccessTeacherApprovalsPage"));
 const AdminAccessTeacherOpsPage = lazy(() => import("./pages/admin/AdminAccessTeacherOpsPage"));
 const AdminAccessDeletionsPage = lazy(() => import("./pages/admin/AdminAccessDeletionsPage"));
 const AdminAccessInboxPage = lazy(() => import("./pages/admin/AdminAccessInboxPage"));
+const AdminSettingsPage = lazy(() => import("./pages/admin/AdminSettingsPage"));
+const AdminBillingPage = lazy(() => import("./pages/admin/AdminBillingPage"));
+const AdminInstitutionsPage = lazy(() => import("./pages/admin/AdminInstitutionsPage"));
+const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
+const AdminReportsPage = lazy(() => import("./pages/admin/AdminReportsPage"));
+const AdminBackupsPage = lazy(() => import("./pages/admin/AdminBackupsPage"));
+const AdminAuditLogPage = lazy(() => import("./pages/admin/AdminAuditLogPage"));
+const AdminSupportConversationsPage = lazy(() => import("./pages/admin/AdminSupportConversationsPage"));
+const AdminInstitutionDetailPage = lazy(() => import("./pages/admin/AdminInstitutionDetailPage"));
+const AdminPermissionsPage = lazy(() => import("./pages/admin/AdminPermissionsPage"));
+const AdminNotificationsPage = lazy(() => import("./pages/admin/AdminNotificationsPage"));
 const TeacherApprovalWaitingPage = lazy(() => import("./pages/shared/TeacherApprovalWaitingPage"));
 
 // 4. Páginas exclusivas de profesores (organizadas por categoría)
@@ -149,8 +159,19 @@ const titleRules: TitleRule[] = [
   { path: "/admin/admins", title: "Admin Emails" },
   { path: "/admin/teacher-approvals", title: "Teacher Approvals" },
   { path: "/admin/teacher-ops", title: "Teacher Operations" },
-  { path: "/admin/deletions", title: "Account Deletions" },
-  { path: "/admin/inbox", title: "Inbound Requests" },
+  { path: "/admin/deletions", title: "Deletion Requests" },
+  { path: "/admin/inbox", title: "Admin Inbox" },
+  { path: "/admin/settings", title: "Settings" },
+  { path: "/admin/billing", title: "Billing" },
+  { path: "/admin/institutions", title: "Institutions" },
+  { path: "/admin/institutions/:institutionKey", title: "Institution Detail" },
+  { path: "/admin/users", title: "Users Directory" },
+  { path: "/admin/reports", title: "Reports" },
+  { path: "/admin/backups", title: "Backups" },
+  { path: "/admin/audit-log", title: "Audit Log" },
+  { path: "/admin/support-conversations", title: "Support Conversations" },
+  { path: "/admin/notifications", title: "Notifications" },
+  { path: "/admin/permissions", title: "Permissions" },
   { path: "*", title: "Page Not Found" },
 ];
 
@@ -211,7 +232,7 @@ const App = () => (
             <NotificationProvider>
             <Toaster />
             <Sonner />
-            <BrowserRouter future={{ v7_relativeSplatPath: true }}>
+            <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
               <DocumentTitleManager />
               <Suspense fallback={<div className="min-h-screen bg-background" />}>
                 <Routes>
@@ -282,7 +303,7 @@ const App = () => (
               <Route
                 path="/courses"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "estudiante", "admin"]}>
                     <CoursesPage />
                   </ProtectedRoute>
                 }
@@ -290,7 +311,7 @@ const App = () => (
               <Route
                 path="/courses/view/:courseCode"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "estudiante", "admin"]}>
                     <CoursesPage />
                   </ProtectedRoute>
                 }
@@ -298,7 +319,7 @@ const App = () => (
               <Route
                 path="/courses/:courseCode/files"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "estudiante"]}>
                     <FileManager />
                   </ProtectedRoute>
                 }
@@ -306,7 +327,7 @@ const App = () => (
               <Route
                 path="/courses/:courseCode/exercise-bank"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "estudiante", "admin"]}>
                     <ExerciseBankPage />
                   </ProtectedRoute>
                 }
@@ -314,7 +335,7 @@ const App = () => (
               <Route
                 path="/courses/:courseCode/exercise-bank/stats"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "admin"]}>
                     <ExerciseQuizStatsPage />
                   </ProtectedRoute>
                 }
@@ -324,7 +345,7 @@ const App = () => (
               <Route
                 path="/courses/:courseCode/assessments"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "estudiante"]}>
                     <AssessmentsPage />
                   </ProtectedRoute>
                 }
@@ -332,7 +353,7 @@ const App = () => (
               <Route
                 path="/courses/:courseCode/assessments/:assessmentId"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "estudiante"]}>
                     <AssessmentDetailPage />
                   </ProtectedRoute>
                 }
@@ -340,7 +361,7 @@ const App = () => (
               <Route
                 path="/courses/:courseCode/assessments/:assessmentId/:tab"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "estudiante"]}>
                     <AssessmentDetailPage />
                   </ProtectedRoute>
                 }
@@ -350,7 +371,7 @@ const App = () => (
               <Route
                 path="/grades"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "estudiante"]}>
                     <GradesPage />
                   </ProtectedRoute>
                 }
@@ -360,7 +381,7 @@ const App = () => (
               <Route
                 path="/slides"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "estudiante"]}>
                     <SlidesPage />
                   </ProtectedRoute>
                 }
@@ -368,7 +389,7 @@ const App = () => (
               <Route
                 path="/calendar"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requiredRole={["docente", "estudiante", "admin"]}>
                     <CalendarPage />
                   </ProtectedRoute>
                 }
@@ -400,41 +421,129 @@ const App = () => (
               <Route
                 path="/admin/admins"
                 element={
-                  <AdminRoute>
+                  <AdminPermissionRoute ownerOnly>
                     <AdminAccessAdminsPage />
-                  </AdminRoute>
+                  </AdminPermissionRoute>
                 }
               />
               <Route
                 path="/admin/teacher-approvals"
                 element={
-                  <AdminRoute>
+                  <AdminPermissionRoute permission="manageTeacherApprovals">
                     <AdminAccessTeacherApprovalsPage />
-                  </AdminRoute>
+                  </AdminPermissionRoute>
                 }
               />
               <Route
                 path="/admin/teacher-ops"
                 element={
-                  <AdminRoute>
+                  <AdminPermissionRoute permission="manageTeacherOps">
                     <AdminAccessTeacherOpsPage />
-                  </AdminRoute>
+                  </AdminPermissionRoute>
                 }
               />
               <Route
                 path="/admin/deletions"
                 element={
-                  <AdminRoute>
+                  <AdminPermissionRoute permission="manageDeletions">
                     <AdminAccessDeletionsPage />
-                  </AdminRoute>
+                  </AdminPermissionRoute>
                 }
               />
               <Route
                 path="/admin/inbox"
                 element={
-                  <AdminRoute>
+                  <AdminPermissionRoute permission="manageInbox">
                     <AdminAccessInboxPage />
-                  </AdminRoute>
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/settings"
+                element={
+                  <AdminPermissionRoute permission="manageSettings">
+                    <AdminSettingsPage />
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/billing"
+                element={
+                  <AdminPermissionRoute permission="manageBilling">
+                    <AdminBillingPage />
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/institutions"
+                element={
+                  <AdminPermissionRoute permission="manageInstitutions">
+                    <AdminInstitutionsPage />
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/institutions/:institutionKey"
+                element={
+                  <AdminPermissionRoute permission="manageInstitutions">
+                    <AdminInstitutionDetailPage />
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/users"
+                element={
+                  <AdminPermissionRoute permission="manageUsersDirectory">
+                    <AdminUsersPage />
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/reports"
+                element={
+                  <AdminPermissionRoute permission="exportReports">
+                    <AdminReportsPage />
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/backups"
+                element={
+                  <AdminPermissionRoute permission="manageBackups">
+                    <AdminBackupsPage />
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/audit-log"
+                element={
+                  <AdminPermissionRoute permission="exportReports">
+                    <AdminAuditLogPage />
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/support-conversations"
+                element={
+                  <AdminPermissionRoute permission="manageInbox">
+                    <AdminSupportConversationsPage />
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/notifications"
+                element={
+                  <AdminPermissionRoute permission="manageInbox">
+                    <AdminNotificationsPage />
+                  </AdminPermissionRoute>
+                }
+              />
+              <Route
+                path="/admin/permissions"
+                element={
+                  <AdminPermissionRoute ownerOnly>
+                    <AdminPermissionsPage />
+                  </AdminPermissionRoute>
                 }
               />
               <Route
@@ -460,7 +569,7 @@ const App = () => (
               <Route
                 path="/courses/create"
                 element={
-                  <ProtectedRoute requiredRole="docente">
+                  <ProtectedRoute requiredRole={["docente", "admin"]}>
                     <CreateCoursePage />
                   </ProtectedRoute>
                 }
@@ -468,7 +577,7 @@ const App = () => (
               <Route
                 path="/courses/:courseCode/edit"
                 element={
-                  <ProtectedRoute requiredRole="docente">
+                  <ProtectedRoute requiredRole={["docente", "admin"]}>
                     <CoursesEditPage />
                   </ProtectedRoute>
                 }

@@ -305,6 +305,9 @@ async function createCourseWithPlanFallback(
   if (!description || description.length < 10) {
     throw new Error("Description must be at least 10 characters.");
   }
+  if (description.length > 100) {
+    throw new Error("Description must be 100 characters or less.");
+  }
   const [existingCodeSnap, teacherCoursesSnap, teacherProfileSnap] = await Promise.all([
     getDocs(query(collection(firebaseDB, "cursos"), where("code", "==", code))),
     getDocs(query(collection(firebaseDB, "cursos"), where("teacherId", "==", teacherId))),

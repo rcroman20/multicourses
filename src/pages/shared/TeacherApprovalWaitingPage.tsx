@@ -1058,3 +1058,4 @@ export default function TeacherApprovalWaitingPage() {
     </div>
   );
 }
+ 

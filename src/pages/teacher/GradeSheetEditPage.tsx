@@ -33,6 +33,7 @@ import {
 import { firebaseDB } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { getTeacherOwnedCourses } from '@/lib/courseAccess';
 
 interface Activity {
   id: string;
@@ -123,11 +124,15 @@ export default function EditGradeSheetPage() {
   ]);
   
   const [courseName, setCourseName] = useState('');
-  const { courses } = useAcademic();
-const selectedCourse = useMemo(() => 
-  courses.find(c => c.code === courseCode || c.id === courseCode),
-  [courses, courseCode]
-);
+  const { courses, loading } = useAcademic();
+  const teacherCourses = useMemo(
+    () => getTeacherOwnedCourses(courses, user?.id),
+    [courses, user?.id],
+  );
+  const selectedCourse = useMemo(
+    () => teacherCourses.find((course) => course.code === courseCode || course.id === courseCode) || null,
+    [teacherCourses, courseCode],
+  );
 
   const focusedStudent = useMemo(() => {
     if (!focusStudentId || !gradeSheet?.students) return null;
@@ -138,6 +143,7 @@ const selectedCourse = useMemo(() =>
   useEffect(() => {
     const fetchGradeSheet = async () => {
       if (!courseCode || !gradeSheetId || !user) return;
+      if (loading.courses) return;
       
       setIsLoading(true);
       try {
@@ -151,53 +157,48 @@ const selectedCourse = useMemo(() =>
         }
         
         const data = gradeSheetDoc.data();
-        
-        // Verify ownership
-        if (data.teacherId !== user.id) {
+
+        if (!data.courseId && !data.courseCode) {
+          toast.error('Grade sheet has invalid course information');
+          navigate(`/courses/${courseCode}/grade-sheets`);
+          return;
+        }
+
+        const storedCourseCode = String(data.courseCode || '').trim();
+        const urlCourseCode = String(courseCode || '').trim();
+        const storedCourseId = String(data.courseId || '').trim();
+        const normalizedStoredCourseCode = storedCourseCode.toLowerCase();
+        const normalizedUrlCourseCode = urlCourseCode.toLowerCase();
+
+        const matchedTeacherCourse =
+          teacherCourses.find((course) => {
+            const normalizedCourseCode = String(course.code || '').trim().toLowerCase();
+            return (
+              (storedCourseId && course.id === storedCourseId) ||
+              (normalizedStoredCourseCode && normalizedCourseCode === normalizedStoredCourseCode)
+            );
+          }) || null;
+
+        const teacherOwnsCourse = Boolean(matchedTeacherCourse);
+        if (!teacherOwnsCourse) {
           toast.error('You do not have permission to edit this grade sheet');
           navigate(`/courses/${courseCode}/grade-sheets`);
           return;
-        };
-        
+        }
 
-        
-        
-if (!data.courseId && !data.courseCode) {
-  toast.error('Grade sheet has invalid course information');
-  navigate(`/courses/${courseCode}/grade-sheets`);
-  return;
-}
+        const belongsToRequestedCourse = Boolean(
+          selectedCourse &&
+            ((storedCourseId && storedCourseId === selectedCourse.id) ||
+              (normalizedStoredCourseCode &&
+                normalizedStoredCourseCode === String(selectedCourse.code || '').trim().toLowerCase()) ||
+              normalizedStoredCourseCode === normalizedUrlCourseCode),
+        );
 
-
-const storedCourseCode = data.courseCode || '';
-const urlCourseCode = courseCode || '';
-const storedCourseId = data.courseId || '';
-
-// Log para diagnóstico
-console.log('Validating course ownership:', {
-  storedCourseCode,
-  urlCourseCode,
-  storedCourseId,
-  dataCourseCode: data.courseCode,
-  dataCourseId: data.courseId
-});
-
-// Verifica si hay match en courseCode (insensible a mayúsculas) O en courseId
-const courseCodeMatches = storedCourseCode.toLowerCase() === urlCourseCode.toLowerCase();
-const courseIdMatches = storedCourseId && selectedCourse && storedCourseId === selectedCourse.id;
-
-
-if (!courseCodeMatches && !courseIdMatches) {
-  console.log('Validation failed:', {
-    storedCourseCode,
-    urlCourseCode,
-    storedCourseId,
-    selectedCourseId: selectedCourse?.id
-  });
-  toast.error('Grade sheet does not belong to this course');
-  navigate(`/courses/${courseCode}/grade-sheets`);
-  return;
-}
+        if (!belongsToRequestedCourse) {
+          toast.error('Grade sheet does not belong to this course');
+          navigate(`/courses/${courseCode}/grade-sheets`);
+          return;
+        }
 
 
         // Set form data
@@ -231,7 +232,7 @@ setIsPublished(data.isPublished || false);
         }
         
         // Set course name
-        setCourseName(data.courseName || '');
+        setCourseName(matchedTeacherCourse?.name || data.courseName || '');
         
         // Set full grade sheet object
         setGradeSheet({
@@ -248,7 +249,7 @@ setIsPublished(data.isPublished || false);
     };
 
     fetchGradeSheet();
-  }, [courseCode, gradeSheetId, user, navigate]);
+  }, [courseCode, gradeSheetId, loading.courses, navigate, selectedCourse, teacherCourses, user]);
 
   // Add new activity
   const addActivity = () => {

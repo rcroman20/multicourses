@@ -15,19 +15,35 @@ import {
   FolderOpen,
   ChevronRight,
   ChevronLeft,
+  Clock3,
   FileText,
   ClipboardCheck,
+  BadgeCheck,
   Settings,
   Bell,
   User,
   FileSpreadsheet,
   CalendarDays,
-  ShieldCheck,
+  MessageSquare,
+  CreditCard,
+  Building2,
+  FileBarChart2,
+  KeyRound,
+  ArchiveRestore,
+  FileSearch,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { useAcademic } from '@/contexts/AcademicContext';
-import { isAdminEmail } from '@/lib/services/adminAccessService';
+import {
+  ADMIN_EMAILS_CHANGED_EVENT,
+  isAdminEmail,
+  isOwnerAdminEmail,
+} from '@/lib/services/adminAccessService';
+import {
+  ADMIN_PERMISSIONS_CHANGED_EVENT,
+  canAccessDelegatedAdminPermission,
+} from '@/lib/services/adminPermissionsService';
 
 interface NavItem {
   label: string;
@@ -53,6 +69,7 @@ export function Sidebar({
   const location = useLocation();
   const params = useParams();
   const [isOpen, setIsOpen] = useState(false);
+  const [, setAdminPermissionsVersion] = useState(0);
   
   const courseCode = params.courseCode;
   const currentCourse = courseCode
@@ -62,7 +79,7 @@ export function Sidebar({
   const getUserFirstCourse = () => {
     if (!user) return null;
     
-    if (user.role === 'admin') return null;
+    if (user.role === 'admin') return courses[0] || null;
 
     const userCourses = user.role === 'docente'
       ? courses.filter(c => c.teacherId === user.id)
@@ -119,6 +136,23 @@ export function Sidebar({
 
   const dashboardPath =
     user?.role === 'docente' ? '/teacher' : user?.role === 'admin' ? '/admin/dashboard' : '/student';
+  const isOwnerAdmin = isOwnerAdminEmail(user?.email);
+
+  useEffect(() => {
+    const handlePermissionsChanged = () => {
+      setAdminPermissionsVersion((current) => current + 1);
+    };
+
+    window.addEventListener("storage", handlePermissionsChanged);
+    window.addEventListener(ADMIN_EMAILS_CHANGED_EVENT, handlePermissionsChanged as EventListener);
+    window.addEventListener(ADMIN_PERMISSIONS_CHANGED_EVENT, handlePermissionsChanged as EventListener);
+
+    return () => {
+      window.removeEventListener("storage", handlePermissionsChanged);
+      window.removeEventListener(ADMIN_EMAILS_CHANGED_EVENT, handlePermissionsChanged as EventListener);
+      window.removeEventListener(ADMIN_PERMISSIONS_CHANGED_EVENT, handlePermissionsChanged as EventListener);
+    };
+  }, []);
 
   const navItems: NavItem[] = [
     {
@@ -131,13 +165,103 @@ export function Sidebar({
       label: 'Calendar',
       href: '/calendar',
       icon: <CalendarDays className="h-4 w-4" />,
-      roles: ['docente', 'estudiante'],
+      roles: ['docente', 'estudiante', 'admin'],
+    },
+    {
+      label: 'Teacher Approvals',
+      href: '/admin/teacher-approvals',
+      icon: <BadgeCheck className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Admin Inbox',
+      href: '/admin/inbox',
+      icon: <MessageSquare className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Notifications',
+      href: '/admin/notifications',
+      icon: <Bell className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Support Conversations',
+      href: '/admin/support-conversations',
+      icon: <MessageSquare className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Deletion Requests',
+      href: '/admin/deletions',
+      icon: <Clock3 className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Teacher Ops',
+      href: '/admin/teacher-ops',
+      icon: <FileText className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Billing',
+      href: '/admin/billing',
+      icon: <CreditCard className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Users Directory',
+      href: '/admin/users',
+      icon: <Users className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Institutions',
+      href: '/admin/institutions',
+      icon: <Building2 className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Reports',
+      href: '/admin/reports',
+      icon: <FileBarChart2 className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Audit Log',
+      href: '/admin/audit-log',
+      icon: <FileSearch className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Backups',
+      href: '/admin/backups',
+      icon: <ArchiveRestore className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Settings',
+      href: '/admin/settings',
+      icon: <Settings className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Admin Emails',
+      href: '/admin/admins',
+      icon: <Settings className="h-4 w-4" />,
+      roles: ['admin'],
+    },
+    {
+      label: 'Permissions',
+      href: '/admin/permissions',
+      icon: <KeyRound className="h-4 w-4" />,
+      roles: ['admin'],
     },
     {
       label: 'Courses',
       href: '/courses',
       icon: <BookOpen className="h-4 w-4" />,
-      roles: ['docente', 'estudiante', 'admin'],
+      roles: ['docente', 'estudiante'],
     },
     { 
       label: 'Assessments',
@@ -204,36 +328,6 @@ export function Sidebar({
       roles: ['docente'],
     },
     {
-      label: 'Admin Emails',
-      href: '/admin/admins',
-      icon: <ShieldCheck className="h-4 w-4" />,
-      roles: ['admin'],
-    },
-    {
-      label: 'Teacher Approvals',
-      href: '/admin/teacher-approvals',
-      icon: <ClipboardCheck className="h-4 w-4" />,
-      roles: ['admin'],
-    },
-    {
-      label: 'Teacher Ops',
-      href: '/admin/teacher-ops',
-      icon: <BarChart3 className="h-4 w-4" />,
-      roles: ['admin'],
-    },
-    {
-      label: 'Deletion Requests',
-      href: '/admin/deletions',
-      icon: <Users className="h-4 w-4" />,
-      roles: ['admin'],
-    },
-    {
-      label: 'Admin Inbox',
-      href: '/admin/inbox',
-      icon: <Bell className="h-4 w-4" />,
-      roles: ['admin'],
-    },
-    {
       label: 'Profile',
       href: user
         ? user.role === 'docente'
@@ -251,6 +345,52 @@ export function Sidebar({
   const filteredNavItems = navItems.filter(item => {
     if (!user || !item.roles.includes(user.role)) return false;
     if (item.showCondition && !item.showCondition()) return false;
+    if (user.role === 'admin') {
+      if (item.label === 'Dashboard' || item.label === 'Profile' || item.label === 'Calendar') return true;
+      if (item.label === 'Admin Emails' || item.label === 'Permissions') {
+        return isOwnerAdmin;
+      }
+      if (item.label === 'Teacher Approvals') {
+        return canAccessDelegatedAdminPermission("manageTeacherApprovals", user.email);
+      }
+      if (item.label === 'Teacher Ops') {
+        return canAccessDelegatedAdminPermission("manageTeacherOps", user.email);
+      }
+      if (item.label === 'Deletion Requests') {
+        return canAccessDelegatedAdminPermission("manageDeletions", user.email);
+      }
+      if (item.label === 'Admin Inbox') {
+        return canAccessDelegatedAdminPermission("manageInbox", user.email);
+      }
+      if (item.label === 'Notifications') {
+        return canAccessDelegatedAdminPermission("manageInbox", user.email);
+      }
+      if (item.label === 'Settings') {
+        return canAccessDelegatedAdminPermission("manageSettings", user.email);
+      }
+      if (item.label === 'Billing') {
+        return canAccessDelegatedAdminPermission("manageBilling", user.email);
+      }
+      if (item.label === 'Institutions') {
+        return canAccessDelegatedAdminPermission("manageInstitutions", user.email);
+      }
+      if (item.label === 'Users Directory') {
+        return canAccessDelegatedAdminPermission("manageUsersDirectory", user.email);
+      }
+      if (item.label === 'Reports') {
+        return canAccessDelegatedAdminPermission("exportReports", user.email);
+      }
+      if (item.label === 'Audit Log') {
+        return canAccessDelegatedAdminPermission("exportReports", user.email);
+      }
+      if (item.label === 'Support Conversations') {
+        return canAccessDelegatedAdminPermission("manageInbox", user.email);
+      }
+      if (item.label === 'Backups') {
+        return canAccessDelegatedAdminPermission("manageBackups", user.email);
+      }
+      return false;
+    }
     return true;
   });
 
@@ -297,7 +437,8 @@ export function Sidebar({
     }
 
     if (label === 'Notifications') {
-      return location.pathname.startsWith('/teacher/notifications');
+      return location.pathname.startsWith('/teacher/notifications') ||
+        location.pathname.startsWith('/admin/notifications');
     }
 
     // Para otros items

@@ -40,6 +40,10 @@ interface CreateNotificationInput {
   dedupeKey?: string;
 }
 
+interface CreateBulkNotificationInput extends CreateNotificationInput {
+  recipientIds: string[];
+}
+
 const notificationsCollection = (userId: string) =>
   collection(firebaseDB, "usuarios", userId, "notifications");
 
@@ -159,7 +163,7 @@ export const notificationService = {
       link,
       senderId: currentUserId,
       read: false,
-      createdAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
       expiresAt,
     };
 
@@ -209,6 +213,50 @@ export const notificationService = {
     } catch {
       // Best effort cleanup; do not fail notification delivery on permission/index issues.
     }
+  },
+
+  async createBulkNotifications(input: CreateBulkNotificationInput) {
+    const currentUserId = firebaseAuth.currentUser?.uid || "";
+    if (!currentUserId) {
+      throw new Error("You must be signed in to create notifications.");
+    }
+
+    const recipientIds = Array.from(
+      new Set(
+        input.recipientIds
+          .map((value) => String(value || "").trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (recipientIds.length === 0) return 0;
+
+    const expiresAt = Timestamp.fromDate(
+      new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    );
+    const payload = {
+      title: input.title.trim(),
+      message: input.message.trim(),
+      type: input.type || "info",
+      link: input.link?.trim() || "",
+      senderId: currentUserId,
+      read: false,
+      createdAt: serverTimestamp(),
+      expiresAt,
+    };
+
+    const chunkSize = 400;
+    for (let index = 0; index < recipientIds.length; index += chunkSize) {
+      const batch = writeBatch(firebaseDB);
+      const chunk = recipientIds.slice(index, index + chunkSize);
+      chunk.forEach((recipientId) => {
+        const notificationRef = doc(notificationsCollection(recipientId));
+        batch.set(notificationRef, payload);
+      });
+      await batch.commit();
+    }
+
+    return recipientIds.length;
   },
 
   async ensureWelcomeNotification(userId: string) {

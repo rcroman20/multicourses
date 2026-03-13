@@ -42,13 +42,14 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { changeCourseEnrollmentWithPlan } from '@/lib/services/teacherPlanEnforcementService';
+import { isAdminEmail } from '@/lib/services/adminAccessService';
 
 interface Student {
   id: string;
   idNumber: string;
   email: string;
   name: string;
-  role: 'estudiante' | 'docente';
+  role: 'estudiante' | 'docente' | 'admin';
   requestedRole?: 'estudiante' | 'docente';
   teacherApprovalStatus?: 'pending' | 'approved' | 'rejected';
   whatsApp: string;
@@ -75,11 +76,18 @@ interface Course {
   status: string;
 } 
 
-type StudentRoleDisplay = "student" | "teacher" | "teacher_pending" | "teacher_rejected";
+type UserRole = "estudiante" | "docente" | "admin";
+type RequestedRole = "estudiante" | "docente";
+type StudentRoleDisplay =
+  | "student"
+  | "teacher"
+  | "teacher_pending"
+  | "teacher_rejected"
+  | "admin";
 
 const normalizeUserRole = (
   value: unknown,
-): "estudiante" | "docente" | null => {
+): UserRole | null => {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toLowerCase();
 
@@ -102,6 +110,20 @@ const normalizeUserRole = (
     return "estudiante";
   }
 
+  if (
+    normalized === "admin" ||
+    normalized === "administrator" ||
+    normalized === "administrador"
+  ) {
+    return "admin";
+  }
+
+  return null;
+};
+
+const normalizeRequestedRole = (value: unknown): RequestedRole | null => {
+  const normalized = normalizeUserRole(value);
+  if (normalized === "docente" || normalized === "estudiante") return normalized;
   return null;
 };
 
@@ -123,6 +145,7 @@ const normalizeTeacherApprovalStatus = (
 const getStudentRoleDisplay = (
   student: Pick<Student, "role" | "requestedRole" | "teacherApprovalStatus">,
 ): StudentRoleDisplay => {
+  if (student.role === "admin") return "admin";
   if (student.role === "docente") return "teacher";
   if (student.requestedRole !== "docente") return "student";
   if (student.teacherApprovalStatus === "pending") return "teacher_pending";
@@ -159,20 +182,33 @@ export default function StudentDetailPage() {
   const isTeacher = user?.role === 'docente';
   const studentRoleDisplay = student ? getStudentRoleDisplay(student) : "student";
   const detailTitle =
-    studentRoleDisplay === "teacher" ||
-    studentRoleDisplay === "teacher_pending" ||
-    studentRoleDisplay === "teacher_rejected"
-      ? "Teacher Detail"
-      : "Student Detail";
+    studentRoleDisplay === "admin"
+      ? "Admin Detail"
+      : studentRoleDisplay === "teacher" ||
+          studentRoleDisplay === "teacher_pending" ||
+          studentRoleDisplay === "teacher_rejected"
+        ? "Teacher Detail"
+        : "Student Detail";
   const detailSubtitle =
-    studentRoleDisplay === "teacher_pending"
-      ? "Teacher request pending admin approval"
-      : studentRoleDisplay === "teacher_rejected"
-        ? "Teacher request was rejected by an admin"
-        : "Academic detail and enrollment status";
+    studentRoleDisplay === "admin"
+      ? "Account detail and enrollment status"
+      : studentRoleDisplay === "teacher_pending"
+        ? "Teacher request pending admin approval"
+        : studentRoleDisplay === "teacher_rejected"
+          ? "Teacher request was rejected by an admin"
+          : "Academic detail and enrollment status";
 
   const renderRoleBadge = () => {
     if (!student) return null;
+
+    if (studentRoleDisplay === "admin") {
+      return (
+        <span className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-xs font-semibold text-violet-700">
+          <Shield className="h-3 w-3" />
+          Admin
+        </span>
+      );
+    }
 
     if (studentRoleDisplay === "teacher") {
       return (
@@ -245,24 +281,32 @@ export default function StudentDetailPage() {
 
       const studentData = studentSnap.exists() ? studentSnap.data() : {};
       const userData = userSnap.exists() ? userSnap.data() : {};
+      const roleFromUser = normalizeUserRole(userData?.role);
+      const roleFromStudent = normalizeUserRole(studentData.role);
       const roleFromData =
-        normalizeUserRole(studentData.role) ||
-        normalizeUserRole(userData?.role) ||
+        roleFromUser ||
+        roleFromStudent ||
         "estudiante";
       const requestedRole =
-        normalizeUserRole(studentData.requestedRole) ||
-        normalizeUserRole(userData?.requestedRole) ||
+        normalizeRequestedRole(studentData.requestedRole) ||
+        normalizeRequestedRole(userData?.requestedRole) ||
         undefined;
       const teacherApprovalStatus =
         normalizeTeacherApprovalStatus(studentData.teacherApprovalStatus) ||
         normalizeTeacherApprovalStatus(userData?.teacherApprovalStatus) ||
         undefined;
-      const role: "estudiante" | "docente" =
-        roleFromData === "estudiante" &&
-        requestedRole === "docente" &&
-        teacherApprovalStatus === "approved"
-          ? "docente"
-          : roleFromData;
+      const isKnownAdmin =
+        roleFromUser === "admin" ||
+        roleFromStudent === "admin" ||
+        isAdminEmail(studentData.email || userData?.email);
+      const role: UserRole =
+        isKnownAdmin
+          ? "admin"
+          : roleFromData === "estudiante" &&
+              requestedRole === "docente" &&
+              teacherApprovalStatus === "approved"
+            ? "docente"
+            : roleFromData;
       
       const studentObj: Student = {
         id: studentId!,

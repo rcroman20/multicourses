@@ -18,18 +18,31 @@ import {
   Trophy,
   UserPlus,
 } from "lucide-react";
-import { collection, getDocs, orderBy, query, Timestamp, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, orderBy, query, Timestamp, where } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAcademic } from "@/contexts/AcademicContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { InstitutionCaptureModal } from "@/components/common/InstitutionCaptureModal";
 import { calculateStudentProgress } from "@/utils/gradeCalculations";
 import type { Assessment, Course, Grade, CourseClassSchedule } from "@/types/academic";
 import { firebaseDB } from "@/lib/firebase";
+import {
+  getInstitutionSaveErrorMessage,
+  getInstitutionSuggestions,
+  getUserStoredInstitution,
+  isInstitutionMissing,
+  saveUserInstitution,
+} from "@/lib/services/institutionProfileService";
 
 interface GradeSheetStudentRecord {
   studentId: string;
+  userId?: string;
+  email?: string;
+  idNumber?: string;
+  identification?: string;
   total?: number;
   status: string;
+  matchesCurrentUser?: boolean;
   grades?: Record<
     string,
     {
@@ -44,8 +57,10 @@ interface GradeSheetRecord {
   id: string;
   title: string;
   courseId: string;
+  courseCode?: string;
   courseName: string;
   gradingPeriod: string;
+  weightPercentage?: number;
   isPublished: boolean;
   students: GradeSheetStudentRecord[];
   activities: Array<{
@@ -189,6 +204,60 @@ const normalizeText = (value: string): string =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
+const normalizeCourseMatchValue = (value: unknown): string =>
+  normalizeText(String(value || "").trim());
+
+const normalizeIdentityValue = (value: unknown): string =>
+  String(value || "").trim().toLowerCase();
+
+const normalizeNameValue = (value: unknown): string =>
+  normalizeText(String(value || "").trim()).replace(/\s+/g, " ");
+
+const readRecordValue = (
+  record: Record<string, unknown>,
+  keys: string[],
+): unknown => {
+  for (const key of keys) {
+    if (key in record) return record[key];
+  }
+  return undefined;
+};
+
+const parseLooseNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed
+    .replace(/\s+/g, "")
+    .replace(/,/g, ".")
+    .replace(/[^0-9.\-]/g, "");
+  if (!normalized) return null;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const gradeSheetMatchesCourse = (
+  sheet: Pick<GradeSheetRecord, "courseId" | "courseCode" | "courseName">,
+  course: Pick<Course, "id" | "code" | "name">,
+): boolean => {
+  const sheetCourseId = String(sheet.courseId || "").trim();
+  const courseId = String(course.id || "").trim();
+  if (sheetCourseId && courseId && sheetCourseId === courseId) return true;
+
+  const sheetCode = normalizeCourseMatchValue(sheet.courseCode);
+  const courseCode = normalizeCourseMatchValue(course.code);
+  if (sheetCode && courseCode && sheetCode === courseCode) return true;
+
+  const sheetName = normalizeCourseMatchValue(sheet.courseName);
+  const courseName = normalizeCourseMatchValue(course.name);
+  if (sheetName && courseName && sheetName === courseName) return true;
+
+  return false;
+};
+
 const normalizeClassSchedule = (value: unknown): CourseClassSchedule[] => {
   if (!Array.isArray(value)) return [];
   return value
@@ -322,7 +391,14 @@ const resolvePendingStateTone = (stateKey: string): StatusTone => {
 
 export default function StudentDashboard() {
   const { user, isAuthenticated } = useAuth();
-  const { courses, assessments, grades, loading } = useAcademic();
+  const {
+    courses,
+    assessments,
+    grades,
+    loading,
+    selectedCourseId: persistedSelectedCourseId,
+    setSelectedCourseId,
+  } = useAcademic();
   const navigate = useNavigate();
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
@@ -335,13 +411,67 @@ export default function StudentDashboard() {
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
   const [activeInsightIndex, setActiveInsightIndex] = useState(0);
   const [animateIn, setAnimateIn] = useState(false);
-  const [activeCourseCardId, setActiveCourseCardId] = useState<string | null>(null);
+  const [institutionModalOpen, setInstitutionModalOpen] = useState(false);
+  const [institutionValue, setInstitutionValue] = useState("");
+  const [institutionSuggestions, setInstitutionSuggestions] = useState<string[]>([]);
+  const [savingInstitution, setSavingInstitution] = useState(false);
+  const [institutionError, setInstitutionError] = useState("");
+  const institutionRoleLabel = user?.role === "admin" ? "Admin" : "Student";
 
   useEffect(() => {
     if (isAuthenticated && user?.role === "docente") {
       navigate("/teacher", { replace: true });
     }
   }, [isAuthenticated, navigate, user?.role]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadInstitutionProfile = async () => {
+      if (!isAuthenticated || !user?.id) {
+        if (!cancelled) {
+          setInstitutionModalOpen(false);
+        }
+        return;
+      }
+
+      if (user.role !== "estudiante" && user.role !== "admin") {
+        if (!cancelled) {
+          setInstitutionModalOpen(false);
+        }
+        return;
+      }
+
+      try {
+        const [storedInstitution, options] = await Promise.all([
+          getUserStoredInstitution(user.id, user.role),
+          getInstitutionSuggestions(),
+        ]);
+        if (cancelled) return;
+
+        setInstitutionSuggestions(options);
+        setInstitutionError("");
+
+        if (isInstitutionMissing(storedInstitution)) {
+          setInstitutionValue("");
+          setInstitutionModalOpen(true);
+          return;
+        }
+
+        setInstitutionValue(storedInstitution);
+        setInstitutionModalOpen(false);
+      } catch {
+        if (cancelled) return;
+        setInstitutionModalOpen(true);
+      }
+    };
+
+    void loadInstitutionProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, user?.id, user?.role]);
 
   useEffect(() => {
     setAvatarLoadFailed(false);
@@ -367,36 +497,209 @@ export default function StudentDashboard() {
 
   useEffect(() => {
     const loadGradeSheets = async () => {
-      if (!user?.id) {
+      if (!user?.id || studentCourses.length === 0) {
         setGradeSheets([]);
         return;
       }
 
       setLoadingSheets(true);
       try {
+        const [userDocSnapshot, studentDocSnapshot] = await Promise.all([
+          getDoc(doc(firebaseDB, "usuarios", user.id)),
+          getDoc(doc(firebaseDB, "estudiantes", user.id)),
+        ]);
+
+        const userDocData = userDocSnapshot.exists() ? userDocSnapshot.data() : {};
+        const studentDocData = studentDocSnapshot.exists() ? studentDocSnapshot.data() : {};
+        const identityAliases = new Set<string>(
+          [
+            user.id,
+            user.email,
+            user.name,
+            (userDocData as Record<string, unknown>).idNumber,
+            (userDocData as Record<string, unknown>).identification,
+            (userDocData as Record<string, unknown>).document,
+            (userDocData as Record<string, unknown>).cedula,
+            (studentDocData as Record<string, unknown>).idNumber,
+            (studentDocData as Record<string, unknown>).identification,
+            (studentDocData as Record<string, unknown>).document,
+            (studentDocData as Record<string, unknown>).cedula,
+            (studentDocData as Record<string, unknown>).email,
+          ]
+            .map(normalizeIdentityValue)
+            .filter(Boolean),
+        );
+        const currentUserNameKey = normalizeNameValue(user.name);
+
+        const matchesCurrentStudent = (payload: Record<string, unknown>) => {
+          const nestedStudent =
+            payload.student && typeof payload.student === "object"
+              ? (payload.student as Record<string, unknown>)
+              : null;
+          const directIdentifiers = [
+            payload.studentId,
+            payload.studentID,
+            payload.student_id,
+            payload.userId,
+            payload.userID,
+            payload.user_id,
+            payload.uid,
+            payload.id,
+            payload.email,
+            payload.studentEmail,
+            payload.correo,
+            payload.mail,
+            payload.idNumber,
+            payload.identification,
+            payload.document,
+            payload.cedula,
+            nestedStudent?.id,
+            nestedStudent?.uid,
+            nestedStudent?.userId,
+            nestedStudent?.email,
+            nestedStudent?.idNumber,
+            nestedStudent?.identification,
+            nestedStudent?.document,
+            nestedStudent?.cedula,
+          ]
+            .map(normalizeIdentityValue)
+            .filter(Boolean);
+
+          if (directIdentifiers.some((key) => identityAliases.has(key))) return true;
+
+          const payloadName = normalizeNameValue(payload.name);
+          return Boolean(payloadName) && payloadName === currentUserNameKey;
+        };
+
+        const courseIds = Array.from(
+          new Set(
+            studentCourses
+              .map((course) => String(course.id || "").trim())
+              .filter(Boolean),
+          ),
+        );
+        if (courseIds.length === 0) {
+          setGradeSheets([]);
+          return;
+        }
+
         const gradeSheetsRef = collection(firebaseDB, "gradeSheets");
-        const querySnapshot = await getDocs(query(gradeSheetsRef));
+        const chunkSize = 10;
+        const chunks = Array.from(
+          { length: Math.ceil(courseIds.length / chunkSize) },
+          (_, index) => courseIds.slice(index * chunkSize, index * chunkSize + chunkSize),
+        );
+        const snapshotGroups = await Promise.all(
+          chunks.map((chunk) =>
+            getDocs(query(gradeSheetsRef, where("courseId", "in", chunk))),
+          ),
+        );
 
         const sheets: GradeSheetRecord[] = [];
-        querySnapshot.forEach((docSnapshot) => {
+        snapshotGroups.forEach((groupSnapshot) => {
+          groupSnapshot.forEach((docSnapshot) => {
           const data = docSnapshot.data();
-          if (!data?.isPublished) return;
+          const publishedRaw = (data as Record<string, unknown>)?.isPublished ??
+            (data as Record<string, unknown>)?.published ??
+            (data as Record<string, unknown>)?.status ??
+            (data as Record<string, unknown>)?.estado;
+          const normalizedPublishText = normalizeIdentityValue(publishedRaw);
+          const isSheetPublished =
+            typeof publishedRaw === "boolean"
+              ? publishedRaw
+              : typeof publishedRaw === "number"
+                ? publishedRaw === 1
+                : normalizedPublishText === "true" ||
+                  normalizedPublishText === "1" ||
+                  normalizedPublishText === "published" ||
+                  normalizedPublishText === "publicado" ||
+                  normalizedPublishText === "active" ||
+                  normalizedPublishText === "activo" ||
+                  normalizedPublishText === "yes" ||
+                  normalizedPublishText === "si";
+          if (!isSheetPublished) return;
 
-          const studentsRaw = Array.isArray(data.students) ? data.students : [];
+          const studentsRaw = Array.isArray(data.students)
+            ? data.students
+            : data.students && typeof data.students === "object"
+              ? Object.entries(data.students as Record<string, unknown>).map(
+                  ([studentKey, studentPayload]) => {
+                    if (studentPayload && typeof studentPayload === "object") {
+                      return {
+                        __studentKey: studentKey,
+                        ...(studentPayload as Record<string, unknown>),
+                      };
+                    }
+                    return {
+                      __studentKey: studentKey,
+                      total: studentPayload,
+                    };
+                  },
+                )
+              : [];
           const students = studentsRaw
             .map((entry) => {
               if (!entry || typeof entry !== "object") return null;
-              const payload = entry as {
-                studentId?: unknown;
-                total?: unknown;
-                status?: unknown;
-                grades?: unknown;
-              };
-              const studentId = String(payload.studentId || "").trim();
-              if (!studentId) return null;
+              const payload = entry as Record<string, unknown>;
+              const studentId = String(
+                readRecordValue(payload, [
+                  "__studentKey",
+                  "studentId",
+                  "studentID",
+                  "student_id",
+                  "id",
+                  "uid",
+                  "userId",
+                  "userID",
+                  "user_id",
+                ]) || "",
+              ).trim();
+              const userIdValue = String(
+                readRecordValue(payload, ["userId", "userID", "user_id", "uid"]) || "",
+              ).trim();
+              const emailValue = String(
+                readRecordValue(payload, ["email", "studentEmail", "correo", "mail"]) || "",
+              ).trim();
+              const idNumberValue = String(
+                readRecordValue(payload, ["idNumber", "document", "cedula"]) || "",
+              ).trim();
+              const identificationValue = String(
+                readRecordValue(payload, ["identification"]) || "",
+              ).trim();
+              const hasSomeIdentity =
+                studentId ||
+                userIdValue ||
+                emailValue ||
+                idNumberValue ||
+                identificationValue;
+              if (!hasSomeIdentity) return null;
 
               let parsedGrades: GradeSheetStudentRecord["grades"];
-              if (payload.grades && typeof payload.grades === "object") {
+              if (Array.isArray(payload.grades)) {
+                const entries: Array<
+                  [string, NonNullable<GradeSheetStudentRecord["grades"]>[string]]
+                > = [];
+                (payload.grades as unknown[]).forEach((gradeValue, index) => {
+                  const parsedGradeValue = parseLooseNumber(
+                    typeof gradeValue === "object" && gradeValue !== null
+                      ? readRecordValue(gradeValue as Record<string, unknown>, [
+                          "value",
+                          "grade",
+                          "score",
+                          "nota",
+                          "total",
+                          "average",
+                        ])
+                      : gradeValue,
+                  );
+                  if (parsedGradeValue === null) return;
+                  entries.push([`activity_${index + 1}`, { value: parsedGradeValue }]);
+                });
+
+                if (entries.length > 0) {
+                  parsedGrades = Object.fromEntries(entries);
+                }
+              } else if (payload.grades && typeof payload.grades === "object") {
                 const entries: Array<
                   [string, NonNullable<GradeSheetStudentRecord["grades"]>[string]]
                 > = [];
@@ -405,16 +708,26 @@ export default function StudentDashboard() {
                     if (!gradeValue || typeof gradeValue !== "object") return;
                     const gradePayload = gradeValue as {
                       value?: unknown;
+                      grade?: unknown;
+                      score?: unknown;
+                      nota?: unknown;
+                      total?: unknown;
+                      average?: unknown;
                       comment?: unknown;
                       submittedAt?: unknown;
                     };
 
                     const gradeEntry: NonNullable<GradeSheetStudentRecord["grades"]>[string] = {};
-                    if (
-                      typeof gradePayload.value === "number" &&
-                      Number.isFinite(gradePayload.value)
-                    ) {
-                      gradeEntry.value = gradePayload.value;
+                    const parsedGradeValue = parseLooseNumber(
+                      gradePayload.value ??
+                        gradePayload.grade ??
+                        gradePayload.score ??
+                        gradePayload.nota ??
+                        gradePayload.total ??
+                        gradePayload.average,
+                    );
+                    if (parsedGradeValue !== null) {
+                      gradeEntry.value = parsedGradeValue;
                     }
                     if (typeof gradePayload.comment === "string") {
                       gradeEntry.comment = gradePayload.comment;
@@ -437,11 +750,28 @@ export default function StudentDashboard() {
               }
 
               const studentRecord: GradeSheetStudentRecord = {
-                studentId,
-                status: String(payload.status || ""),
+                studentId: studentId || userIdValue,
+                status: String(readRecordValue(payload, ["status", "estado"]) || ""),
+                userId: userIdValue || undefined,
+                email: emailValue || undefined,
+                idNumber: idNumberValue || undefined,
+                identification: identificationValue || undefined,
+                matchesCurrentUser: matchesCurrentStudent(payload as Record<string, unknown>),
               };
-              if (typeof payload.total === "number" && Number.isFinite(payload.total)) {
-                studentRecord.total = payload.total;
+              const parsedTotal = parseLooseNumber(
+                readRecordValue(payload, [
+                  "total",
+                  "grade",
+                  "finalGrade",
+                  "average",
+                  "promedio",
+                  "notaFinal",
+                  "nota",
+                  "score",
+                ]),
+              );
+              if (parsedTotal !== null) {
+                studentRecord.total = parsedTotal;
               }
               if (parsedGrades) {
                 studentRecord.grades = parsedGrades;
@@ -450,12 +780,29 @@ export default function StudentDashboard() {
             })
             .filter((entry): entry is GradeSheetStudentRecord => entry !== null);
 
-          const activitiesRaw = Array.isArray(data.activities) ? data.activities : [];
+          const activitiesRaw = Array.isArray(data.activities)
+            ? data.activities
+            : data.activities && typeof data.activities === "object"
+              ? Object.entries(data.activities as Record<string, unknown>).map(
+                  ([activityKey, activityPayload]) => {
+                    if (activityPayload && typeof activityPayload === "object") {
+                      return {
+                        __activityKey: activityKey,
+                        ...(activityPayload as Record<string, unknown>),
+                      };
+                    }
+                    return {
+                      __activityKey: activityKey,
+                      name: String(activityPayload || activityKey),
+                    };
+                  },
+                )
+              : [];
           const activities = activitiesRaw
             .map((entry) => {
               if (!entry || typeof entry !== "object") return null;
               const payload = entry as { id?: unknown; name?: unknown; description?: unknown };
-              const id = String(payload.id || "").trim();
+              const id = String((payload as Record<string, unknown>).__activityKey || payload.id || "").trim();
               const name = String(payload.name || "").trim();
               if (!id && !name) return null;
               const activityRecord: GradeSheetRecord["activities"][number] = {
@@ -471,22 +818,52 @@ export default function StudentDashboard() {
               (entry): entry is GradeSheetRecord["activities"][number] => entry !== null,
             );
 
-          const isStudentInSheet = students.some((student) => student.studentId === user.id);
+          const isStudentInSheet = students.some(
+            (student) =>
+              student.matchesCurrentUser ||
+              normalizeIdentityValue(student.studentId) === normalizeIdentityValue(user.id) ||
+              normalizeIdentityValue(student.userId) === normalizeIdentityValue(user.id),
+          );
           if (!isStudentInSheet) return;
 
           sheets.push({
             id: docSnapshot.id,
             title: String(data.title || "Grade Sheet"),
-            courseId: String(data.courseId || ""),
-            courseName: String(data.courseName || "Course"),
+            courseId: String(
+              (data as Record<string, unknown>).courseId ||
+                (data as Record<string, unknown>).course_id ||
+                (data as Record<string, unknown>).cursoId ||
+                "",
+            ).trim(),
+            courseCode:
+              String(
+                (data as Record<string, unknown>).courseCode ||
+                  (data as Record<string, unknown>).course_code ||
+                  (data as Record<string, unknown>).codigoCurso ||
+                  "",
+              ).trim() || undefined,
+            courseName: String(
+              (data as Record<string, unknown>).courseName ||
+                (data as Record<string, unknown>).course_name ||
+                (data as Record<string, unknown>).nombreCurso ||
+                "Course",
+            ),
             gradingPeriod: String(data.gradingPeriod || "Period"),
-            isPublished: Boolean(data.isPublished),
+            weightPercentage:
+              parseLooseNumber(
+                (data as Record<string, unknown>).weightPercentage ??
+                  (data as Record<string, unknown>).weight ??
+                  (data as Record<string, unknown>).percentage ??
+                  (data as Record<string, unknown>).porcentaje,
+              ) ?? undefined,
+            isPublished: isSheetPublished,
             students,
             activities,
             updatedAt:
               data.updatedAt instanceof Timestamp || data.updatedAt instanceof Date
                 ? data.updatedAt
                 : new Date(),
+          });
           });
         });
 
@@ -499,7 +876,7 @@ export default function StudentDashboard() {
     };
 
     void loadGradeSheets();
-  }, [user?.id]);
+  }, [studentCourses, user?.id]);
 
   useEffect(() => {
     const loadRecentSlides = async () => {
@@ -625,48 +1002,241 @@ export default function StudentDashboard() {
     void loadSubmissions();
   }, [user?.id]);
 
-  const calculateCourseAverages = useMemo(() => {
-    const averages = new Map<string, { average: number; sheets: GradeSheetRecord[] }>();
-    if (!user?.id) return averages;
+  const courseGradeMetrics = useMemo(() => {
+    const metrics = new Map<
+      string,
+      { average: number; evaluatedPercentage: number; hasGrade: boolean }
+    >();
+    if (!user?.id || studentCourses.length === 0) return metrics;
 
-    gradeSheets.forEach((sheet) => {
-      const studentData = sheet.students.find((student) => student.studentId === user.id);
-      if (!studentData || typeof studentData.total !== "number") return;
+    studentCourses.forEach((course) => {
+      const matchingSheets = gradeSheets.filter((sheet) =>
+        gradeSheetMatchesCourse(sheet, course),
+      );
+      if (matchingSheets.length === 0) return;
 
-      if (!averages.has(sheet.courseId)) {
-        averages.set(sheet.courseId, { average: 0, sheets: [] });
-      }
+      const evaluatedSheets: Array<{ score: number; weight: number | null }> = [];
+      let gradedActivities = 0;
+      let totalActivities = 0;
 
-      const current = averages.get(sheet.courseId);
-      if (!current) return;
-      current.sheets.push(sheet);
-      current.average =
-        current.sheets.reduce((sum, currentSheet) => {
-          const currentStudent = currentSheet.students.find(
-            (student) => student.studentId === user.id,
-          );
-          return sum + (currentStudent?.total || 0);
-        }, 0) / current.sheets.length;
+      matchingSheets.forEach((sheet) => {
+        const studentData = sheet.students.find(
+          (student) =>
+            student.matchesCurrentUser ||
+            normalizeIdentityValue(student.studentId) === normalizeIdentityValue(user.id) ||
+            normalizeIdentityValue(student.userId) === normalizeIdentityValue(user.id),
+        );
+        if (!studentData) return;
+
+        const gradeEntries = Object.values(studentData.grades || {})
+          .map((entry) => parseLooseNumber(entry?.value))
+          .filter((value): value is number => value !== null);
+        const hasGradeEntries = gradeEntries.length > 0;
+
+        const activityCount = Array.isArray(sheet.activities) && sheet.activities.length > 0
+          ? sheet.activities.length
+          : gradeEntries.length;
+
+        if (activityCount > 0) {
+          totalActivities += activityCount;
+        }
+        if (hasGradeEntries) {
+          gradedActivities += gradeEntries.length;
+        }
+
+        const totalValue = parseLooseNumber(studentData.total);
+        const statusText = normalizeIdentityValue(studentData.status);
+        const pendingWithoutGrades =
+          !hasGradeEntries &&
+          (statusText === "" ||
+            statusText === "pending" ||
+            statusText === "not_graded" ||
+            statusText === "sin calificar");
+
+        if (pendingWithoutGrades) return;
+
+        let sheetScore: number | null = null;
+        if (gradeEntries.length > 0) {
+          const averageFromEntries =
+            gradeEntries.reduce((sum, value) => sum + value, 0) / gradeEntries.length;
+          sheetScore = Math.max(0, Math.min(5, averageFromEntries));
+        } else if (totalValue !== null) {
+          sheetScore = Math.max(0, Math.min(5, totalValue));
+        }
+
+        if (sheetScore === null) return;
+
+        const sheetWeight = parseLooseNumber(sheet.weightPercentage);
+        evaluatedSheets.push({
+          score: sheetScore,
+          weight:
+            sheetWeight !== null && sheetWeight > 0
+              ? Math.max(0, Math.min(100, sheetWeight))
+              : null,
+        });
+      });
+
+      const hasGrade = evaluatedSheets.length > 0;
+      if (!hasGrade) return;
+
+      const weightedSheets = evaluatedSheets.filter((sheet) => sheet.weight !== null);
+      const hasWeights = weightedSheets.length > 0;
+      const average = hasWeights
+        ? (() => {
+            const evaluatedWeight = weightedSheets.reduce(
+              (sum, sheet) => sum + (sheet.weight || 0),
+              0,
+            );
+            if (evaluatedWeight <= 0) {
+              return (
+                evaluatedSheets.reduce((sum, sheet) => sum + sheet.score, 0) /
+                evaluatedSheets.length
+              );
+            }
+            const weightedSum = weightedSheets.reduce(
+              (sum, sheet) => sum + sheet.score * ((sheet.weight || 0) / 100),
+              0,
+            );
+            return weightedSum / (evaluatedWeight / 100);
+          })()
+        : evaluatedSheets.reduce((sum, sheet) => sum + sheet.score, 0) / evaluatedSheets.length;
+
+      const evaluatedPercentage = hasWeights
+        ? Math.max(
+            0,
+            Math.min(
+              100,
+              weightedSheets.reduce((sum, sheet) => sum + (sheet.weight || 0), 0),
+            ),
+          )
+        : totalActivities > 0
+          ? Math.max(0, Math.min(100, (gradedActivities / totalActivities) * 100))
+          : Math.max(
+              0,
+              Math.min(
+                100,
+                (evaluatedSheets.length / Math.max(1, matchingSheets.length)) * 100,
+              ),
+            );
+
+      metrics.set(course.id, {
+        average: Math.max(0, Math.min(5, average)),
+        evaluatedPercentage,
+        hasGrade,
+      });
     });
 
-    return averages;
-  }, [gradeSheets, user?.id]);
+    return metrics;
+  }, [gradeSheets, studentCourses, user?.id]);
 
   const courseProgress = useMemo(() => {
     if (!user?.id) return [];
 
     return studentCourses.map((course) => {
       const courseAssessments = assessments.filter((assessment) => assessment.courseId === course.id);
-      const realAverage = calculateCourseAverages.get(course.id);
+      const realAverage = courseGradeMetrics.get(course.id);
+      const gradedAssessmentIds = new Set(
+        courseAssessments
+          .map((assessment) => String(assessment.id || "").trim())
+          .filter(Boolean),
+      );
+      const linkedAssessmentGrades = grades.filter((grade) => {
+        if (grade.studentId !== user.id) return false;
+        const assessmentId = String(grade.assessmentId || "").trim();
+        if (!assessmentId || !gradedAssessmentIds.has(assessmentId)) return false;
+        const parsedValue = parseLooseNumber(grade.value);
+        return parsedValue !== null;
+      });
+
+      const linkedAssessmentProgress =
+        linkedAssessmentGrades.length > 0
+          ? (() => {
+              const assessmentById = new Map(
+                courseAssessments.map((assessment) => [String(assessment.id || "").trim(), assessment]),
+              );
+              const gradedPercentages = new Set<string>();
+              let weightedSum = 0;
+
+              linkedAssessmentGrades.forEach((grade) => {
+                const assessmentId = String(grade.assessmentId || "").trim();
+                const assessment = assessmentById.get(assessmentId);
+                if (!assessment) return;
+
+                const gradeValue = parseLooseNumber(grade.value);
+                if (gradeValue === null) return;
+                const percentage = parseLooseNumber(
+                  (assessment as unknown as Record<string, unknown>).percentage,
+                );
+                const safePercentage = percentage !== null ? Math.max(0, percentage) : 0;
+
+                weightedSum += gradeValue * (safePercentage / 100);
+                gradedPercentages.add(`${assessmentId}:${safePercentage}`);
+              });
+
+              const evaluatedPercentage = Array.from(gradedPercentages).reduce((sum, key) => {
+                const maybePercentage = parseLooseNumber(key.split(":")[1]);
+                return sum + (maybePercentage ?? 0);
+              }, 0);
+
+              const normalizedGrade =
+                evaluatedPercentage > 0
+                  ? Math.max(0, Math.min(5, weightedSum / (evaluatedPercentage / 100)))
+                  : 0;
+              const remainingPercentage = Math.max(0, 100 - evaluatedPercentage);
+
+              return {
+                studentId: user.id,
+                courseId: course.id,
+                currentGrade: normalizedGrade,
+                evaluatedPercentage: Math.max(0, Math.min(100, evaluatedPercentage)),
+                remainingPercentage,
+                minGradeToPass: normalizedGrade >= 3.0 ? 0 : 3.0,
+                status:
+                  normalizedGrade >= 3.5
+                    ? "passing"
+                    : normalizedGrade >= 2.5
+                      ? "at-risk"
+                      : "failing",
+                grades: linkedAssessmentGrades as Grade[],
+              } as const;
+            })()
+          : null;
+
+      const fallbackCalculatedProgress = calculateStudentProgress(
+        user.id,
+        course.id,
+        grades,
+        courseAssessments,
+      );
+      const fallbackNormalizedGrade =
+        fallbackCalculatedProgress.evaluatedPercentage > 0
+          ? fallbackCalculatedProgress.currentGrade /
+            (fallbackCalculatedProgress.evaluatedPercentage / 100)
+          : fallbackCalculatedProgress.currentGrade;
+      const fallbackCurrentGrade = Math.max(
+        0,
+        Math.min(5, Number.isFinite(fallbackNormalizedGrade) ? fallbackNormalizedGrade : 0),
+      );
+      const fallbackStatus =
+        fallbackCurrentGrade >= 3.5
+          ? "passing"
+          : fallbackCurrentGrade >= 2.5
+            ? "at-risk"
+            : "failing";
+      const normalizedFallbackProgress = {
+        ...fallbackCalculatedProgress,
+        currentGrade: fallbackCurrentGrade,
+        status: fallbackStatus,
+      };
 
       const progress =
-        realAverage && realAverage.sheets.length > 0
+        realAverage?.hasGrade
           ? {
               studentId: user.id,
               courseId: course.id,
               currentGrade: realAverage.average,
-              evaluatedPercentage: 100,
-              remainingPercentage: 0,
+              evaluatedPercentage: realAverage.evaluatedPercentage,
+              remainingPercentage: Math.max(0, 100 - realAverage.evaluatedPercentage),
               minGradeToPass: realAverage.average >= 3.0 ? 0 : 3.0,
               status:
                 realAverage.average >= 3.5
@@ -674,20 +1244,23 @@ export default function StudentDashboard() {
                   : realAverage.average >= 2.5
                     ? "at-risk"
                     : "failing",
-              grades: [] as Grade[],
+                grades: [] as Grade[],
             }
-          : calculateStudentProgress(user.id, course.id, grades, courseAssessments);
+          : linkedAssessmentProgress
+            ? linkedAssessmentProgress
+          : normalizedFallbackProgress;
 
       return {
         course,
         progress,
         hasRealGrades:
-          Boolean(realAverage?.sheets.length) ||
+          Boolean(realAverage?.hasGrade) ||
+          Boolean(linkedAssessmentProgress) ||
           progress.grades.length > 0 ||
           grades.some((grade) => grade.courseId === course.id && grade.studentId === user.id),
       };
     });
-  }, [assessments, calculateCourseAverages, grades, studentCourses, user?.id]);
+  }, [assessments, courseGradeMetrics, grades, studentCourses, user?.id]);
 
   const totalCourses = studentCourses.length;
 
@@ -1218,11 +1791,14 @@ export default function StudentDashboard() {
 
   const selectedCourseId = useMemo(() => {
     if (studentCourseCards.length === 0) return null;
-    if (activeCourseCardId && studentCourseCards.some((item) => item.course.id === activeCourseCardId)) {
-      return activeCourseCardId;
+    if (
+      persistedSelectedCourseId &&
+      studentCourseCards.some((item) => item.course.id === persistedSelectedCourseId)
+    ) {
+      return persistedSelectedCourseId;
     }
     return studentCourseCards[0].course.id;
-  }, [activeCourseCardId, studentCourseCards]);
+  }, [persistedSelectedCourseId, studentCourseCards]);
 
   const selectedCourse = useMemo(
     () => studentCourses.find((course) => course.id === selectedCourseId) || null,
@@ -1497,13 +2073,15 @@ export default function StudentDashboard() {
 
   useEffect(() => {
     if (studentCourseCards.length === 0) {
-      setActiveCourseCardId(null);
+      if (persistedSelectedCourseId) {
+        setSelectedCourseId("");
+      }
       return;
     }
-    if (!activeCourseCardId || !studentCourseCards.some((item) => item.course.id === activeCourseCardId)) {
-      setActiveCourseCardId(studentCourseCards[0].course.id);
+    if (!selectedCourseId || selectedCourseId !== persistedSelectedCourseId) {
+      setSelectedCourseId(selectedCourseId || studentCourseCards[0].course.id);
     }
-  }, [activeCourseCardId, studentCourseCards]);
+  }, [persistedSelectedCourseId, selectedCourseId, setSelectedCourseId, studentCourseCards]);
 
   useEffect(() => {
     setActiveInsightIndex(0);
@@ -1517,6 +2095,34 @@ export default function StudentDashboard() {
   const goToNextInsight = () => {
     if (insightCards.length <= 1) return;
     setActiveInsightIndex((current) => (current + 1) % insightCards.length);
+  };
+
+  const handleSaveInstitution = async () => {
+    if (!user?.id || savingInstitution) return;
+
+    setInstitutionError("");
+    setSavingInstitution(true);
+    try {
+      const savedInstitution = await saveUserInstitution({
+        userId: user.id,
+        role: user.role,
+        email: user.email,
+        name: user.name,
+        institutionName: institutionValue,
+      });
+
+      setInstitutionValue(savedInstitution);
+      setInstitutionSuggestions((current) =>
+        Array.from(new Set([...current, savedInstitution])).sort((left, right) =>
+          left.localeCompare(right),
+        ),
+      );
+      setInstitutionModalOpen(false);
+    } catch (error) {
+      setInstitutionError(getInstitutionSaveErrorMessage(error));
+    } finally {
+      setSavingInstitution(false);
+    }
   };
 
   if (loading.courses || loadingSheets || loadingSubmissions) {
@@ -1537,6 +2143,19 @@ export default function StudentDashboard() {
             </div>
           </div>
         </div>
+        <InstitutionCaptureModal
+          open={institutionModalOpen}
+          roleLabel={institutionRoleLabel}
+          institutionValue={institutionValue}
+          suggestions={institutionSuggestions}
+          saving={savingInstitution}
+          errorMessage={institutionError}
+          onInstitutionChange={(value) => {
+            setInstitutionValue(value);
+            if (institutionError) setInstitutionError("");
+          }}
+          onSave={handleSaveInstitution}
+        />
       </DashboardLayout>
     );
   }
@@ -1590,6 +2209,19 @@ export default function StudentDashboard() {
             </section>
           </div>
         </div>
+        <InstitutionCaptureModal
+          open={institutionModalOpen}
+          roleLabel={institutionRoleLabel}
+          institutionValue={institutionValue}
+          suggestions={institutionSuggestions}
+          saving={savingInstitution}
+          errorMessage={institutionError}
+          onInstitutionChange={(value) => {
+            setInstitutionValue(value);
+            if (institutionError) setInstitutionError("");
+          }}
+          onSave={handleSaveInstitution}
+        />
       </DashboardLayout>
     );
   }
@@ -1734,15 +2366,15 @@ export default function StudentDashboard() {
                   ) : (
                     <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                       {studentCourseCards.map((item) => {
-                        const isActive = activeCourseCardId === item.course.id;
+                        const isActive = selectedCourseId === item.course.id;
                         return (
                           <article
                             key={item.course.id}
-                            onClick={() => setActiveCourseCardId(item.course.id)}
+                            onClick={() => setSelectedCourseId(item.course.id)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                setActiveCourseCardId(item.course.id);
+                                setSelectedCourseId(item.course.id);
                               }
                             }}
                             role="button"
@@ -1777,7 +2409,8 @@ export default function StudentDashboard() {
                               <p className={`text-4xl font-extrabold leading-none ${item.scoreTone}`}>
                                 {item.currentGrade.toFixed(1)}
                               </p>
-                              <span className="pb-1 text-sm font-semibold text-slate-500">/5</span>
+                              <span className="pb-1 text-sm font-semibold text-slate-500">/5.0
+</span>
                             </div>
 
                             <div className="mt-2 grid grid-cols-3 gap-1.5">
@@ -2320,6 +2953,19 @@ export default function StudentDashboard() {
           </div>
         </div>
       </div>
+      <InstitutionCaptureModal
+        open={institutionModalOpen}
+        roleLabel={institutionRoleLabel}
+        institutionValue={institutionValue}
+        suggestions={institutionSuggestions}
+        saving={savingInstitution}
+        errorMessage={institutionError}
+        onInstitutionChange={(value) => {
+          setInstitutionValue(value);
+          if (institutionError) setInstitutionError("");
+        }}
+        onSave={handleSaveInstitution}
+      />
     </DashboardLayout>
   );
 }

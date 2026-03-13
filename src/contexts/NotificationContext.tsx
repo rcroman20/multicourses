@@ -7,6 +7,8 @@ import {
   type NotificationType,
 } from "@/lib/services/notificationService";
 import { assessmentService } from "@/lib/services/assessmentService";
+import { getTeacherApprovalRequests } from "@/lib/services/teacherApprovalService";
+import { getPendingAccountDeletionRequests } from "@/lib/services/accountDeletionService";
 import {
   getNotificationAutomations,
   isNotificationAutomationEnabled,
@@ -135,6 +137,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const processingDeadlineRemindersRef = useRef(false);
   const processingStudentRemindersRef = useRef(false);
   const processingDailyClassesDigestRef = useRef(false);
+  const processingRoleDigestRef = useRef(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -564,6 +567,105 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     return () => window.clearInterval(intervalId);
   }, [academicLoading.courses, courses, user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!user?.id || academicLoading.courses) return;
+
+    const runRoleDigest = async () => {
+      if (processingRoleDigestRef.current) return;
+      processingRoleDigestRef.current = true;
+
+      try {
+        const hubPrefs = getNotificationHubPreferences(user.id);
+        if (isWithinQuietHours(hubPrefs) || isMutedType(hubPrefs, "info")) return;
+
+        const todayKey = getLocalDateKey();
+        const localGuardKey = `notifications:auto:role-digest:${user.id}:${user.role}:${todayKey}`;
+        if (localStorage.getItem(localGuardKey)) return;
+
+        let title = "Daily digest";
+        let message = "";
+        let link = "/";
+
+        if (user.role === "docente") {
+          const teacherCourses = courses.filter((course) => course.teacherId === user.id);
+          const teacherCourseIds = new Set(teacherCourses.map((course) => course.id));
+          const totalStudents = teacherCourses.reduce(
+            (sum, course) =>
+              sum +
+              (Array.isArray(course.enrolledStudents) ? course.enrolledStudents.length : 0),
+            0,
+          );
+          const now = Date.now();
+          const upcomingWindowMs = 7 * 24 * 60 * 60 * 1000;
+          const upcomingAssessments = assessments.filter((assessment) => {
+            if (!teacherCourseIds.has(assessment.courseId)) return false;
+            if (!assessment.dueDate) return false;
+            const dueTs = new Date(String(assessment.dueDate)).getTime();
+            if (Number.isNaN(dueTs)) return false;
+            return dueTs >= now && dueTs <= now + upcomingWindowMs;
+          });
+
+          title = "Teacher daily brief";
+          message = `You have ${teacherCourses.length} active course(s), ${totalStudents} enrolled student(s), and ${upcomingAssessments.length} assessment(s) due in the next 7 days.`;
+          link = "/teacher";
+        } else if (user.role === "estudiante") {
+          const studentCourses = courses.filter((course) =>
+            (course.enrolledStudents || []).includes(user.id),
+          );
+          const courseIds = new Set(studentCourses.map((course) => course.id));
+          const now = Date.now();
+          const upcomingWindowMs = 7 * 24 * 60 * 60 * 1000;
+          const upcomingAssessments = assessments.filter((assessment) => {
+            if (!courseIds.has(assessment.courseId)) return false;
+            if (!assessment.dueDate) return false;
+            const dueTs = new Date(String(assessment.dueDate)).getTime();
+            if (Number.isNaN(dueTs)) return false;
+            return dueTs >= now && dueTs <= now + upcomingWindowMs;
+          });
+
+          title = "Student daily brief";
+          message = `You are enrolled in ${studentCourses.length} course(s) with ${upcomingAssessments.length} assessment(s) due in the next 7 days.`;
+          link = "/student";
+        } else if (user.role === "admin") {
+          const [approvalsResult, deletionsResult] = await Promise.allSettled([
+            getTeacherApprovalRequests(),
+            getPendingAccountDeletionRequests(),
+          ]);
+          const approvalsCount =
+            approvalsResult.status === "fulfilled" ? approvalsResult.value.length : 0;
+          const deletionsCount =
+            deletionsResult.status === "fulfilled" ? deletionsResult.value.length : 0;
+
+          title = "Admin daily brief";
+          message = `Pending teacher approvals: ${approvalsCount}. Pending account deletions: ${deletionsCount}.`;
+          link = "/admin/dashboard";
+        } else {
+          return;
+        }
+
+        await notificationService.createNotification(user.id, {
+          title,
+          message,
+          type: "info",
+          link,
+          dedupeKey: `role-digest:${user.role}:${todayKey}`,
+        });
+        localStorage.setItem(localGuardKey, String(Date.now()));
+      } catch {
+        // Keep digest automation best-effort.
+      } finally {
+        processingRoleDigestRef.current = false;
+      }
+    };
+
+    void runRoleDigest();
+    const intervalId = window.setInterval(() => {
+      void runRoleDigest();
+    }, 60 * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [academicLoading.courses, assessments, courses, user?.id, user?.role]);
 
   return (
     <NotificationContext.Provider

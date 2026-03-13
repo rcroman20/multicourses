@@ -3,6 +3,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAcademic } from "@/contexts/AcademicContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { getAccessibleCoursesForUser } from "@/lib/courseAccess";
+import { getAdminUserIds, isAdminEmail } from "@/lib/services/adminAccessService";
+import { notificationService } from "@/lib/services/notificationService";
+import { TEACHER_ONBOARDING_COURSE_CODE } from "@/lib/services/teacherOnboardingService";
 import { firebaseDB } from "@/lib/firebase";
 import {
   addDoc,
@@ -91,6 +95,7 @@ interface SharedQuizTemplate {
   normalizedTheme: string;
   questionCount: number;
   questions: SharedQuizQuestionDraft[];
+  templateKind?: "exercise";
   createdAt: Date;
   updatedAt: Date;
 }
@@ -123,6 +128,7 @@ interface QuizAttempt {
 interface CourseGradeSheet {
   id: string;
   title: string;
+  unitLabel: string;
 }
 
 interface GradeSheetActivity {
@@ -150,6 +156,11 @@ interface GradeSheetStudentRow {
 
 type FinishReason = "manual" | "timeout" | "abandoned";
 type EditingField = "theme" | "question" | "options" | "correctOptionIndex";
+type AuthoringWorkspacePanel =
+  | "create"
+  | "questionBank"
+  | "sharedQuizBank"
+  | "mandatoryTeacherQuizzes";
 type EditableQuestionFields = Pick<
   ExerciseQuestion,
   "theme" | "question" | "options" | "correctOptionIndex" | "isPublished"
@@ -207,6 +218,14 @@ const buildQuestionSignature = (
     options.map((option) => normalizeQuestionText(option)).join("|"),
     correctOptionIndex,
   ].join("::");
+
+const getSharedTemplateVisibilityKey = (
+  template: Pick<
+    SharedQuizTemplate,
+    "sourceCourseId" | "normalizedTheme" | "templateKind"
+  >,
+) =>
+  `${template.sourceCourseId}::${template.templateKind || "exercise"}::${template.normalizedTheme}`;
 
 interface ModalProps {
   isOpen: boolean;
@@ -372,6 +391,9 @@ interface ThemeCardProps {
   attemptCount?: number;
   isSelected: boolean;
   canTake: boolean;
+  mandatoryApprovalEnabled?: boolean;
+  approvalThreshold?: number;
+  approved?: boolean;
   onSelect: () => void;
   onStart: () => void;
 }
@@ -385,9 +407,20 @@ const ThemeCard: React.FC<ThemeCardProps> = ({
   attemptCount = 0,
   isSelected,
   canTake,
+  mandatoryApprovalEnabled = false,
+  approvalThreshold = 80,
+  approved = false,
   onSelect,
   onStart,
 }) => {
+  const startButtonLabel = mandatoryApprovalEnabled
+    ? attempt
+      ? "Retry Quiz"
+      : "Start Quiz"
+    : attempt && !isLinked
+      ? "Retake Quiz"
+      : "Start Quiz";
+
   return (
     <div
       className={`group cursor-pointer rounded-xl border transition-all ${
@@ -445,7 +478,7 @@ const ThemeCard: React.FC<ThemeCardProps> = ({
 
         <div className="flex items-center justify-between">
           <div className="text-xs text-slate-500">
-            {!isLinked && (
+            {(!isLinked || mandatoryApprovalEnabled) && (
               <span>
                 Attempts: {attemptCount}/{maxAttempts}
               </span>
@@ -459,13 +492,34 @@ const ThemeCard: React.FC<ThemeCardProps> = ({
               }}
               className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-700"
             >
-              {attempt && !isLinked ? "Retake Quiz" : "Start Quiz"}
+              {startButtonLabel}
             </button>
           ) : (
-            <div className="flex items-center gap-1 text-emerald-700">
-              <CheckCircle className="h-3.5 w-3.5" />
-              <span className="text-xs font-semibold">Completed</span>
-            </div>
+            <>
+              {mandatoryApprovalEnabled ? (
+                <div
+                  className={`flex items-center gap-1 ${
+                    approved ? "text-emerald-700" : "text-rose-700"
+                  }`}
+                >
+                  {approved ? (
+                    <CheckCircle className="h-3.5 w-3.5" />
+                  ) : (
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                  )}
+                  <span className="text-xs font-semibold">
+                    {approved
+                      ? "Approved"
+                      : `Not approved (< ${approvalThreshold}%)`}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 text-emerald-700">
+                  <CheckCircle className="h-3.5 w-3.5" />
+                  <span className="text-xs font-semibold">Completed</span>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -887,6 +941,8 @@ export default function ExerciseBankPage() {
   const QUIZ_SECONDS_PER_QUESTION = 90;
   const MAX_HISTORY_ATTEMPTS = 3;
   const MAX_UNLINKED_ATTEMPTS = 3;
+  const MAX_MANDATORY_ATTEMPTS = 3;
+  const MANDATORY_APPROVAL_PERCENTAGE = 80;
   const SHARED_TEMPLATE_COLLECTION = "quizBankTemplates";
 
   const { courseCode } = useParams<{ courseCode?: string }>();
@@ -894,7 +950,9 @@ export default function ExerciseBankPage() {
   const { user } = useAuth();
   const { courses, selectedCourseId, setSelectedCourseId } = useAcademic();
 
-  const isTeacher = user?.role === "docente";
+  const isAdmin = user?.role === "admin";
+  const isTeacherRole = user?.role === "docente";
+  const isTeacher = isTeacherRole || isAdmin;
 
   const [loading, setLoading] = useState(false);
   const [loadingAttempts, setLoadingAttempts] = useState(false);
@@ -973,9 +1031,18 @@ export default function ExerciseBankPage() {
   const [expandedThemes, setExpandedThemes] = useState<Record<string, boolean>>(
     {},
   );
+  const [selectedQuestionBankTheme, setSelectedQuestionBankTheme] = useState("all");
+  const [activeAuthoringPanel, setActiveAuthoringPanel] =
+    useState<AuthoringWorkspacePanel>("create");
+  const [mandatoryCourseQuizThemes, setMandatoryCourseQuizThemes] = useState<
+    Array<{ theme: string; questionCount: number }>
+  >([]);
+  const [loadingMandatoryCourseQuizThemes, setLoadingMandatoryCourseQuizThemes] =
+    useState(false);
   const [sharedTemplates, setSharedTemplates] = useState<SharedQuizTemplate[]>(
     [],
   );
+  const [adminOwnerIds, setAdminOwnerIds] = useState<string[]>([]);
   const [loadingSharedTemplates, setLoadingSharedTemplates] = useState(false);
   const [sharedSearchQuery, setSharedSearchQuery] = useState("");
   const [selectedThemeToPublish, setSelectedThemeToPublish] = useState("");
@@ -983,11 +1050,22 @@ export default function ExerciseBankPage() {
   const [importingTemplateId, setImportingTemplateId] = useState<string | null>(
     null,
   );
-  const [showSharedQuizBank, setShowSharedQuizBank] = useState(false);
-
+  const [deletingImportedTemplateId, setDeletingImportedTemplateId] = useState<
+    string | null
+  >(null);
+  const [deletingSharedTemplateId, setDeletingSharedTemplateId] = useState<
+    string | null
+  >(null);
+  const [hiddenSharedTemplateKeys, setHiddenSharedTemplateKeys] = useState<
+    string[]
+  >([]);
   const finishInFlightRef = useRef(false);
   const quizStartSectionRef = useRef<HTMLDivElement | null>(null);
   const finishingByTimerRef = useRef(false);
+  const latestQuestionsRequestRef = useRef(0);
+  const latestThemeLinksRequestRef = useRef(0);
+  const latestAttemptsRequestRef = useRef(0);
+  const latestGradeSheetsRequestRef = useRef(0);
   const finishQuizRef = useRef<
     | ((
         reason?: FinishReason,
@@ -1023,25 +1101,63 @@ export default function ExerciseBankPage() {
 
   const availableCourses = useMemo(() => {
     if (!user) return [];
-    if (isTeacher) {
-      return courses.filter((course) => course.teacherId === user.id);
-    }
-    return courses.filter(
-      (course) =>
-        course.enrolledStudents?.includes(user.id) ||
-        course.enrolledStudents?.some((student: unknown) => {
-          if (typeof student === "string") return student === user.id;
-          if (student && typeof student === "object" && "id" in student) {
-            return (student as { id: string }).id === user.id;
-          }
-          return false;
-        }),
-    );
-  }, [courses, isTeacher, user]);
+    return getAccessibleCoursesForUser(courses, user, {
+      includeAllForAdmin: user.role === "admin",
+      includeEnrolledForTeacher: true,
+    });
+  }, [courses, user]);
 
   const selectedCourse = useMemo(
     () => availableCourses.find((course) => course.id === selectedCourseId),
     [availableCourses, selectedCourseId],
+  );
+
+  const selectedCourseRecord = selectedCourse
+    ? (selectedCourse as unknown as Record<string, unknown>)
+    : null;
+  const mandatoryTeacherCourse = useMemo(
+    () =>
+      availableCourses.find((course) => {
+        const courseRecord = course as unknown as Record<string, unknown>;
+        return Boolean(
+          courseRecord?.isMandatory ||
+            courseRecord?.mandatory ||
+            courseRecord?.isMandatoryForTeachers ||
+            courseRecord?.mandatoryForTeachers ||
+            courseRecord?.mandatoryTeacherCourse ||
+            String(course.code || "").trim().toUpperCase() ===
+              TEACHER_ONBOARDING_COURSE_CODE,
+        );
+      }) || null,
+    [availableCourses],
+  );
+  const isMandatorySelectedCourse = useMemo(() => {
+    if (!selectedCourse) return false;
+    return Boolean(
+      selectedCourseRecord?.isMandatory ||
+        selectedCourseRecord?.mandatory ||
+        selectedCourseRecord?.isMandatoryForTeachers ||
+        selectedCourseRecord?.mandatoryForTeachers ||
+        selectedCourseRecord?.mandatoryTeacherCourse ||
+        String(selectedCourse.code || "").trim().toUpperCase() ===
+          TEACHER_ONBOARDING_COURSE_CODE,
+    );
+  }, [selectedCourse, selectedCourseRecord]);
+
+  const teacherOwnsSelectedCourse = Boolean(
+    isTeacherRole &&
+      selectedCourse &&
+      String(selectedCourse.teacherId || "").trim() === String(user?.id || "").trim(),
+  );
+  const teacherMandatoryLearnerMode = isTeacherRole && isMandatorySelectedCourse;
+  const teacherCanAuthorSelectedCourse =
+    teacherOwnsSelectedCourse && !teacherMandatoryLearnerMode;
+  const isAuthoringMode = isAdmin || teacherCanAuthorSelectedCourse;
+  const isLearnerMode = !isAdmin && !teacherCanAuthorSelectedCourse;
+  const showMandatoryTeacherQuizzesCard = Boolean(
+    isAdmin &&
+      mandatoryTeacherCourse &&
+      mandatoryTeacherCourse.id === selectedCourseId,
   );
 
   const availableThemes = useMemo(
@@ -1105,9 +1221,120 @@ export default function ExerciseBankPage() {
     return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
   }, [filteredQuestions]);
 
+  const currentCourseQuestionSignatureSet = useMemo(
+    () =>
+      new Set(
+        questions.map((question) =>
+          buildQuestionSignature(
+            question.theme,
+            question.question,
+            question.options,
+            question.correctOptionIndex,
+          ),
+        ),
+      ),
+    [questions],
+  );
+
+  const visibleGroupedQuestions = useMemo(() => {
+    if (selectedQuestionBankTheme === "all") return groupedFilteredQuestions;
+    return groupedFilteredQuestions.filter(
+      ([theme]) => theme === selectedQuestionBankTheme,
+    );
+  }, [groupedFilteredQuestions, selectedQuestionBankTheme]);
+
+  const groupedCourseGradeSheets = useMemo(() => {
+    const grouped = new Map<string, CourseGradeSheet[]>();
+
+    courseGradeSheets.forEach((sheet) => {
+      const unitLabel = String(sheet.unitLabel || "Without unit").trim() || "Without unit";
+      if (!grouped.has(unitLabel)) grouped.set(unitLabel, []);
+      grouped.get(unitLabel)?.push(sheet);
+    });
+
+    return Array.from(grouped.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([unitLabel, sheets]) => ({
+        unitLabel,
+        sheets: [...sheets].sort((a, b) => a.title.localeCompare(b.title)),
+      }));
+  }, [courseGradeSheets]);
+
+  const sharedThemeKeysForCurrentCourse = useMemo(() => {
+    const currentCourseId = String(selectedCourseId || "").trim();
+    const ownerId = String(user?.id || "").trim();
+    if (!currentCourseId || !ownerId) return new Set<string>();
+
+    const keys = sharedTemplates
+      .filter((template) => {
+        if (template.templateKind && template.templateKind !== "exercise") return false;
+        return (
+          String(template.ownerId || "").trim() === ownerId &&
+          String(template.sourceCourseId || "").trim() === currentCourseId
+        );
+      })
+      .map((template) => String(template.normalizedTheme || "").trim())
+      .filter(Boolean);
+
+    return new Set(keys);
+  }, [selectedCourseId, sharedTemplates, user?.id]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadAdminOwnerIds = async () => {
+      try {
+        const ids = await getAdminUserIds();
+        if (!active) return;
+        setAdminOwnerIds(ids);
+      } catch {
+        if (!active) return;
+        setAdminOwnerIds([]);
+      }
+    };
+
+    void loadAdminOwnerIds();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const reusableSharedTemplates = useMemo(() => {
+    const adminOwnerIdSet = new Set(
+      adminOwnerIds
+        .map((value) => String(value || "").trim())
+        .filter((value) => value.length > 0),
+    );
+
+    return sharedTemplates.filter((template) => {
+      const ownerId = String(template.ownerId || "").trim();
+      const ownerEmail = String(template.ownerEmail || "").trim();
+
+      return !isAdminEmail(ownerEmail) && !adminOwnerIdSet.has(ownerId);
+    });
+  }, [adminOwnerIds, sharedTemplates]);
+
+  const visibleSharedTemplates = useMemo(() => {
+    if (reusableSharedTemplates.length > 0) return reusableSharedTemplates;
+
+    return sharedTemplates.filter((template) => {
+      const ownerEmail = String(template.ownerEmail || "").trim();
+      return !isAdminEmail(ownerEmail);
+    });
+  }, [reusableSharedTemplates, sharedTemplates]);
+
   const filteredSharedTemplates = useMemo(() => {
+    const visibleTemplates = isAdmin
+      ? visibleSharedTemplates.filter((template) => template.ownerId === user?.id)
+      : visibleSharedTemplates;
     const normalizedQuery = sharedSearchQuery.trim().toLowerCase();
-    const sorted = [...sharedTemplates].sort(
+    const hiddenKeys = new Set(hiddenSharedTemplateKeys);
+    const sorted = [...visibleTemplates]
+      .filter(
+        (template) => !hiddenKeys.has(getSharedTemplateVisibilityKey(template)),
+      )
+      .sort(
       (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime(),
     );
 
@@ -1123,17 +1350,26 @@ export default function ExerciseBankPage() {
         template.sourceCourseName.toLowerCase().includes(normalizedQuery)
       );
     });
-  }, [sharedSearchQuery, sharedTemplates]);
+  }, [
+    hiddenSharedTemplateKeys,
+    isAdmin,
+    visibleSharedTemplates,
+    sharedSearchQuery,
+    user?.id,
+  ]);
 
   const sharedTemplatesFromOtherTeachersCount = useMemo(
     () =>
-      sharedTemplates.filter((template) => template.ownerId !== user?.id)
+      isAdmin
+        ? 0
+        :
+      visibleSharedTemplates.filter((template) => template.ownerId !== user?.id)
         .length,
-    [sharedTemplates, user?.id],
+    [isAdmin, user?.id, visibleSharedTemplates],
   );
 
   useEffect(() => {
-    if (!isTeacher) return;
+    if (!isAuthoringMode) return;
     if (availableThemes.length === 0) {
       setSelectedThemeToPublish("");
       return;
@@ -1142,23 +1378,96 @@ export default function ExerciseBankPage() {
       if (current && availableThemes.includes(current)) return current;
       return availableThemes[0];
     });
-  }, [availableThemes, isTeacher]);
+  }, [availableThemes, isAuthoringMode]);
 
   useEffect(() => {
     setExpandedThemes((prev) => {
       const next: Record<string, boolean> = {};
 
       groupedFilteredQuestions.forEach(([theme]) => {
-        next[theme] = prev[theme] ?? true;
+        next[theme] = prev[theme] ?? false;
       });
 
       return next;
     });
   }, [groupedFilteredQuestions]);
 
+  useEffect(() => {
+    if (selectedQuestionBankTheme === "all") return;
+    const stillExists = groupedFilteredQuestions.some(
+      ([theme]) => theme === selectedQuestionBankTheme,
+    );
+    if (!stillExists) {
+      setSelectedQuestionBankTheme("all");
+    }
+  }, [groupedFilteredQuestions, selectedQuestionBankTheme]);
+
+  useEffect(() => {
+    if (isAdmin && activeAuthoringPanel === "sharedQuizBank") {
+      setActiveAuthoringPanel("create");
+      return;
+    }
+    if (
+      activeAuthoringPanel === "mandatoryTeacherQuizzes" &&
+      !showMandatoryTeacherQuizzesCard
+    ) {
+      setActiveAuthoringPanel("create");
+    }
+  }, [activeAuthoringPanel, isAdmin, showMandatoryTeacherQuizzesCard]);
+
+  useEffect(() => {
+    if (!showMandatoryTeacherQuizzesCard || !mandatoryTeacherCourse?.id) {
+      setMandatoryCourseQuizThemes([]);
+      return;
+    }
+
+    let active = true;
+    const loadMandatoryCourseQuizThemes = async () => {
+      setLoadingMandatoryCourseQuizThemes(true);
+      try {
+        const snapshot = await getDocs(
+          query(
+            collection(firebaseDB, "exerciseQuestions"),
+            where("courseId", "==", mandatoryTeacherCourse.id),
+          ),
+        );
+        if (!active) return;
+
+        const byTheme = new Map<string, number>();
+        snapshot.forEach((item) => {
+          const data = item.data() as Record<string, unknown>;
+          const theme = String(data.theme || "").trim();
+          const isPublished =
+            typeof data.isPublished === "boolean" ? data.isPublished : true;
+          if (!theme || !isPublished) return;
+          byTheme.set(theme, (byTheme.get(theme) || 0) + 1);
+        });
+
+        const ordered = Array.from(byTheme.entries())
+          .map(([theme, questionCount]) => ({ theme, questionCount }))
+          .sort((a, b) => a.theme.localeCompare(b.theme));
+
+        setMandatoryCourseQuizThemes(ordered);
+      } catch {
+        if (!active) return;
+        setMandatoryCourseQuizThemes([]);
+      } finally {
+        if (active) {
+          setLoadingMandatoryCourseQuizThemes(false);
+        }
+      }
+    };
+
+    void loadMandatoryCourseQuizThemes();
+
+    return () => {
+      active = false;
+    };
+  }, [showMandatoryTeacherQuizzesCard, mandatoryTeacherCourse?.id]);
+
   const stats = useMemo(() => {
     const totalQuestions = questions.length;
-    const totalThemes = isTeacher
+    const totalThemes = isAuthoringMode
       ? availableThemes.length
       : studentAvailableThemes.length;
     const questionsPerTheme =
@@ -1170,17 +1479,45 @@ export default function ExerciseBankPage() {
       totalThemes,
       questionsPerTheme,
       completedQuizzes,
-      pendingThemes: isTeacher ? 0 : totalThemes - completedQuizzes,
+      pendingThemes: isAuthoringMode ? 0 : totalThemes - completedQuizzes,
       publishedCount: publishedQuestions.length,
       draftCount: questions.length - publishedQuestions.length,
     };
   }, [
     availableThemes.length,
     attemptsByTheme,
-    isTeacher,
+    isAuthoringMode,
     publishedQuestions.length,
     questions.length,
     studentAvailableThemes.length,
+  ]);
+
+  const mandatoryThemeApprovalStats = useMemo(() => {
+    if (!teacherMandatoryLearnerMode) {
+      return null;
+    }
+
+    const totalThemes = studentAvailableThemes.length;
+    const approvedThemes = studentAvailableThemes.filter((theme) => {
+      const attempt = attemptsByTheme[theme];
+      return Boolean(
+        attempt && attempt.percentage >= MANDATORY_APPROVAL_PERCENTAGE,
+      );
+    }).length;
+    const notApprovedThemes = Math.max(0, totalThemes - approvedThemes);
+    const isApproved = totalThemes > 0 && approvedThemes === totalThemes;
+
+    return {
+      totalThemes,
+      approvedThemes,
+      notApprovedThemes,
+      isApproved,
+    };
+  }, [
+    attemptsByTheme,
+    teacherMandatoryLearnerMode,
+    studentAvailableThemes,
+    MANDATORY_APPROVAL_PERCENTAGE,
   ]);
 
   const bulkVisibilityTargetCount = useMemo(() => {
@@ -1201,8 +1538,28 @@ export default function ExerciseBankPage() {
     [attemptsCountByTheme],
   );
   const canTakeTheme = (theme: string) => {
+    if (teacherMandatoryLearnerMode) {
+      const latestAttempt = attemptsByTheme[theme];
+      if (latestAttempt && latestAttempt.percentage >= MANDATORY_APPROVAL_PERCENTAGE) {
+        return false;
+      }
+      return getThemeAttemptCount(theme) < MAX_MANDATORY_ATTEMPTS;
+    }
     if (isLinkedTheme(theme)) return !attemptsByTheme[theme];
     return getThemeAttemptCount(theme) < MAX_UNLINKED_ATTEMPTS;
+  };
+  const getMandatoryBlockedMessage = (
+    theme: string,
+    latestAttempt?: QuizAttempt,
+  ) => {
+    if (latestAttempt && latestAttempt.percentage >= MANDATORY_APPROVAL_PERCENTAGE) {
+      return `Approved. You reached ${latestAttempt.percentage}% (minimum ${MANDATORY_APPROVAL_PERCENTAGE}%).`;
+    }
+    const attemptsUsed = getThemeAttemptCount(theme);
+    if (attemptsUsed >= MAX_MANDATORY_ATTEMPTS) {
+      return `Not approved after ${MAX_MANDATORY_ATTEMPTS} attempts. You need at least ${MANDATORY_APPROVAL_PERCENTAGE}%.`;
+    }
+    return `Not approved yet. You need at least ${MANDATORY_APPROVAL_PERCENTAGE}%.`;
   };
   const selectedThemeIsLinked = selectedTheme
     ? isLinkedTheme(selectedTheme)
@@ -1212,10 +1569,10 @@ export default function ExerciseBankPage() {
     : false;
   const pendingThemeQuestionCount = useMemo(() => {
     if (!pendingStartTheme) return 0;
-    const source = isTeacher ? questions : publishedQuestions;
+    const source = isAuthoringMode ? questions : publishedQuestions;
     return source.filter((question) => question.theme === pendingStartTheme)
       .length;
-  }, [isTeacher, pendingStartTheme, publishedQuestions, questions]);
+  }, [isAuthoringMode, pendingStartTheme, publishedQuestions, questions]);
 
   const pendingThemeTimeLimitSeconds =
     pendingThemeQuestionCount * QUIZ_SECONDS_PER_QUESTION;
@@ -1298,6 +1655,8 @@ export default function ExerciseBankPage() {
   };
 
   const loadQuestions = async (courseId: string) => {
+    const requestId = latestQuestionsRequestRef.current + 1;
+    latestQuestionsRequestRef.current = requestId;
     setLoading(true);
     try {
       const questionsQuery = query(
@@ -1324,14 +1683,18 @@ export default function ExerciseBankPage() {
       });
 
       loaded.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      if (requestId !== latestQuestionsRequestRef.current) return;
       setQuestions(loaded);
     } finally {
+      if (requestId !== latestQuestionsRequestRef.current) return;
       setLoading(false);
     }
   };
 
   const loadStudentAttempts = useCallback(
     async (courseId: string, studentId: string) => {
+      const requestId = latestAttemptsRequestRef.current + 1;
+      latestAttemptsRequestRef.current = requestId;
       setLoadingAttempts(true);
       try {
         const attemptsQuery = query(
@@ -1381,10 +1744,12 @@ export default function ExerciseBankPage() {
           countByTheme[attempt.theme] = (countByTheme[attempt.theme] || 0) + 1;
         });
 
+        if (requestId !== latestAttemptsRequestRef.current) return;
         setAttemptsByTheme(latestByTheme);
         setAttemptsCountByTheme(countByTheme);
         setAttemptHistory(dedupedLoaded.slice(0, MAX_HISTORY_ATTEMPTS));
       } finally {
+        if (requestId !== latestAttemptsRequestRef.current) return;
         setLoadingAttempts(false);
       }
     },
@@ -1392,6 +1757,8 @@ export default function ExerciseBankPage() {
   );
 
   const loadThemeLinks = async (courseId: string) => {
+    const requestId = latestThemeLinksRequestRef.current + 1;
+    latestThemeLinksRequestRef.current = requestId;
     const linksQuery = query(
       collection(firebaseDB, "exerciseThemeLinks"),
       where("courseId", "==", courseId),
@@ -1406,12 +1773,16 @@ export default function ExerciseBankPage() {
         map[theme] = gradeSheetId;
       }
     });
+    if (requestId !== latestThemeLinksRequestRef.current) return;
     setThemeLinksByTheme(map);
   };
 
   const loadCourseGradeSheets = useCallback(
     async (courseId: string) => {
-      if (!user?.id || !isTeacher) {
+      const requestId = latestGradeSheetsRequestRef.current + 1;
+      latestGradeSheetsRequestRef.current = requestId;
+      if (!user?.id || !isAuthoringMode) {
+        if (requestId !== latestGradeSheetsRequestRef.current) return;
         setCourseGradeSheets([]);
         return;
       }
@@ -1425,54 +1796,69 @@ export default function ExerciseBankPage() {
       const snapshot = await getDocs(sheetsQuery);
       const loaded: CourseGradeSheet[] = snapshot.docs.map((item) => {
         const data = item.data();
+        const rawUnit = String(
+          (data as Record<string, unknown>).unitName ||
+            (data as Record<string, unknown>).unit ||
+            data.gradingPeriod ||
+            "Without unit",
+        )
+          .trim();
         return {
           id: item.id,
           title: String(data.title || "Untitled grade sheet"),
+          unitLabel: rawUnit || "Without unit",
         };
       });
 
       loaded.sort((a, b) => a.title.localeCompare(b.title));
+      if (requestId !== latestGradeSheetsRequestRef.current) return;
       setCourseGradeSheets(loaded);
     },
-    [isTeacher, user?.id],
+    [isAuthoringMode, user?.id],
   );
 
   const loadSharedQuizTemplates = useCallback(async () => {
-    if (!isTeacher) {
+    if (!isTeacher || isAdmin) {
       setSharedTemplates([]);
       return;
     }
 
     setLoadingSharedTemplates(true);
     try {
-      const sharedSnapshot = await getDocs(
-        collection(firebaseDB, SHARED_TEMPLATE_COLLECTION),
-      ).catch(() => null);
-
-      const allQuestionsSnapshots = await Promise.all(
-        availableCourses.map((course) =>
-          getDocs(
-            query(
-              collection(firebaseDB, "exerciseQuestions"),
-              where("courseId", "==", course.id),
-            ),
-          ).catch(() => null),
-        ),
-      );
+      const [sharedSnapshot, allCoursesSnapshot] =
+        await Promise.all([
+          getDocs(collection(firebaseDB, SHARED_TEMPLATE_COLLECTION)).catch(
+            () => null,
+          ),
+          getDocs(collection(firebaseDB, "cursos")).catch(() => null),
+        ]);
 
       const courseMetaById: Record<
         string,
         { code: string; name: string; teacherId: string; teacherName: string }
       > = {};
 
-      availableCourses.forEach((course) => {
-        courseMetaById[course.id] = {
-          code: String(course.code || ""),
-          name: String(course.name || ""),
-          teacherId: String(course.teacherId || ""),
-          teacherName: String(course.teacherName || "Teacher"),
+      allCoursesSnapshot?.forEach((item) => {
+        const data = item.data() as Record<string, unknown>;
+        courseMetaById[item.id] = {
+          code: String(data.code || ""),
+          name: String(data.name || ""),
+          teacherId: String(data.teacherId || ""),
+          teacherName: String(data.teacherName || "Teacher"),
         };
       });
+
+      const allCourseIds = Object.keys(courseMetaById);
+      const allQuestionsSnapshots = await Promise.all(
+        allCourseIds.map((courseId) =>
+          getDocs(
+            query(
+              collection(firebaseDB, "exerciseQuestions"),
+              where("courseId", "==", courseId),
+            ),
+          ).catch(() => null),
+        ),
+      );
 
       const resolveCorrectOptionIndex = (
         rawValue: unknown,
@@ -1566,6 +1952,10 @@ export default function ExerciseBankPage() {
         sharedSnapshot?.docs
           .map((item) => {
             const data = item.data();
+            const rawTemplateKind = String(data.templateKind || "exercise")
+              .trim()
+              .toLowerCase();
+            if (rawTemplateKind && rawTemplateKind !== "exercise") return null;
             const parsedQuestions = Array.isArray(data.questions)
               ? data.questions
                   .map((question: unknown) => inferQuestionDraft(question))
@@ -1591,15 +1981,18 @@ export default function ExerciseBankPage() {
                 data.questionCount || parsedQuestions.length,
               ),
               questions: parsedQuestions,
+              templateKind: "exercise",
               createdAt: toDate(data.createdAt),
               updatedAt: toDate(data.updatedAt),
             } satisfies SharedQuizTemplate;
           })
           .filter(
             (template) =>
+              Boolean(template) &&
               template.theme &&
               (template.questions.length > 0 || template.questionCount > 0),
-          ) || [];
+          )
+          .map((template) => template as SharedQuizTemplate) || [];
 
       type InferredTemplateBucket = SharedQuizTemplate & {
         signatures: Set<string>;
@@ -1620,7 +2013,8 @@ export default function ExerciseBankPage() {
           const normalizedTheme = normalizeThemeKey(theme);
           const mapKey = `${courseId}::${normalizedTheme}`;
           const courseMeta = courseMetaById[courseId];
-          const ownerId = String(data.createdBy || courseMeta?.teacherId || "");
+          const ownerId = String(courseMeta?.teacherId || data.createdBy || "").trim();
+          if (!ownerId) return;
           const ownerName =
             String(courseMeta?.teacherName || "").trim() ||
             (ownerId === user?.id
@@ -1722,7 +2116,7 @@ export default function ExerciseBankPage() {
     }
   }, [
     SHARED_TEMPLATE_COLLECTION,
-    availableCourses,
+    isAdmin,
     isTeacher,
     user?.email,
     user?.id,
@@ -1732,17 +2126,6 @@ export default function ExerciseBankPage() {
   useEffect(() => {
     if (availableCourses.length === 0) {
       if (selectedCourseId) setSelectedCourseId("");
-      return;
-    }
-
-    const urlCourse = courseCode
-      ? availableCourses.find((course) => course.code === courseCode)
-      : null;
-
-    if (urlCourse) {
-      if (urlCourse.id !== selectedCourseId) {
-        setSelectedCourseId(urlCourse.id);
-      }
       return;
     }
 
@@ -1756,6 +2139,15 @@ export default function ExerciseBankPage() {
           replace: true,
         });
       }
+      return;
+    }
+
+    const urlCourse = courseCode
+      ? availableCourses.find((course) => course.code === courseCode)
+      : null;
+
+    if (urlCourse) {
+      setSelectedCourseId(urlCourse.id);
       return;
     }
 
@@ -1775,10 +2167,24 @@ export default function ExerciseBankPage() {
   useEffect(() => {
     if (!selectedCourseId) return;
 
+    setQuestions([]);
+    setThemeLinksByTheme({});
+    setCourseGradeSheets([]);
+    latestQuestionsRequestRef.current += 1;
+    latestThemeLinksRequestRef.current += 1;
+    latestGradeSheetsRequestRef.current += 1;
+
+    if (isLearnerMode) {
+      setAttemptsByTheme({});
+      setAttemptsCountByTheme({});
+      setAttemptHistory([]);
+      latestAttemptsRequestRef.current += 1;
+    }
+
     loadQuestions(selectedCourseId);
     loadThemeLinks(selectedCourseId);
 
-    if (!isTeacher && user?.id) {
+    if (isLearnerMode && user?.id) {
       loadStudentAttempts(selectedCourseId, user.id);
     } else {
       setAttemptsByTheme({});
@@ -1787,7 +2193,7 @@ export default function ExerciseBankPage() {
       loadCourseGradeSheets(selectedCourseId);
     }
   }, [
-    isTeacher,
+    isLearnerMode,
     loadCourseGradeSheets,
     loadStudentAttempts,
     selectedCourseId,
@@ -1804,7 +2210,7 @@ export default function ExerciseBankPage() {
   }, [isTeacher, loadSharedQuizTemplates, selectedCourseId]);
 
   useEffect(() => {
-    if (!selectedTheme || isTeacher) return;
+    if (!selectedTheme || !isLearnerMode) return;
 
     const attempt = attemptsByTheme[selectedTheme];
     if (attempt && Boolean(themeLinksByTheme[selectedTheme])) {
@@ -1815,10 +2221,10 @@ export default function ExerciseBankPage() {
       });
       setQuizStarted(false);
     }
-  }, [attemptsByTheme, isTeacher, selectedTheme, themeLinksByTheme]);
+  }, [attemptsByTheme, isLearnerMode, selectedTheme, themeLinksByTheme]);
 
   useEffect(() => {
-    if (!quizStarted || isTeacher) return;
+    if (!quizStarted || !isLearnerMode) return;
 
     const timer = window.setInterval(() => {
       setTimeLeftSeconds((prev) => {
@@ -1831,10 +2237,10 @@ export default function ExerciseBankPage() {
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [isTeacher, quizStarted]);
+  }, [isLearnerMode, quizStarted]);
 
   useEffect(() => {
-    if (!quizStarted || isTeacher) return;
+    if (!quizStarted || !isLearnerMode) return;
 
     const scrollToQuiz = () => {
       const target = quizStartSectionRef.current;
@@ -1852,10 +2258,10 @@ export default function ExerciseBankPage() {
     });
 
     return () => window.cancelAnimationFrame(frameId);
-  }, [isTeacher, quizStarted]);
+  }, [isLearnerMode, quizStarted]);
 
   const handleCourseChange = (courseId: string) => {
-    if (quizStarted && !isTeacher) {
+    if (quizStarted && isLearnerMode) {
       const confirmLeave = window.confirm(
         "If you leave now, your progress will be saved and unanswered questions will count as incorrect. Continue?",
       );
@@ -1899,7 +2305,9 @@ export default function ExerciseBankPage() {
           percentage: previous.percentage,
         });
       }
-      if (!isLinkedTheme(theme)) {
+      if (teacherMandatoryLearnerMode) {
+        setGradingMessage(getMandatoryBlockedMessage(theme, previous));
+      } else if (!isLinkedTheme(theme)) {
         setGradingMessage(
           `Attempt limit reached (${MAX_UNLINKED_ATTEMPTS}/${MAX_UNLINKED_ATTEMPTS}) for this theme.`,
         );
@@ -1925,9 +2333,10 @@ export default function ExerciseBankPage() {
     }
 
     if (
-      !isTeacher &&
+      isLearnerMode &&
       isLinkedTheme(themeToStart) &&
-      attemptsByTheme[themeToStart]
+      attemptsByTheme[themeToStart] &&
+      !teacherMandatoryLearnerMode
     ) {
       const previous = attemptsByTheme[themeToStart];
       setResult({
@@ -1938,8 +2347,21 @@ export default function ExerciseBankPage() {
       setQuizStarted(false);
       return;
     }
+    if (isLearnerMode && teacherMandatoryLearnerMode && !canTakeTheme(themeToStart)) {
+      const previous = attemptsByTheme[themeToStart];
+      if (previous) {
+        setResult({
+          total: previous.total,
+          correct: previous.correct,
+          percentage: previous.percentage,
+        });
+      }
+      setGradingMessage(getMandatoryBlockedMessage(themeToStart, previous));
+      setQuizStarted(false);
+      return;
+    }
     if (
-      !isTeacher &&
+      isLearnerMode &&
       !isLinkedTheme(themeToStart) &&
       !canTakeTheme(themeToStart)
     ) {
@@ -1951,14 +2373,18 @@ export default function ExerciseBankPage() {
           percentage: previous.percentage,
         });
       }
-      setGradingMessage(
-        `Attempt limit reached (${MAX_UNLINKED_ATTEMPTS}/${MAX_UNLINKED_ATTEMPTS}) for this theme.`,
-      );
+      if (teacherMandatoryLearnerMode) {
+        setGradingMessage(getMandatoryBlockedMessage(themeToStart, previous));
+      } else {
+        setGradingMessage(
+          `Attempt limit reached (${MAX_UNLINKED_ATTEMPTS}/${MAX_UNLINKED_ATTEMPTS}) for this theme.`,
+        );
+      }
       setQuizStarted(false);
       return;
     }
 
-    const source = isTeacher ? questions : publishedQuestions;
+    const source = isAuthoringMode ? questions : publishedQuestions;
     const pool = source.filter((question) => question.theme === themeToStart);
     if (pool.length === 0) return;
     const timeLimitSeconds = pool.length * QUIZ_SECONDS_PER_QUESTION;
@@ -2015,12 +2441,25 @@ export default function ExerciseBankPage() {
           total === 0 ? 0 : Math.round((correct / total) * 100);
         const quizResult = { total, correct, percentage };
 
-        if (!isTeacher && user?.id) {
+        if (isLearnerMode && user?.id) {
           const linkedTheme = Boolean(themeLinksByTheme[targetTheme]);
           const currentThemeAttempts = getThemeAttemptCount(targetTheme);
-          const allowAttemptSave = linkedTheme
-            ? !attemptsByTheme[targetTheme]
-            : currentThemeAttempts < MAX_UNLINKED_ATTEMPTS;
+          const allowAttemptSave = teacherMandatoryLearnerMode
+            ? currentThemeAttempts < MAX_MANDATORY_ATTEMPTS
+            : linkedTheme
+              ? !attemptsByTheme[targetTheme]
+              : currentThemeAttempts < MAX_UNLINKED_ATTEMPTS;
+          const nextAttemptsCount = allowAttemptSave
+            ? currentThemeAttempts + 1
+            : currentThemeAttempts;
+          const mandatoryApproved =
+            quizResult.percentage >= MANDATORY_APPROVAL_PERCENTAGE;
+          const shouldTriggerMandatoryFailureAlert = Boolean(
+            teacherMandatoryLearnerMode &&
+              allowAttemptSave &&
+              !mandatoryApproved &&
+              nextAttemptsCount >= MAX_MANDATORY_ATTEMPTS,
+          );
 
           if (allowAttemptSave) {
             const createdAt = new Date();
@@ -2076,6 +2515,50 @@ export default function ExerciseBankPage() {
             });
           }
 
+          if (shouldTriggerMandatoryFailureAlert) {
+            try {
+              const alertDocId = `mandatory_fail_${selectedCourseId}_${user.id}_${normalizeThemeKey(targetTheme)}`;
+              const historyRef = doc(
+                firebaseDB,
+                "usuarios",
+                user.id,
+                "mandatoryQuizAlerts",
+                alertDocId,
+              );
+              await setDoc(
+                historyRef,
+                {
+                  userId: user.id,
+                  courseId: selectedCourseId,
+                  courseCode: String(selectedCourse?.code || "").trim(),
+                  courseName: String(selectedCourse?.name || "").trim(),
+                  theme: targetTheme,
+                  attemptsUsed: nextAttemptsCount,
+                  requiredPercentage: MANDATORY_APPROVAL_PERCENTAGE,
+                  lastPercentage: quizResult.percentage,
+                  status: "not_approved",
+                  triggeredAt: new Date(),
+                },
+                { merge: true },
+              );
+
+              const courseCode = String(selectedCourse?.code || "").trim();
+              const notificationLink = courseCode
+                ? `/courses/${courseCode}/exercise-bank`
+                : "/courses";
+              await notificationService.createNotification(user.id, {
+                title: "Mandatory quiz not approved",
+                message: `You reached ${MAX_MANDATORY_ATTEMPTS}/${MAX_MANDATORY_ATTEMPTS} attempts in "${targetTheme}" without reaching ${MANDATORY_APPROVAL_PERCENTAGE}%.`,
+                type: "warning",
+                link: notificationLink,
+                courseCode,
+                dedupeKey: alertDocId,
+              });
+            } catch {
+              // Keep quiz submission flow resilient even if alert persistence fails.
+            }
+          }
+
           if (linkedTheme && allowAttemptSave) {
             try {
               const gradeSyncMessage = await syncQuizScoreToLinkedGradeSheet(
@@ -2091,10 +2574,7 @@ export default function ExerciseBankPage() {
                 "Quiz completed, but grade could not be synced to a grade sheet.",
               );
             }
-          } else if (!linkedTheme) {
-            const nextAttemptsCount = allowAttemptSave
-              ? currentThemeAttempts + 1
-              : currentThemeAttempts;
+          } else if (!linkedTheme && !teacherMandatoryLearnerMode) {
             const attemptsLeft = Math.max(
               0,
               MAX_UNLINKED_ATTEMPTS - nextAttemptsCount,
@@ -2112,6 +2592,21 @@ export default function ExerciseBankPage() {
             setGradingMessage(
               "Attempt not saved because the attempt limit was reached.",
             );
+          }
+
+          if (teacherMandatoryLearnerMode) {
+            setGradingMessage((prev) => {
+              const attemptsLeft = Math.max(
+                0,
+                MAX_MANDATORY_ATTEMPTS - nextAttemptsCount,
+              );
+              const approvalMessage = mandatoryApproved
+                ? `Approved (${quizResult.percentage}%). Minimum required: ${MANDATORY_APPROVAL_PERCENTAGE}%.`
+                : attemptsLeft > 0
+                  ? `Not approved (${quizResult.percentage}%). You need at least ${MANDATORY_APPROVAL_PERCENTAGE}% to pass. Attempts left: ${attemptsLeft}/${MAX_MANDATORY_ATTEMPTS}.`
+                  : `Not approved (${quizResult.percentage}%). You reached ${MAX_MANDATORY_ATTEMPTS}/${MAX_MANDATORY_ATTEMPTS} attempts.`;
+              return prev ? `${prev} ${approvalMessage}` : approvalMessage;
+            });
           }
         }
 
@@ -2141,16 +2636,22 @@ export default function ExerciseBankPage() {
       }
     },
     [
+      MAX_MANDATORY_ATTEMPTS,
       MAX_UNLINKED_ATTEMPTS,
+      MANDATORY_APPROVAL_PERCENTAGE,
       answers,
       attemptsByTheme,
       dedupeAttempts,
       finishInFlightRef,
       getThemeAttemptCount,
       isFinishingQuiz,
-      isTeacher,
+      isLearnerMode,
+      teacherMandatoryLearnerMode,
+      isAuthoringMode,
       quizQuestions,
       selectedCourseId,
+      selectedCourse?.code,
+      selectedCourse?.name,
       selectedTheme,
       activeQuizStorageKey,
       themeLinksByTheme,
@@ -2165,19 +2666,19 @@ export default function ExerciseBankPage() {
   useEffect(() => {
     quizSessionRef.current = {
       quizStarted,
-      isTeacher,
+      isTeacher: isAuthoringMode,
       selectedTheme,
       quizQuestions,
       answers,
     };
-  }, [answers, isTeacher, quizQuestions, quizStarted, selectedTheme]);
+  }, [answers, isAuthoringMode, quizQuestions, quizStarted, selectedTheme]);
 
   useEffect(() => {
     if (!activeQuizStorageKey) return;
 
-    try {
-      if (
-        !isTeacher &&
+      try {
+        if (
+        isLearnerMode &&
         quizStarted &&
         selectedTheme &&
         quizQuestions.length > 0
@@ -2205,7 +2706,7 @@ export default function ExerciseBankPage() {
   }, [
     activeQuizStorageKey,
     answers,
-    isTeacher,
+    isLearnerMode,
     quizGuardStorageKey,
     quizQuestions,
     quizStarted,
@@ -2242,7 +2743,7 @@ export default function ExerciseBankPage() {
       }
 
       if (
-        !isTeacher &&
+        isLearnerMode &&
         quizStarted &&
         selectedTheme &&
         selectedTheme !== theme
@@ -2255,7 +2756,7 @@ export default function ExerciseBankPage() {
       setSelectedTheme(theme);
       setQuizStarted(false);
     },
-    [finishQuiz, isTeacher, quizStarted, selectedTheme],
+    [finishQuiz, isLearnerMode, quizStarted, selectedTheme],
   );
 
   const handleStartTheme = useCallback(
@@ -2269,7 +2770,7 @@ export default function ExerciseBankPage() {
       }
 
       if (
-        !isTeacher &&
+        isLearnerMode &&
         quizStarted &&
         selectedTheme &&
         selectedTheme !== theme
@@ -2279,7 +2780,7 @@ export default function ExerciseBankPage() {
 
       requestStartQuiz(theme);
     },
-    [finishQuiz, isTeacher, quizStarted, requestStartQuiz, selectedTheme],
+    [finishQuiz, isLearnerMode, quizStarted, requestStartQuiz, selectedTheme],
   );
 
   const syncQuizScoreToLinkedGradeSheet = useCallback(
@@ -2436,7 +2937,7 @@ export default function ExerciseBankPage() {
   );
 
   const handleThemeLinkChange = async (theme: string, gradeSheetId: string) => {
-    if (!selectedCourseId || !user?.id || !isTeacher) return;
+    if (!selectedCourseId || !user?.id || !isAuthoringMode) return;
 
     setSavingThemeLink(theme);
     try {
@@ -2591,7 +3092,7 @@ export default function ExerciseBankPage() {
   };
 
   const handleCreateQuestion = async () => {
-    if (!selectedCourseId || !user) return;
+    if (!selectedCourseId || !user || !isAuthoringMode) return;
 
     const normalizedTheme =
       themeMode === "existing"
@@ -2660,7 +3161,7 @@ export default function ExerciseBankPage() {
   };
 
   const publishThemeToSharedBank = async (theme: string) => {
-    if (!isTeacher || !user?.id || !selectedCourseId) return;
+    if (!isAuthoringMode || !user?.id || !selectedCourseId) return;
 
     const normalizedTheme = theme.trim();
     if (!normalizedTheme) return;
@@ -2706,6 +3207,15 @@ export default function ExerciseBankPage() {
         { merge: true },
       );
 
+      const publishedTemplateKey = getSharedTemplateVisibilityKey({
+        sourceCourseId: selectedCourseId,
+        normalizedTheme: normalizeThemeKey(normalizedTheme),
+        templateKind: "exercise",
+      });
+      setHiddenSharedTemplateKeys((prev) =>
+        prev.filter((key) => key !== publishedTemplateKey),
+      );
+
       await loadSharedQuizTemplates();
       alert(
         `Theme "${normalizedTheme}" is now available in the shared quiz bank.`,
@@ -2719,12 +3229,20 @@ export default function ExerciseBankPage() {
   };
 
   const importSharedTemplateToCourse = async (template: SharedQuizTemplate) => {
-    if (!isTeacher || !user?.id || !selectedCourseId || importingTemplateId)
+    if (
+      !isAuthoringMode ||
+      !user?.id ||
+      !selectedCourseId ||
+      importingTemplateId ||
+      deletingImportedTemplateId ||
+      deletingSharedTemplateId
+    )
       return;
-    if (!template.questions.length) return;
 
     setImportingTemplateId(template.id);
     try {
+      if (!template.questions.length) return;
+
       const existingSignatures = new Set(
         questions.map((question) =>
           buildQuestionSignature(
@@ -2792,6 +3310,177 @@ export default function ExerciseBankPage() {
       alert("Could not import this shared template.");
     } finally {
       setImportingTemplateId(null);
+    }
+  };
+
+  const handleDeleteImportedTemplateFromCourse = async (
+    template: SharedQuizTemplate,
+  ) => {
+    if (
+      !isAuthoringMode ||
+      !user?.id ||
+      !selectedCourseId ||
+      deletingImportedTemplateId ||
+      importingTemplateId
+    ) {
+      return;
+    }
+
+    const currentCourseId = String(selectedCourseId || "").trim();
+    const templateSourceCourseId = String(template.sourceCourseId || "").trim();
+    const currentCourseCode = String(selectedCourse?.code || "")
+      .trim()
+      .toLowerCase();
+    const templateSourceCourseCode = String(template.sourceCourseCode || "")
+      .trim()
+      .toLowerCase();
+    const asSourceQuiz = Boolean(
+      currentCourseId &&
+        ((templateSourceCourseId &&
+          templateSourceCourseId === currentCourseId) ||
+          (templateSourceCourseCode &&
+            currentCourseCode &&
+            templateSourceCourseCode === currentCourseCode)),
+    );
+
+    const confirmed = window.confirm(
+      asSourceQuiz
+        ? `Delete quiz "${template.theme}" from the current course? This action cannot be undone.`
+        : `Delete imported content from "${template.theme}" in the current course? This action cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingImportedTemplateId(template.id);
+    try {
+      let deletedQuestions = 0;
+      let importedQuestionIds = questions
+        .filter((question) => {
+          const data = question as unknown as Record<string, unknown>;
+          return (
+            String(data.importedFromTemplateId || "") === template.id &&
+            String(data.importedByUserId || "") === user.id
+          );
+        })
+        .map((question) => question.id);
+
+      if (importedQuestionIds.length === 0 && template.questions.length > 0) {
+        const templateSignatures = new Set(
+          template.questions.map((item) =>
+            buildQuestionSignature(
+              template.theme,
+              item.question,
+              item.options,
+              item.correctOptionIndex,
+            ),
+          ),
+        );
+
+        importedQuestionIds = questions
+          .filter(
+            (question) =>
+              question.createdBy === user.id &&
+              templateSignatures.has(
+                buildQuestionSignature(
+                  question.theme,
+                  question.question,
+                  question.options,
+                  question.correctOptionIndex,
+                ),
+              ),
+          )
+          .map((question) => question.id);
+      }
+
+      if (importedQuestionIds.length > 0) {
+        const chunkSize = 350;
+        for (
+          let index = 0;
+          index < importedQuestionIds.length;
+          index += chunkSize
+        ) {
+          const chunk = importedQuestionIds.slice(index, index + chunkSize);
+          const batch = writeBatch(firebaseDB);
+          chunk.forEach((questionId) => {
+            batch.delete(doc(firebaseDB, "exerciseQuestions", questionId));
+          });
+          await batch.commit();
+        }
+
+        const importedSet = new Set(importedQuestionIds);
+        deletedQuestions = importedQuestionIds.length;
+
+        setQuestions((prev) =>
+          prev.filter((question) => !importedSet.has(question.id)),
+        );
+        setPendingQuestionUpdates((prev) => {
+          const next = { ...prev };
+          importedQuestionIds.forEach((questionId) => {
+            delete next[questionId];
+          });
+          return next;
+        });
+        if (editingQuestionId && importedSet.has(editingQuestionId)) {
+          setEditingQuestionId(null);
+        }
+      }
+
+      if (deletedQuestions === 0) {
+        alert(
+          asSourceQuiz
+            ? "No matching quiz items were found for this template in the current course."
+            : "No imported items were found for this template in the course.",
+        );
+        return;
+      }
+
+      const messageParts: string[] = [];
+      if (deletedQuestions > 0) {
+        messageParts.push(
+          `${deletedQuestions} question${deletedQuestions === 1 ? "" : "s"}`,
+        );
+      }
+      alert(
+        asSourceQuiz
+          ? `Deleted quiz ${messageParts.join(" and ")}.`
+          : `Deleted imported ${messageParts.join(" and ")}.`,
+      );
+    } catch (error) {
+      console.error("Could not delete imported template content:", error);
+      alert("Could not delete imported content for this template.");
+    } finally {
+      setDeletingImportedTemplateId(null);
+    }
+  };
+
+  const handleDeleteSharedTemplate = async (template: SharedQuizTemplate) => {
+    const canDeleteSharedTemplate =
+      template.ownerId === user?.id && template.id.startsWith("template_");
+    if (!canDeleteSharedTemplate || deletingSharedTemplateId) return;
+
+    const confirmed = window.confirm(
+      `Delete "${template.theme}" from the shared quiz bank?`,
+    );
+    if (!confirmed) return;
+
+    setDeletingSharedTemplateId(template.id);
+    try {
+      await deleteDoc(doc(firebaseDB, SHARED_TEMPLATE_COLLECTION, template.id));
+      const hiddenTemplateKey = getSharedTemplateVisibilityKey(template);
+      setHiddenSharedTemplateKeys((prev) =>
+        prev.includes(hiddenTemplateKey) ? prev : [...prev, hiddenTemplateKey],
+      );
+      setSharedTemplates((prev) =>
+        prev.filter(
+          (candidate) =>
+            getSharedTemplateVisibilityKey(candidate) !== hiddenTemplateKey,
+        ),
+      );
+      alert(`"${template.theme}" was removed from shared quizzes.`);
+    } catch (error) {
+      console.error("Could not delete shared template:", error);
+      alert("Could not delete this shared quiz.");
+    } finally {
+      setDeletingSharedTemplateId(null);
     }
   };
 
@@ -2964,235 +3653,289 @@ export default function ExerciseBankPage() {
   };
 
   const renderSharedQuizBankPanel = () => (
+    isAdmin ? null : (
     <div
-      className={`overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all ${
-        showSharedQuizBank ? "ring-1 ring-sky-100" : ""
-      }`}
+      className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
     >
-      {!showSharedQuizBank ? (
-        <div className="p-4">
-          <div className="rounded-2xl border border-sky-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4">
-            <div className="flex items-start gap-3">
-              <div className="h-9 w-9 rounded-xl bg-sky-100 flex items-center justify-center">
-                <Sparkles className="h-5 w-5 text-sky-600" />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-base font-bold text-slate-900">
-                  Want to reuse an existing quiz?
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  You can choose existing quizzes and import them into your
-                  course.
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex items-center justify-between gap-2">
-              <p className="text-xs text-slate-500">
-                {sharedTemplates.length} quizzes available
-              </p>
+      <div className="px-4 py-3 border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+        <div className="flex items-start gap-3">
+          <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
+            <Sparkles className="h-5 w-5 text-sky-600" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-base font-bold text-slate-900">
+              Shared Quiz Bank
+            </h2>
+            <p className="text-xs text-slate-500">
+              Reuse, import, and publish quizzes across courses
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-4 bg-gradient-to-b from-slate-50/50 to-white">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 lg:col-span-2">
+            <p className="text-xs font-semibold tracking-wide text-sky-700 mb-2">
+              Publish one of your themes
+            </p>
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedThemeToPublish}
+                onChange={(event) =>
+                  setSelectedThemeToPublish(event.target.value)
+                }
+                className="flex-1 min-w-0 rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500"
+              >
+                {availableThemes.length === 0 && (
+                  <option value="">No themes available</option>
+                )}
+                {availableThemes.map((theme) => (
+                  <option key={theme} value={theme}>
+                    {theme}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
-                onClick={() => setShowSharedQuizBank(true)}
-                className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
+                onClick={() => {
+                  void publishThemeToSharedBank(selectedThemeToPublish);
+                }}
+                disabled={
+                  !selectedThemeToPublish ||
+                  publishingTheme === selectedThemeToPublish
+                }
+                className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <ChevronRight className="h-3.5 w-3.5" />
-                View quizzes
+                {publishingTheme === selectedThemeToPublish ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ExternalLink className="h-3.5 w-3.5" />
+                )}
+                Publish
               </button>
+            </div>
+            {!selectedCourseId && (
+              <p className="mt-2 text-[11px] text-sky-700">
+                Select a course to publish or import quizzes.
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-xl bg-slate-100/80 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                Shared templates
+              </p>
+              <p className="text-lg font-semibold text-slate-900">
+                {visibleSharedTemplates.length}
+              </p>
+            </div>
+            <div className="rounded-xl bg-slate-100/80 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                From others
+              </p>
+              <p className="text-lg font-semibold text-slate-900">
+                {sharedTemplatesFromOtherTeachersCount}
+              </p>
             </div>
           </div>
         </div>
-      ) : (
-        <>
-          <div className="px-4 py-3 border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
-                  <Sparkles className="h-5 w-5 text-sky-600" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-900">
-                    Shared Quiz Bank
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Reuse, import, and publish quizzes across courses
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowSharedQuizBank(false)}
-                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Back
-              </button>
-            </div>
-          </div>
 
-          <div className="p-4 space-y-4 bg-gradient-to-b from-slate-50/50 to-white">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 lg:col-span-2">
-                <p className="text-xs font-semibold tracking-wide text-sky-700 mb-2">
-                Publish one of your themes
-                </p>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={selectedThemeToPublish}
-                    onChange={(event) =>
-                      setSelectedThemeToPublish(event.target.value)
-                    }
-                    className="flex-1 min-w-0 rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500"
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={sharedSearchQuery}
+            onChange={(event) => setSharedSearchQuery(event.target.value)}
+            placeholder="Search shared quizzes..."
+            className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+          />
+        </div>
+
+        <div className="max-h-[62vh] overflow-y-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          {loadingSharedTemplates ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-sky-600" />
+            </div>
+          ) : filteredSharedTemplates.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-500">
+              No shared templates found yet.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {filteredSharedTemplates.map((template) => {
+                const isOwnTemplate = template.ownerId === user?.id;
+                const canImportTemplate =
+                  isAuthoringMode &&
+                  Boolean(selectedCourseId) &&
+                  template.questions.length > 0;
+                const isTemplatePresentInCurrentCourse = Boolean(
+                  canImportTemplate &&
+                    template.questions.length > 0 &&
+                    template.questions.every((item) =>
+                      currentCourseQuestionSignatureSet.has(
+                        buildQuestionSignature(
+                          template.theme,
+                          item.question,
+                          item.options,
+                          item.correctOptionIndex,
+                        ),
+                      ),
+                    ),
+                );
+                const currentCourseId = String(selectedCourseId || "").trim();
+                const templateSourceCourseId = String(
+                  template.sourceCourseId || "",
+                ).trim();
+                const currentCourseCode = String(selectedCourse?.code || "")
+                  .trim()
+                  .toLowerCase();
+                const templateSourceCourseCode = String(
+                  template.sourceCourseCode || "",
+                )
+                  .trim()
+                  .toLowerCase();
+                const isTemplateFromCurrentCourse = Boolean(
+                  currentCourseId &&
+                    ((templateSourceCourseId &&
+                      templateSourceCourseId === currentCourseId) ||
+                      (templateSourceCourseCode &&
+                        currentCourseCode &&
+                        templateSourceCourseCode === currentCourseCode)),
+                );
+                const canDeleteTemplateContentInCurrentCourse =
+                  isAuthoringMode &&
+                  Boolean(selectedCourseId) &&
+                  isTemplatePresentInCurrentCourse;
+                const canDeleteSharedTemplate =
+                  isOwnTemplate && template.id.startsWith("template_");
+                const isImportingTemplate = importingTemplateId === template.id;
+                const isDeletingImportedTemplate =
+                  deletingImportedTemplateId === template.id;
+                const isDeletingSharedTemplate =
+                  deletingSharedTemplateId === template.id;
+                const hasActiveAction =
+                  isImportingTemplate ||
+                  isDeletingImportedTemplate ||
+                  isDeletingSharedTemplate;
+                const hasAnotherTemplateAction =
+                  (!!importingTemplateId && importingTemplateId !== template.id) ||
+                  (!!deletingImportedTemplateId &&
+                    deletingImportedTemplateId !== template.id) ||
+                  (!!deletingSharedTemplateId &&
+                    deletingSharedTemplateId !== template.id);
+
+                return (
+                  <article
+                    key={template.id}
+                    className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm transition hover:border-sky-200"
                   >
-                    {availableThemes.length === 0 && (
-                      <option value="">No themes available</option>
-                    )}
-                    {availableThemes.map((theme) => (
-                      <option key={theme} value={theme}>
-                        {theme}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void publishThemeToSharedBank(selectedThemeToPublish);
-                    }}
-                    disabled={
-                      !selectedThemeToPublish ||
-                      publishingTheme === selectedThemeToPublish
-                    }
-                    className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {publishingTheme === selectedThemeToPublish ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    )}
-                    Publish
-                  </button>
-                </div>
-                {!selectedCourseId && (
-                  <p className="mt-2 text-[11px] text-sky-700">
-                    Select a course to publish or import quizzes.
-                  </p>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl bg-slate-100/80 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                    Shared templates
-                  </p>
-                  <p className="text-lg font-semibold text-slate-900">
-                    {sharedTemplates.length}
-                  </p>
-                </div>
-                <div className="rounded-xl bg-slate-100/80 px-3 py-2">
-                  <p className="text-[11px] uppercase tracking-wide text-slate-500">
-                    From others
-                  </p>
-                  <p className="text-lg font-semibold text-slate-900">
-                    {sharedTemplatesFromOtherTeachersCount}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={sharedSearchQuery}
-                onChange={(event) => setSharedSearchQuery(event.target.value)}
-                placeholder="Search shared quizzes..."
-                className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-              />
-            </div>
-
-            <div className="max-h-[62vh] overflow-y-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              {loadingSharedTemplates ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-sky-600" />
-                </div>
-              ) : filteredSharedTemplates.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-500">
-                  No shared templates found yet.
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {filteredSharedTemplates.map((template) => {
-                    const isOwnTemplate = template.ownerId === user?.id;
-                    const canImportTemplate =
-                      Boolean(selectedCourseId) &&
-                      template.questions.length > 0;
-
-                    return (
-                      <article
-                        key={template.id}
-                        className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm transition hover:border-sky-200"
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-900 break-words">
+                          {template.theme}
+                        </p>
+                        <p className="text-xs text-slate-600 mt-1">
+                          {template.questionCount} questions
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
+                          isOwnTemplate
+                            ? "bg-sky-100 text-sky-700"
+                            : "bg-emerald-100 text-emerald-700"
+                        }`}
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-bold text-slate-900 break-words">
-                              {template.theme}
-                            </p>
-                            <p className="text-xs text-slate-600 mt-1">
-                              {template.questionCount} questions
-                            </p>
-                          </div>
-                          <span
-                            className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
-                              isOwnTemplate
-                                ? "bg-sky-100 text-sky-700"
-                                : "bg-emerald-100 text-emerald-700"
-                            }`}
-                          >
-                            {isOwnTemplate ? "Your quiz" : "Community"}
-                          </span>
-                        </div>
+                        {isOwnTemplate ? "Your quiz" : "Community"}
+                      </span>
+                    </div>
 
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700">
-                            {template.sourceCourseCode || "No code"}
-                          </span>
-                          <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700">
-                            {template.ownerName || "Teacher"}
-                          </span>
-                          <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700">
-                            Updated {formatDate(template.updatedAt)}
-                          </span>
-                        </div>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700">
+                        {template.sourceCourseCode || "No code"}
+                      </span>
+                      <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700">
+                        {template.ownerName || "Teacher"}
+                      </span>
+                      <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700">
+                        Updated {formatDate(template.updatedAt)}
+                      </span>
+                    </div>
 
-                        <div className="mt-4 flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void importSharedTemplateToCourse(template);
-                            }}
-                            disabled={
-                              !canImportTemplate ||
-                              (!!importingTemplateId &&
-                                importingTemplateId !== template.id)
-                            }
-                            className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {importingTemplateId === template.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <ChevronRight className="h-3.5 w-3.5" />
-                            )}
-                            Import to current course
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      {isTemplatePresentInCurrentCourse ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleDeleteImportedTemplateFromCourse(template);
+                          }}
+                          disabled={
+                            !canDeleteTemplateContentInCurrentCourse ||
+                            hasActiveAction ||
+                            hasAnotherTemplateAction
+                          }
+                          className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isDeletingImportedTemplate ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                          {isTemplateFromCurrentCourse
+                            ? "Delete Quiz"
+                            : "Delete Imported"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void importSharedTemplateToCourse(template);
+                          }}
+                          disabled={
+                            !canImportTemplate ||
+                            hasActiveAction ||
+                            hasAnotherTemplateAction
+                          }
+                          className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isImportingTemplate ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          )}
+                          {isAuthoringMode
+                            ? "Import to current course"
+                            : "View only"}
+                        </button>
+                      )}
+
+                      {canDeleteSharedTemplate && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleDeleteSharedTemplate(template);
+                          }}
+                          disabled={hasActiveAction || hasAnotherTemplateAction}
+                          className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isDeletingSharedTemplate ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                          Delete Shared
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
-          </div>
-        </>
-      )}
+          )}
+        </div>
+      </div>
     </div>
+    )
   );
 
   return (
@@ -3244,7 +3987,7 @@ export default function ExerciseBankPage() {
                     ))}
                   </select>
                 </div>
-                {isTeacher && (
+                {isAuthoringMode && (
                   selectedCourse?.code ? (
                     <Link
                       to={`/courses/${selectedCourse.code}/exercise-bank/stats`}
@@ -3269,14 +4012,10 @@ export default function ExerciseBankPage() {
           </section>
 
           <div className="mt-4 space-y-4">
-            {isTeacher && showSharedQuizBank ? (
-              <div className="mx-auto w-full max-w-7xl">
-                {renderSharedQuizBankPanel()}
-              </div>
-            ) : !selectedCourseId ? (
+            {!selectedCourseId ? (
               isTeacher ? (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <div className="lg:col-span-2 flex flex-col items-center justify-center min-h-[400px] bg-white border border-slate-200 rounded-2xl p-8">
+                <div className="space-y-4">
+                  <div className="flex flex-col items-center justify-center min-h-[320px] bg-white border border-slate-200 rounded-2xl p-8">
                     <div className="h-20 w-20 rounded-full bg-sky-100 flex items-center justify-center mb-4">
                       <BookOpen className="h-8 w-8 text-sky-600" />
                     </div>
@@ -3288,7 +4027,7 @@ export default function ExerciseBankPage() {
                       bank remains visible for all teachers.
                     </p>
                   </div>
-                  <div className="space-y-2">{renderSharedQuizBankPanel()}</div>
+                  {renderSharedQuizBankPanel()}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center min-h-[400px] bg-white border border-slate-200 rounded-2xl p-8">
@@ -3306,57 +4045,116 @@ export default function ExerciseBankPage() {
               )
             ) : (
               <>
-                <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 sm:gap-4">
-                  <StatCard
-                    icon={<HelpCircle className="h-5 w-5" />}
-                    label="Total Questions"
-                    value={stats.totalQuestions}
-                    tone="sky"
-                  />
-                  <StatCard
-                    icon={<Layers className="h-5 w-5" />}
-                    label="Themes"
-                    value={stats.totalThemes}
-                    tone="indigo"
-                  />
-                  <StatCard
-                    icon={
-                      isTeacher ? (
-                        <BarChart3 className="h-5 w-5" />
-                      ) : (
-                        <CheckCircle2 className="h-5 w-5" />
-                      )
-                    }
-                    label={isTeacher ? "Avg per Theme" : "Completed"}
-                    value={
-                      isTeacher
-                        ? stats.questionsPerTheme
-                        : stats.completedQuizzes
-                    }
-                    tone="emerald"
-                  />
-                  <StatCard
-                    icon={
-                      isTeacher ? (
-                        <Sparkles className="h-5 w-5" />
-                      ) : (
-                        <Zap className="h-5 w-5" />
-                      )
-                    }
-                    label={isTeacher ? "Shared Quizzes" : "Available"}
-                    value={
-                      isTeacher
-                        ? sharedTemplatesFromOtherTeachersCount
-                        : stats.pendingThemes
-                    }
-                    tone="violet"
-                  />
-                </div>
+                {isLearnerMode && (
+                  <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 sm:gap-4">
+                    <StatCard
+                      icon={<HelpCircle className="h-5 w-5" />}
+                      label="Total Questions"
+                      value={stats.totalQuestions}
+                      tone="sky"
+                    />
+                    <StatCard
+                      icon={<Layers className="h-5 w-5" />}
+                      label="Themes"
+                      value={stats.totalThemes}
+                      tone="indigo"
+                    />
+                    <StatCard
+                      icon={<CheckCircle2 className="h-5 w-5" />}
+                      label="Completed"
+                      value={stats.completedQuizzes}
+                      tone="emerald"
+                    />
+                    <StatCard
+                      icon={<Zap className="h-5 w-5" />}
+                      label="Available"
+                      value={stats.pendingThemes}
+                      tone="violet"
+                    />
+                  </div>
+                )}
 
-                {isTeacher && (
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
-                    <div className="lg:col-span-2 space-y-2">
-                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                {isAuthoringMode && (
+                  <div className="space-y-4">
+                    <div
+                      className={`grid grid-cols-1 gap-3 ${
+                        showMandatoryTeacherQuizzesCard
+                          ? "md:grid-cols-2 xl:grid-cols-4"
+                          : "md:grid-cols-3"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveAuthoringPanel("create");
+                          setShowCreatorForm(true);
+                        }}
+                        className={`rounded-2xl border p-4 text-left transition ${
+                          activeAuthoringPanel === "create"
+                            ? "border-sky-300 bg-sky-50"
+                            : "border-slate-200 bg-white hover:border-sky-200"
+                        }`}
+                      >
+                        <p className="text-sm font-bold text-slate-900">Create Questions</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Add single or bulk questions
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveAuthoringPanel("questionBank")}
+                        className={`rounded-2xl border p-4 text-left transition ${
+                          activeAuthoringPanel === "questionBank"
+                            ? "border-sky-300 bg-sky-50"
+                            : "border-slate-200 bg-white hover:border-sky-200"
+                        }`}
+                      >
+                        <p className="text-sm font-bold text-slate-900">Question Bank</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {filteredQuestions.length} questions available
+                        </p>
+                      </button>
+                      {!isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveAuthoringPanel("sharedQuizBank")}
+                          className={`rounded-2xl border p-4 text-left transition ${
+                            activeAuthoringPanel === "sharedQuizBank"
+                              ? "border-sky-300 bg-sky-50"
+                              : "border-slate-200 bg-white hover:border-sky-200"
+                          }`}
+                        >
+                          <p className="text-sm font-bold text-slate-900">Shared Quiz Bank</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Reuse, import, and publish quizzes
+                          </p>
+                        </button>
+                      )}
+                      {showMandatoryTeacherQuizzesCard && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveAuthoringPanel("mandatoryTeacherQuizzes")
+                          }
+                          className={`rounded-2xl border p-4 text-left transition ${
+                            activeAuthoringPanel === "mandatoryTeacherQuizzes"
+                              ? "border-sky-300 bg-sky-50"
+                              : "border-slate-200 bg-white hover:border-sky-200"
+                          }`}
+                        >
+                          <p className="text-sm font-bold text-slate-900">
+                            Mandatory Course Quizzes
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Quizzes teachers must complete
+                          </p>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      {activeAuthoringPanel === "create" && (
+                        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
                         <div className="px-4 py-3 border-b border-slate-200 bg-white">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
@@ -3592,7 +4390,9 @@ D) goes
                           </div>
                         )}
                       </div>
+                      )}
 
+                      {activeAuthoringPanel === "questionBank" && (
                       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
                         <div className="px-4 py-3 border-b border-slate-200">
                           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -3672,6 +4472,34 @@ D) goes
                             </div>
                           </div>
 
+                          <div className="mt-3 flex flex-col gap-1.5 sm:max-w-sm">
+                            <label
+                              htmlFor="question-bank-theme-dropdown"
+                              className="text-[11px] font-semibold uppercase tracking-wide text-slate-500"
+                            >
+                              Question Bank Dropdown
+                            </label>
+                            <select
+                              id="question-bank-theme-dropdown"
+                              value={selectedQuestionBankTheme}
+                              onChange={(e) =>
+                                setSelectedQuestionBankTheme(e.target.value)
+                              }
+                              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:ring-2 focus:ring-sky-500"
+                            >
+                              <option value="all">
+                                All themes ({groupedFilteredQuestions.length})
+                              </option>
+                              {groupedFilteredQuestions.map(
+                                ([theme, themeQuestions]) => (
+                                  <option key={theme} value={theme}>
+                                    {theme} ({themeQuestions.length})
+                                  </option>
+                                ),
+                              )}
+                            </select>
+                          </div>
+
                           <div className="mt-2 p-2 bg-slate-50 rounded-xl text-[14px]">
                             <p className="text-xs font-semibold tracking-wide text-slate-600 mb-3">
                               Bulk Actions
@@ -3745,7 +4573,7 @@ D) goes
                             </div>
                           ) : (
                             <div className="space-y-2">
-                              {groupedFilteredQuestions.map(
+                              {visibleGroupedQuestions.map(
                                 ([theme, themeQuestions]) => {
                                   const isExpanded =
                                     expandedThemes[theme] ?? true;
@@ -3755,51 +4583,114 @@ D) goes
                                       key={theme}
                                       className="rounded-xl border border-slate-200"
                                     >
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setExpandedThemes((prev) => ({
-                                            ...prev,
-                                            [theme]: !isExpanded,
-                                          }))
-                                        }
-                                        className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors rounded-xl"
+                                      <div
+                                        className={`flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-4 py-3 transition-colors hover:bg-slate-100 ${
+                                          isExpanded ? "rounded-t-xl" : "rounded-xl"
+                                        }`}
                                       >
-                                        <div className="text-left">
-                                          <p className="font-semibold text-slate-900">
-                                            {theme}
-                                          </p>
-                                          <p className="text-xs text-slate-500">
-                                            {themeQuestions.length} questions
-                                          </p>
-                                        </div>
-                                        <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setExpandedThemes((prev) => ({
+                                              ...prev,
+                                              [theme]: !isExpanded,
+                                            }))
+                                          }
+                                          className="flex min-w-[180px] flex-1 items-center justify-between gap-2 text-left"
+                                        >
+                                          <div>
+                                            <p className="font-semibold text-slate-900">
+                                              {theme}
+                                            </p>
+                                            <p className="text-xs text-slate-500">
+                                              {themeQuestions.length} questions
+                                            </p>
+                                          </div>
+                                          <ChevronDown
+                                            className={`h-4 w-4 text-slate-500 transition-transform ${
+                                              isExpanded ? "rotate-180" : ""
+                                            }`}
+                                          />
+                                        </button>
+
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+                                            <FileText className="h-3.5 w-3.5 text-slate-500" />
+                                            <select
+                                              value={themeLinksByTheme[theme] || ""}
+                                              onChange={(event) => {
+                                                event.stopPropagation();
+                                                void handleThemeLinkChange(
+                                                  theme,
+                                                  event.target.value,
+                                                );
+                                              }}
+                                              onClick={(event) =>
+                                                event.stopPropagation()
+                                              }
+                                              disabled={savingThemeLink === theme}
+                                              className="h-6 min-w-[140px] border-0 bg-transparent px-1 text-[11px] font-medium text-slate-700 outline-none focus:ring-0"
+                                            >
+                                              <option value="">No sheet</option>
+                                              {groupedCourseGradeSheets.map((group) => (
+                                                <optgroup
+                                                  key={group.unitLabel}
+                                                  label={group.unitLabel}
+                                                >
+                                                  {group.sheets.map((sheet) => (
+                                                    <option
+                                                      key={sheet.id}
+                                                      value={sheet.id}
+                                                    >
+                                                      {sheet.title}
+                                                    </option>
+                                                  ))}
+                                                </optgroup>
+                                              ))}
+                                            </select>
+                                          </div>
+
                                           <button
                                             type="button"
                                             onClick={(event) => {
-                                              event.preventDefault();
                                               event.stopPropagation();
                                               void publishThemeToSharedBank(
                                                 theme,
                                               );
                                             }}
                                             disabled={publishingTheme === theme}
-                                            className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-white px-2 py-1 text-[11px] font-semibold text-sky-700 hover:bg-sky-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            title={
+                                              sharedThemeKeysForCurrentCourse.has(
+                                                normalizeThemeKey(theme),
+                                              )
+                                                ? "Already shared. Click to update shared quiz with latest questions."
+                                                : "Share this theme in the shared quiz bank."
+                                            }
+                                            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed ${
+                                              sharedThemeKeysForCurrentCourse.has(
+                                                normalizeThemeKey(theme),
+                                              )
+                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                                : "border-sky-200 bg-white text-sky-700 hover:bg-sky-50"
+                                            }`}
                                           >
                                             {publishingTheme === theme ? (
                                               <Loader2 className="h-3 w-3 animate-spin" />
+                                            ) : sharedThemeKeysForCurrentCourse.has(
+                                                normalizeThemeKey(theme),
+                                              ) ? (
+                                              <CheckCircle2 className="h-3 w-3" />
                                             ) : (
                                               <ExternalLink className="h-3 w-3" />
                                             )}
-                                            Share
+                                            {sharedThemeKeysForCurrentCourse.has(
+                                              normalizeThemeKey(theme),
+                                            )
+                                              ? "Update Shared"
+                                              : "Share"}
                                           </button>
-                                          <ChevronDown
-                                            className={`h-4 w-4 text-slate-500 transition-transform ${
-                                              isExpanded ? "rotate-180" : ""
-                                            }`}
-                                          />
                                         </div>
-                                      </button>
+                                      </div>
 
                                       {isExpanded && (
                                         <div className="p-4">
@@ -3921,11 +4812,101 @@ D) goes
                           )}
                         </div>
                       </div>
+                      )}
+
+                      {activeAuthoringPanel === "sharedQuizBank" && (
+                        renderSharedQuizBankPanel()
+                      )}
+
+                      {activeAuthoringPanel === "mandatoryTeacherQuizzes" && (
+                        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                          <div className="border-b border-slate-200 px-4 py-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <h2 className="text-base font-bold text-slate-900">
+                                  Mandatory Course Quizzes
+                                </h2>
+                                <p className="text-xs text-slate-500">
+                                  {mandatoryTeacherCourse?.code} -{" "}
+                                  {mandatoryTeacherCourse?.name}
+                                </p>
+                              </div>
+                              {mandatoryTeacherCourse &&
+                                mandatoryTeacherCourse.id !== selectedCourseId && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleCourseChange(mandatoryTeacherCourse.id)
+                                  }
+                                  className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100"
+                                >
+                                  <ChevronRight className="h-3.5 w-3.5" />
+                                  Open mandatory course
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="p-4">
+                            {loadingMandatoryCourseQuizThemes ? (
+                              <div className="flex items-center justify-center py-8">
+                                <Loader2 className="h-5 w-5 animate-spin text-sky-600" />
+                              </div>
+                            ) : mandatoryCourseQuizThemes.length === 0 ? (
+                              <p className="text-sm text-slate-500">
+                                No published quizzes found in the mandatory
+                                course yet.
+                              </p>
+                            ) : (
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                {mandatoryCourseQuizThemes.map((item) => (
+                                  <div
+                                    key={item.theme}
+                                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                                  >
+                                    <p className="text-sm font-semibold text-slate-900">
+                                      {item.theme}
+                                    </p>
+                                    <p className="text-xs text-slate-500">
+                                      {item.questionCount} questions
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                     </div>
 
-                    <div className="space-y-2 lg:sticky lg:top-4 self-start">
-                      {renderSharedQuizBankPanel()}
+                      <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 sm:gap-4">
+                        <StatCard
+                          icon={<HelpCircle className="h-5 w-5" />}
+                          label="Total Questions"
+                          value={stats.totalQuestions}
+                          tone="sky"
+                        />
+                        <StatCard
+                          icon={<Layers className="h-5 w-5" />}
+                          label="Themes"
+                          value={stats.totalThemes}
+                          tone="indigo"
+                        />
+                        <StatCard
+                          icon={<BarChart3 className="h-5 w-5" />}
+                          label="Avg per Theme"
+                          value={stats.questionsPerTheme}
+                          tone="emerald"
+                        />
+                        <StatCard
+                          icon={<Sparkles className="h-5 w-5" />}
+                          label="Shared Quizzes"
+                          value={sharedTemplatesFromOtherTeachersCount}
+                          tone="violet"
+                        />
+                      </div>
 
+                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
                         <div className="px-4 py-3 border-b border-slate-200 bg-white">
                           <div className="flex items-center gap-3">
@@ -3990,58 +4971,6 @@ D) goes
                         <div className="px-4 py-3 border-b border-slate-200">
                           <div className="flex items-center gap-3">
                             <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
-                              <FileText className="h-5 w-5 text-sky-600" />
-                            </div>
-                            <div>
-                              <h2 className="text-base font-bold text-slate-900">
-                                Link to Grade Sheets
-                              </h2>
-                              <p className="text-xs text-slate-500">
-                                Connect themes to grade books
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="p-4 max-h-[300px] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                          <div className="space-y-2">
-                            {availableThemes.map((theme) => (
-                              <div
-                                key={theme}
-                                className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl"
-                              >
-                                <p className="flex-1 text-sm font-medium text-slate-700 whitespace-normal break-words leading-5">
-                                  {theme}
-                                </p>
-                                <select
-                                  value={themeLinksByTheme[theme] || ""}
-                                  onChange={(e) =>
-                                    handleThemeLinkChange(theme, e.target.value)
-                                  }
-                                  disabled={savingThemeLink === theme}
-                                  className="w-[180px] px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-sky-500"
-                                >
-                                  <option value="">No sheet</option>
-                                  {courseGradeSheets.map((sheet) => (
-                                    <option key={sheet.id} value={sheet.id}>
-                                      {sheet.title}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            ))}
-                            {availableThemes.length === 0 && (
-                              <p className="text-sm text-slate-500 text-center py-4">
-                                Create themes first to link them to grade sheets
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
-                        <div className="px-4 py-3 border-b border-slate-200">
-                          <div className="flex items-center gap-3">
-                            <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
                               <BarChart3 className="h-5 w-5 text-sky-600" />
                             </div>
                             <div>
@@ -4091,11 +5020,11 @@ D) goes
                           </div>
                         </div>
                       </div>
+                      </div>
                     </div>
-                  </div>
                 )}
 
-                {!isTeacher && (
+                {isLearnerMode && (
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                     <div className="lg:col-span-2 space-y-2">
                       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
@@ -4110,8 +5039,11 @@ D) goes
                                   Available Themes
                                 </h2>
                                 <p className="text-xs text-slate-500">
-                                  {studentAvailableThemes.length} themes •{" "}
-                                  {stats.completedQuizzes} completed
+                                  {teacherMandatoryLearnerMode
+                                    ? mandatoryThemeApprovalStats?.isApproved
+                                      ? "Approved"
+                                      : "Not approved"
+                                    : `${studentAvailableThemes.length} themes • ${stats.completedQuizzes} completed`}
                                 </p>
                               </div>
                             </div>
@@ -4142,6 +5074,12 @@ D) goes
                                 const questionCount = publishedQuestions.filter(
                                   (q) => q.theme === theme,
                                 ).length;
+                                const isApprovedForMandatory = Boolean(
+                                  teacherMandatoryLearnerMode &&
+                                    attempt &&
+                                    attempt.percentage >=
+                                      MANDATORY_APPROVAL_PERCENTAGE,
+                                );
 
                                 return (
                                   <ThemeCard
@@ -4149,11 +5087,22 @@ D) goes
                                     theme={theme}
                                     questionCount={questionCount}
                                     isLinked={linkedTheme}
-                                    maxAttempts={MAX_UNLINKED_ATTEMPTS}
+                                    maxAttempts={
+                                      teacherMandatoryLearnerMode
+                                        ? MAX_MANDATORY_ATTEMPTS
+                                        : MAX_UNLINKED_ATTEMPTS
+                                    }
                                     attempt={attempt}
                                     attemptCount={attemptCount}
                                     isSelected={selectedTheme === theme}
                                     canTake={canTake}
+                                    mandatoryApprovalEnabled={
+                                      teacherMandatoryLearnerMode
+                                    }
+                                    approvalThreshold={
+                                      MANDATORY_APPROVAL_PERCENTAGE
+                                    }
+                                    approved={isApprovedForMandatory}
                                     onSelect={() => {
                                       void handleSelectTheme(theme);
                                     }}
@@ -4194,7 +5143,7 @@ D) goes
                                     ...prev,
                                     [questionId]: optionIndex,
                                   }))
-                                }
+                                } 
                                 onNext={() =>
                                   setCurrentQuestionIndex((prev) => prev + 1)
                                 }
@@ -4212,13 +5161,18 @@ D) goes
                                 onClose={handleCloseResult}
                               />
                             ) : selectedThemeAttempt &&
-                              selectedThemeIsLinked ? (
+                              selectedThemeIsLinked &&
+                              (!teacherMandatoryLearnerMode ||
+                                selectedThemeAttempt.percentage >=
+                                  MANDATORY_APPROVAL_PERCENTAGE) ? (
                               <div className="text-center py-8">
                                 <div className="h-16 w-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
                                   <CheckCircle className="h-8 w-8 text-emerald-600" />
                                 </div>
                                 <h4 className="text-lg font-semibold text-slate-900 mb-2">
-                                  Quiz Already Completed
+                                  {teacherMandatoryLearnerMode
+                                    ? "Quiz Approved"
+                                    : "Quiz Already Completed"}
                                 </h4>
                                 <p className="text-slate-600 mb-4">
                                   Your score: {selectedThemeAttempt.correct} /{" "}
@@ -4257,7 +5211,9 @@ D) goes
                                   Progress Overview
                                 </h3>
                                 <p className="text-xs text-slate-500">
-                                  Completion status by theme
+                                  {teacherMandatoryLearnerMode
+                                    ? `Approval status by theme (minimum ${MANDATORY_APPROVAL_PERCENTAGE}%)`
+                                    : "Completion status by theme"}
                                 </p>
                               </div>
                             </div>
@@ -4267,19 +5223,32 @@ D) goes
                               <div>
                                 <div className="flex justify-between text-sm mb-2">
                                   <span className="text-slate-600">
-                                    Themes Completed
+                                    {teacherMandatoryLearnerMode
+                                      ? "Themes Approved"
+                                      : "Themes Completed"}
                                   </span>
                                   <span className="font-semibold text-slate-900">
-                                    {stats.completedQuizzes}/{stats.totalThemes}
+                                    {teacherMandatoryLearnerMode
+                                      ? `${mandatoryThemeApprovalStats?.approvedThemes || 0}/${mandatoryThemeApprovalStats?.totalThemes || 0}`
+                                      : `${stats.completedQuizzes}/${stats.totalThemes}`}
                                   </span>
                                 </div>
                                 <progress
                                   max={100}
                                   value={
-                                    stats.totalThemes > 0
+                                    (teacherMandatoryLearnerMode
+                                      ? (mandatoryThemeApprovalStats?.totalThemes || 0)
+                                      : stats.totalThemes) > 0
                                       ? Math.max(
                                           0,
-                                          Math.min(100, (stats.completedQuizzes / stats.totalThemes) * 100),
+                                          Math.min(
+                                            100,
+                                            teacherMandatoryLearnerMode
+                                              ? (((mandatoryThemeApprovalStats?.approvedThemes || 0) /
+                                                  (mandatoryThemeApprovalStats?.totalThemes || 1)) *
+                                                100)
+                                              : ((stats.completedQuizzes / stats.totalThemes) * 100),
+                                          ),
                                         )
                                       : 0
                                   }
@@ -4290,18 +5259,26 @@ D) goes
                               <div className="grid grid-cols-2 gap-3 pt-2">
                                 <div className="p-4 bg-slate-50 rounded-xl text-center">
                                   <p className="text-lg font-extrabold leading-5 text-slate-900">
-                                    {stats.completedQuizzes}
+                                    {teacherMandatoryLearnerMode
+                                      ? mandatoryThemeApprovalStats?.approvedThemes || 0
+                                      : stats.completedQuizzes}
                                   </p>
                                   <p className="text-xs text-slate-600">
-                                    Completed
+                                    {teacherMandatoryLearnerMode
+                                      ? "Approved"
+                                      : "Completed"}
                                   </p>
                                 </div>
                                 <div className="p-4 bg-slate-50 rounded-xl text-center">
                                   <p className="text-lg font-extrabold leading-5 text-slate-900">
-                                    {stats.pendingThemes}
+                                    {teacherMandatoryLearnerMode
+                                      ? mandatoryThemeApprovalStats?.notApprovedThemes || 0
+                                      : stats.pendingThemes}
                                   </p>
                                   <p className="text-xs text-slate-600">
-                                    Pending
+                                    {teacherMandatoryLearnerMode
+                                      ? "Not approved"
+                                      : "Pending"}
                                   </p>
                                 </div>
                               </div>
@@ -4340,11 +5317,14 @@ D) goes
                                     </span>
                                     <span
                                       className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                                        attempt.percentage >= 70
+                                        attempt.percentage >=
+                                        (teacherMandatoryLearnerMode
+                                          ? MANDATORY_APPROVAL_PERCENTAGE
+                                          : 70)
                                           ? "bg-emerald-100 text-emerald-700"
-                                          : attempt.percentage >= 50
-                                            ? "bg-amber-100 text-amber-700"
-                                            : "bg-rose-100 text-rose-700"
+                                        : attempt.percentage >= 50
+                                          ? "bg-amber-100 text-amber-700"
+                                          : "bg-rose-100 text-rose-700"
                                       }`}
                                     >
                                       {attempt.percentage}%
@@ -4407,7 +5387,9 @@ D) goes
                   <div>
                     <p className="font-medium text-slate-900">Attempts</p>
                     <p className="text-xs text-slate-500">
-                      {pendingThemeIsLinked
+                      {teacherMandatoryLearnerMode
+                        ? `Mandatory quiz: up to ${MAX_MANDATORY_ATTEMPTS} attempts. Minimum ${MANDATORY_APPROVAL_PERCENTAGE}% to be approved.`
+                        : pendingThemeIsLinked
                         ? "This quiz is linked to a grade sheet - only one attempt allowed"
                         : `This is a practice quiz - ${MAX_UNLINKED_ATTEMPTS} attempts allowed`}
                     </p>

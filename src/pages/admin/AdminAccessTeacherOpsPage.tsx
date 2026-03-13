@@ -1,72 +1,47 @@
-import { useEffect, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
-import { toast } from "sonner";
-import { FileText, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { doc, getDoc } from "firebase/firestore";
+import {
+  AlertTriangle,
+  BadgeCheck,
+  BookOpen,
+  CalendarClock,
+  CheckCircle2,
+  Clock3,
+  GraduationCap,
+  LayoutDashboard,
+  MessageSquare,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { useAcademic } from "@/contexts/AcademicContext";
 import { firebaseDB } from "@/lib/firebase";
+import {
+  getPendingTeacherApprovalRequests,
+  getTeacherApprovalRequests,
+} from "@/lib/services/teacherApprovalService";
 import { getTeacherPlanDefinition, resolveTeacherPlanId } from "@/lib/services/teacherPlanService";
-import { AdminWorkspaceShell } from "@/pages/admin/components/AdminWorkspaceShell";
-import { useAdminWorkspaceCounts } from "@/pages/admin/hooks/useAdminWorkspaceCounts";
-import { AdminSectionHeader } from "@/pages/admin/components/common/AdminSectionHeader";
-import { AdminMetricCard } from "@/pages/admin/components/common/AdminMetricCard";
-import { AdminLoadingState } from "@/pages/admin/components/common/AdminLoadingState";
-import { AdminEmptyState } from "@/pages/admin/components/common/AdminEmptyState";
 
-type TeacherOpsCourseSnapshot = {
-  id: string;
-  name: string;
-  code: string;
-  group: string;
-  semester: string;
-  enrolledCount: number;
-  assessmentsCount: number;
-  gradeSheetsCount: number;
-  gradesCount: number;
-  filesCount: number;
-  filesBytes: number;
-};
-
-type TeacherOpsSnapshot = {
+type TeacherOpsRow = {
   teacherId: string;
-  name: string;
-  email: string;
-  approvalStatus: string;
+  teacherName: string;
+  coursesCount: number;
+  studentsCount: number;
+  classSlotsCount: number;
+  dueSoonCount: number;
+  overdueCount: number;
+  workloadScore: number;
+};
+
+type TeacherPlanMeta = {
+  courseLimit: number | null;
+  studentLimit: number | null;
+  expiresAt: Date | null;
   planLabel: string;
-  planStatus: string;
-  institutionName: string;
-  institutionOwnership: string;
-  institutionType: string;
-  paymentMethod: string;
-  courseCount: number;
-  enrolledStudentsTotal: number;
-  uniqueStudentsTotal: number;
-  assessmentsTotal: number;
-  gradeSheetsTotal: number;
-  gradesTotal: number;
-  filesTotal: number;
-  filesBytesTotal: number;
-  courses: TeacherOpsCourseSnapshot[];
+  avatarUrl: string;
+  avatarEmoji: string;
 };
-
-type FirebaseUsageSnapshot = {
-  trackedDocuments: number;
-  teacherUsers: number;
-  studentsUsers: number;
-  courses: number;
-  assessments: number;
-  grades: number;
-  gradeSheets: number;
-  files: number;
-  firestorePayloadBytes: number;
-  filesReferencedBytes: number;
-  recent7dAssessments: number;
-  recent7dGrades: number;
-  recent7dFiles: number;
-  recent7dTeacherRequests: number;
-  projectedMonthlyWrites: number;
-};
-
-const toText = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
 const toDate = (value: unknown): Date | null => {
   if (!value) return null;
@@ -87,359 +62,534 @@ const toDate = (value: unknown): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const toCountArray = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-
-const formatBytes = (bytes: number): string => {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  const mb = kb / 1024;
-  if (mb < 1024) return `${mb.toFixed(1)} MB`;
-  const gb = mb / 1024;
-  return `${gb.toFixed(2)} GB`;
+const toNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 };
 
-const estimateObjectBytes = (value: unknown): number => {
-  try {
-    const json = JSON.stringify(value ?? {});
-    return new TextEncoder().encode(json).length;
-  } catch {
-    return 0;
+const addMonths = (value: Date, months: number): Date => {
+  const next = new Date(value);
+  next.setMonth(next.getMonth() + months);
+  return next;
+};
+
+const formatShortDate = (value: Date | null): string =>
+  value
+    ? value.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "Not set";
+
+const getInitials = (name: string): string => {
+  const tokens = name
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2);
+  if (tokens.length === 0) return "T";
+  return tokens.map((token) => token.charAt(0).toUpperCase()).join("");
+};
+
+const resolveTeacherPlanFromRecord = (merged: Record<string, unknown>) => {
+  const planIdRaw = String(merged.teacherPlanId || merged.teacherInterestedPlan || "").trim();
+  const directPlanId = resolveTeacherPlanId(planIdRaw);
+  if (directPlanId) return getTeacherPlanDefinition(directPlanId);
+
+  const planNameRaw = String(merged.teacherPlanName || "").trim().toLowerCase();
+  if (planNameRaw.includes("growth") || planNameRaw.includes("semiannual")) {
+    return getTeacherPlanDefinition("growth");
   }
+  if (planNameRaw.includes("scale") || planNameRaw.includes("annual")) {
+    return getTeacherPlanDefinition("scale");
+  }
+  if (planNameRaw.includes("starter") || planNameRaw.includes("monthly")) {
+    return getTeacherPlanDefinition("starter");
+  }
+
+  // Fallback to starter when plan data is missing so we never render "-" limits.
+  return getTeacherPlanDefinition("starter");
+};
+
+const getLoadTone = (score: number): { text: string; badge: string } => {
+  if (score >= 70) return { text: "text-rose-700", badge: "border-rose-200 bg-rose-50 text-rose-700" };
+  if (score >= 50) return { text: "text-amber-700", badge: "border-amber-200 bg-amber-50 text-amber-700" };
+  return { text: "text-emerald-700", badge: "border-emerald-200 bg-emerald-50 text-emerald-700" };
+};
+
+const getLoadLabel = (score: number): string => {
+  if (score >= 70) return "High load";
+  if (score >= 50) return "Balanced";
+  return "Healthy";
 };
 
 export default function AdminAccessTeacherOpsPage() {
-  const { counts } = useAdminWorkspaceCounts();
-  const [teacherOpsSnapshots, setTeacherOpsSnapshots] = useState<TeacherOpsSnapshot[]>([]);
-  const [firebaseUsageSnapshot, setFirebaseUsageSnapshot] = useState<FirebaseUsageSnapshot | null>(null);
-  const [loadingTeacherOps, setLoadingTeacherOps] = useState(false);
-
-  const loadTeacherOpsSnapshots = async () => {
-    setLoadingTeacherOps(true);
-    try {
-      const readCollection = async (collectionName: string) => {
-        try {
-          const snap = await getDocs(collection(firebaseDB, collectionName));
-          return snap.docs.map((item) => ({
-            id: item.id,
-            data: (item.data() || {}) as Record<string, unknown>,
-          }));
-        } catch {
-          return [] as Array<{ id: string; data: Record<string, unknown> }>;
-        }
-      };
-
-      const [users, courses, assessments, grades, gradeSheets, files] = await Promise.all([
-        readCollection("usuarios"),
-        readCollection("cursos"),
-        readCollection("evaluaciones"),
-        readCollection("notas"),
-        readCollection("gradeSheets"),
-        readCollection("course_files"),
-      ]);
-
-      const teachers = users.filter(({ data }) => {
-        const role = toText(data.role).toLowerCase();
-        const requestedRole = toText(data.requestedRole).toLowerCase();
-        return role === "docente" || role === "teacher" || requestedRole === "docente";
-      });
-
-      const assessmentsPerCourse = new Map<string, number>();
-      for (const record of assessments) {
-        const courseId = toText(record.data.courseId);
-        if (!courseId) continue;
-        assessmentsPerCourse.set(courseId, (assessmentsPerCourse.get(courseId) || 0) + 1);
-      }
-
-      const gradesPerCourse = new Map<string, number>();
-      for (const record of grades) {
-        const courseId = toText(record.data.courseId);
-        if (!courseId) continue;
-        gradesPerCourse.set(courseId, (gradesPerCourse.get(courseId) || 0) + 1);
-      }
-
-      const gradeSheetsPerCourse = new Map<string, number>();
-      for (const record of gradeSheets) {
-        const courseId = toText(record.data.courseId);
-        if (!courseId) continue;
-        gradeSheetsPerCourse.set(courseId, (gradeSheetsPerCourse.get(courseId) || 0) + 1);
-      }
-
-      const filesPerCourse = new Map<string, { count: number; bytes: number }>();
-      for (const record of files) {
-        const courseId = toText(record.data.courseId);
-        if (!courseId) continue;
-        const current = filesPerCourse.get(courseId) || { count: 0, bytes: 0 };
-        const sizeRaw = record.data.size;
-        const sizeBytes =
-          typeof sizeRaw === "number" && Number.isFinite(sizeRaw)
-            ? Math.max(0, Math.floor(sizeRaw))
-            : 0;
-        filesPerCourse.set(courseId, {
-          count: current.count + 1,
-          bytes: current.bytes + sizeBytes,
-        });
-      }
-
-      const coursesByTeacher = new Map<string, Array<{ id: string; data: Record<string, unknown> }>>();
-      for (const course of courses) {
-        const teacherId = toText(course.data.teacherId);
-        if (!teacherId) continue;
-        const bucket = coursesByTeacher.get(teacherId) || [];
-        bucket.push(course);
-        coursesByTeacher.set(teacherId, bucket);
-      }
-
-      const teacherSnapshots: TeacherOpsSnapshot[] = teachers
-        .map((teacher) => {
-          const teacherCoursesRaw = coursesByTeacher.get(teacher.id) || [];
-          const uniqueStudents = new Set<string>();
-          let enrolledStudentsTotal = 0;
-          let assessmentsTotal = 0;
-          let gradeSheetsTotal = 0;
-          let gradesTotal = 0;
-          let filesTotal = 0;
-          let filesBytesTotal = 0;
-
-          const courseSnapshots: TeacherOpsCourseSnapshot[] = teacherCoursesRaw.map((course) => {
-            const courseId = course.id;
-            const enrolled = toCountArray(course.data.enrolledStudents);
-            for (const studentId of enrolled) uniqueStudents.add(studentId);
-            enrolledStudentsTotal += enrolled.length;
-
-            const assessmentsCount = assessmentsPerCourse.get(courseId) || 0;
-            const gradeSheetsCount = gradeSheetsPerCourse.get(courseId) || 0;
-            const gradesCount = gradesPerCourse.get(courseId) || 0;
-            const filesStats = filesPerCourse.get(courseId) || { count: 0, bytes: 0 };
-
-            assessmentsTotal += assessmentsCount;
-            gradeSheetsTotal += gradeSheetsCount;
-            gradesTotal += gradesCount;
-            filesTotal += filesStats.count;
-            filesBytesTotal += filesStats.bytes;
-
-            return {
-              id: courseId,
-              name: toText(course.data.name) || "Untitled course",
-              code: toText(course.data.code) || "No code",
-              group: toText(course.data.group) || "No group",
-              semester: toText(course.data.semester) || "No semester",
-              enrolledCount: enrolled.length,
-              assessmentsCount,
-              gradeSheetsCount,
-              gradesCount,
-              filesCount: filesStats.count,
-              filesBytes: filesStats.bytes,
-            };
-          });
-
-          const planId = resolveTeacherPlanId(toText(teacher.data.teacherPlanId));
-          const planLabel = planId ? getTeacherPlanDefinition(planId).label : "Not assigned";
-          const planStatus = toText(teacher.data.teacherPlanStatus) || "Not set";
-          const approvalStatus = toText(teacher.data.teacherApprovalStatus) || "Not set";
-
-          return {
-            teacherId: teacher.id,
-            name: toText(teacher.data.name) || "Teacher",
-            email: toText(teacher.data.email) || "No email",
-            approvalStatus,
-            planLabel,
-            planStatus,
-            institutionName: toText(teacher.data.teacherInstitutionName) || "Not provided",
-            institutionOwnership: toText(teacher.data.teacherInstitutionOwnership) || "Not provided",
-            institutionType: toText(teacher.data.teacherInstitutionType) || "Not provided",
-            paymentMethod: toText(teacher.data.teacherPaymentMethod) || "Not provided",
-            courseCount: courseSnapshots.length,
-            enrolledStudentsTotal,
-            uniqueStudentsTotal: uniqueStudents.size,
-            assessmentsTotal,
-            gradeSheetsTotal,
-            gradesTotal,
-            filesTotal,
-            filesBytesTotal,
-            courses: courseSnapshots.sort((a, b) => a.name.localeCompare(b.name)),
-          };
-        })
-        .sort((a, b) => b.courseCount - a.courseCount || a.name.localeCompare(b.name));
-
-      const now = Date.now();
-      const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
-      const isRecent = (value: unknown): boolean => {
-        const date = toDate(value);
-        if (!date) return false;
-        return date.getTime() >= sevenDaysAgo;
-      };
-
-      const recent7dAssessments = assessments.filter(
-        (item) => isRecent(item.data.createdAt) || isRecent(item.data.updatedAt),
-      ).length;
-      const recent7dGrades = grades.filter(
-        (item) => isRecent(item.data.gradedAt) || isRecent(item.data.createdAt),
-      ).length;
-      const recent7dFiles = files.filter((item) => isRecent(item.data.uploadedAt)).length;
-      const recent7dTeacherRequests = users.filter((item) => isRecent(item.data.teacherRequestedAt)).length;
-
-      const trackedCollections = [users, courses, assessments, grades, gradeSheets, files];
-      const trackedDocuments = trackedCollections.reduce((acc, list) => acc + list.length, 0);
-      const firestorePayloadBytes = trackedCollections.reduce(
-        (acc, list) => acc + list.reduce((inner, item) => inner + estimateObjectBytes(item.data), 0),
-        0,
-      );
-      const filesReferencedBytes = files.reduce((acc, item) => {
-        const sizeRaw = item.data.size;
-        const sizeBytes =
-          typeof sizeRaw === "number" && Number.isFinite(sizeRaw)
-            ? Math.max(0, Math.floor(sizeRaw))
-            : 0;
-        return acc + sizeBytes;
-      }, 0);
-
-      const projectedMonthlyWrites = Math.round(
-        ((recent7dAssessments + recent7dGrades + recent7dFiles + recent7dTeacherRequests) * 30) / 7,
-      );
-
-      const teacherUsers = users.filter(({ data }) => {
-        const role = toText(data.role).toLowerCase();
-        return role === "docente" || role === "teacher";
-      }).length;
-      const studentsUsers = users.filter(({ data }) => {
-        const role = toText(data.role).toLowerCase();
-        return role === "estudiante" || role === "student";
-      }).length;
-
-      setTeacherOpsSnapshots(teacherSnapshots);
-      setFirebaseUsageSnapshot({
-        trackedDocuments,
-        teacherUsers,
-        studentsUsers,
-        courses: courses.length,
-        assessments: assessments.length,
-        grades: grades.length,
-        gradeSheets: gradeSheets.length,
-        files: files.length,
-        firestorePayloadBytes,
-        filesReferencedBytes,
-        recent7dAssessments,
-        recent7dGrades,
-        recent7dFiles,
-        recent7dTeacherRequests,
-        projectedMonthlyWrites,
-      });
-    } catch {
-      toast.error("Could not load teacher analytics data.");
-    } finally {
-      setLoadingTeacherOps(false);
-    }
-  };
+  const { courses, assessments, loading } = useAcademic();
+  const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number | null>(null);
+  const [paymentPendingCount, setPaymentPendingCount] = useState<number | null>(null);
+  const [rejectedCount, setRejectedCount] = useState<number | null>(null);
+  const [opsError, setOpsError] = useState("");
+  const [teacherPlanMetaById, setTeacherPlanMetaById] = useState<Record<string, TeacherPlanMeta>>({});
 
   useEffect(() => {
-    void loadTeacherOpsSnapshots();
+    let isMounted = true;
+
+    const loadTeacherOps = async () => {
+      const [pendingResult, requestsResult] = await Promise.allSettled([
+        getPendingTeacherApprovalRequests(),
+        getTeacherApprovalRequests(),
+      ]);
+
+      if (!isMounted) return;
+
+      if (pendingResult.status === "fulfilled") {
+        setPendingApprovalsCount(pendingResult.value.length);
+      } else {
+        setPendingApprovalsCount(0);
+        setOpsError("Could not load some teacher workflow counters.");
+      }
+
+      if (requestsResult.status === "fulfilled") {
+        setPaymentPendingCount(
+          requestsResult.value.filter((request) => request.status === "approved").length,
+        );
+        setRejectedCount(
+          requestsResult.value.filter((request) => request.status === "rejected").length,
+        );
+      } else {
+        setPaymentPendingCount(0);
+        setRejectedCount(0);
+        setOpsError("Could not load some teacher workflow counters.");
+      }
+    };
+
+    void loadTeacherOps();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  const teacherRows = useMemo<TeacherOpsRow[]>(() => {
+    const now = Date.now();
+    const nextWeek = now + 7 * 24 * 60 * 60 * 1000;
+    const byTeacher = new Map<string, TeacherOpsRow>();
+    const courseTeacherMap = new Map<string, string>();
+
+    courses.forEach((course) => {
+      const teacherId = String(course.teacherId || "").trim();
+      if (!teacherId) return;
+
+      const teacherName = String(course.teacherName || "").trim() || "Teacher";
+      const row = byTeacher.get(teacherId) || {
+        teacherId,
+        teacherName,
+        coursesCount: 0,
+        studentsCount: 0,
+        classSlotsCount: 0,
+        dueSoonCount: 0,
+        overdueCount: 0,
+        workloadScore: 0,
+      };
+
+      const studentsCount = Array.isArray(course.enrolledStudents) ? course.enrolledStudents.length : 0;
+      const classSlotsCount = Array.isArray(course.classSchedule) ? course.classSchedule.length : 0;
+
+      row.coursesCount += 1;
+      row.studentsCount += studentsCount;
+      row.classSlotsCount += classSlotsCount;
+      row.teacherName = teacherName;
+
+      byTeacher.set(teacherId, row);
+      courseTeacherMap.set(String(course.id || ""), teacherId);
+    });
+
+    assessments.forEach((assessment) => {
+      const courseId = String((assessment as { courseId?: unknown }).courseId || "");
+      const teacherId = courseTeacherMap.get(courseId);
+      if (!teacherId) return;
+
+      const row = byTeacher.get(teacherId);
+      if (!row) return;
+
+      const dueDate = toDate((assessment as { dueDate?: unknown }).dueDate);
+      if (!dueDate) return;
+
+      const dueTimestamp = dueDate.getTime();
+      if (dueTimestamp < now) row.overdueCount += 1;
+      if (dueTimestamp >= now && dueTimestamp <= nextWeek) row.dueSoonCount += 1;
+    });
+
+    return Array.from(byTeacher.values())
+      .map((row) => {
+        const workloadScore = Math.min(
+          100,
+          Math.round(
+            row.coursesCount * 12 +
+              row.studentsCount * 0.9 +
+              row.dueSoonCount * 8 +
+              row.overdueCount * 15,
+          ),
+        );
+        return { ...row, workloadScore };
+      })
+      .sort((a, b) => b.workloadScore - a.workloadScore);
+  }, [assessments, courses]);
+
+  const activeTeachersCount = teacherRows.length;
+  const teacherAssignedCoursesCount = useMemo(
+    () => courses.filter((course) => String(course.teacherId || "").trim().length > 0).length,
+    [courses],
+  );
+  const unassignedCoursesCount = useMemo(
+    () => courses.filter((course) => String(course.teacherId || "").trim().length === 0).length,
+    [courses],
+  );
+  const coursesWithoutScheduleCount = useMemo(
+    () =>
+      courses.filter((course) => {
+        const schedule = Array.isArray(course.classSchedule) ? course.classSchedule : [];
+        return schedule.length === 0;
+      }).length,
+    [courses],
+  );
+  const teachersWithHighLoadCount = useMemo(
+    () => teacherRows.filter((row) => row.workloadScore >= 70).length,
+    [teacherRows],
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    const teacherIds = teacherRows.map((row) => row.teacherId);
+    if (teacherIds.length === 0) {
+      setTeacherPlanMetaById({});
+      return;
+    }
+
+    const loadTeacherPlanMeta = async () => {
+      const entries = await Promise.all(
+        teacherIds.map(async (teacherId) => {
+          const [userSnapResult, studentSnapResult] = await Promise.allSettled([
+            getDoc(doc(firebaseDB, "usuarios", teacherId)),
+            getDoc(doc(firebaseDB, "estudiantes", teacherId)),
+          ]);
+
+          const userData =
+            userSnapResult.status === "fulfilled" && userSnapResult.value.exists()
+              ? (userSnapResult.value.data() as Record<string, unknown>)
+              : {};
+          const studentData =
+            studentSnapResult.status === "fulfilled" && studentSnapResult.value.exists()
+              ? (studentSnapResult.value.data() as Record<string, unknown>)
+              : {};
+          const merged = { ...studentData, ...userData };
+
+          const inferredPlan = resolveTeacherPlanFromRecord(merged);
+          const courseLimit = toNumber(merged.teacherPlanCourseLimit) ?? inferredPlan.courseLimit;
+          const studentLimit = toNumber(merged.teacherPlanStudentLimit) ?? inferredPlan.studentLimit;
+
+          const explicitExpiresAt = toDate(merged.teacherPlanExpiresAt);
+          const planStartAt =
+            toDate(merged.teacherPlanAssignedAt) ||
+            toDate(merged.teacherApprovedAt) ||
+            toDate(merged.teacherRequestedAt) ||
+            toDate(merged.createdAt);
+          const expiresAt =
+            explicitExpiresAt || (planStartAt ? addMonths(planStartAt, inferredPlan.durationMonths || 12) : null);
+          const avatarUrl = String(merged.avatarUrl || merged.photoURL || merged.photoUrl || "").trim();
+          const avatarEmoji = String(merged.avatarEmoji || "").trim();
+
+          return [
+            teacherId,
+            {
+              courseLimit,
+              studentLimit,
+              expiresAt,
+              planLabel: inferredPlan.label,
+              avatarUrl,
+              avatarEmoji,
+            },
+          ] as const;
+        }),
+      );
+
+      if (!isMounted) return;
+      setTeacherPlanMetaById(Object.fromEntries(entries));
+    };
+
+    void loadTeacherPlanMeta();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [teacherRows]);
 
   return (
     <DashboardLayout contentClassName="pt-0 lg:pt-1">
-      <AdminWorkspaceShell activeTab="teacherOps" counts={counts}>
-        <section className="space-y-4">
-          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <AdminSectionHeader
-              icon={FileText}
-              iconClassName="border-indigo-200 bg-indigo-50 text-indigo-700"
-              title="Firebase Usage (Estimated)"
-              description="Operational control based on current Firestore data and recent platform activity."
-            />
+      <div className="relative overflow-x-hidden">
+        <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
+        <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-            {loadingTeacherOps ? (
-              <AdminLoadingState message="Loading usage and teacher intelligence..." />
-            ) : !firebaseUsageSnapshot ? (
-              <AdminEmptyState message="No usage snapshot available yet." />
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <AdminMetricCard
-                    label="Tracked docs"
-                    value={firebaseUsageSnapshot.trackedDocuments.toLocaleString("en-US")}
-                  />
-                  <AdminMetricCard
-                    label="Firestore payload (approx)"
-                    value={formatBytes(firebaseUsageSnapshot.firestorePayloadBytes)}
-                  />
-                  <AdminMetricCard
-                    label="Files referenced size"
-                    value={formatBytes(firebaseUsageSnapshot.filesReferencedBytes)}
-                  />
-                  <AdminMetricCard
-                    label="Projected writes / month"
-                    value={firebaseUsageSnapshot.projectedMonthlyWrites.toLocaleString("en-US")}
-                  />
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <section className="space-y-4">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+              <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
+              <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
+
+              <div className="relative space-y-4">
+                <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                  <LayoutDashboard className="h-3.5 w-3.5" />
+                  Admin Module
                 </div>
-                <p className="text-[11px] text-slate-500">
-                  These are platform-derived estimates for operational control. Official billing values must be
-                  verified in Firebase Console billing reports.
-                </p>
-              </div>
-            )}
-          </article>
 
-          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <AdminSectionHeader
-              icon={Users}
-              iconClassName="border-indigo-200 bg-indigo-50 text-indigo-700"
-              title="Teachers, Courses, and Institutions"
-              description="Full operational snapshot per teacher with courses, students, and assessments."
-            />
+                <div className="min-w-0">
+                  <h1 className="mt-1 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
+                    Teacher Ops
+                  </h1>
+                  <p className="mt-1.5 max-w-3xl text-sm text-slate-600">
+                    Operational monitoring for teacher workload, delivery pressure, and workflow backlog.
+                  </p>
+                </div>
 
-            {loadingTeacherOps ? (
-              <AdminLoadingState message="Loading teacher data..." />
-            ) : teacherOpsSnapshots.length === 0 ? (
-              <AdminEmptyState message="No teacher records available yet." />
-            ) : (
-              <div className="space-y-2">
-                {teacherOpsSnapshots.map((teacher) => (
-                  <article key={teacher.teacherId} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{teacher.name}</p>
-                        <p className="text-xs text-slate-600">{teacher.email}</p>
+                <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+                        <Users className="h-4 w-4" />
                       </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
-                          {teacher.planLabel}
-                        </span>
-                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-                          Approval: {teacher.approvalStatus}
-                        </span>
-                      </div>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{activeTeachersCount}</p>
                     </div>
-
-                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-700 md:grid-cols-4 xl:grid-cols-6">
-                      <p className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
-                        Courses: <span className="font-semibold">{teacher.courseCount}</span>
-                      </p>
-                      <p className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
-                        Students: <span className="font-semibold">{teacher.uniqueStudentsTotal}</span>
-                      </p>
-                      <p className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
-                        Assessments: <span className="font-semibold">{teacher.assessmentsTotal}</span>
-                      </p>
-                      <p className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
-                        Grade sheets: <span className="font-semibold">{teacher.gradeSheetsTotal}</span>
-                      </p>
-                      <p className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
-                        Grades: <span className="font-semibold">{teacher.gradesTotal}</span>
-                      </p>
-                      <p className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
-                        Files: <span className="font-semibold">{teacher.filesTotal}</span> ({formatBytes(teacher.filesBytesTotal)})
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Active teachers</p>
+                  </div>
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
+                        <BookOpen className="h-4 w-4" />
+                      </div>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{teacherAssignedCoursesCount}</p>
+                    </div>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Assigned courses</p>
+                  </div>
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+                        <Clock3 className="h-4 w-4" />
+                      </div>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">
+                        {pendingApprovalsCount === null ? "..." : pendingApprovalsCount}
                       </p>
                     </div>
-                  </article>
-                ))}
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Pending approvals</p>
+                  </div>
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-100 text-cyan-700">
+                        <BadgeCheck className="h-4 w-4" />
+                      </div>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">
+                        {paymentPendingCount === null ? "..." : paymentPendingCount}
+                      </p>
+                    </div>
+                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Payment pending</p>
+                  </div>
+                </div>
               </div>
-            )}
-          </article>
-        </section>
-      </AdminWorkspaceShell>
+            </section>
+
+            <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Teacher Workload Snapshot</p>
+                    <p className="text-xs text-slate-500">Current delivery pressure and scheduling indicators by teacher.</p>
+                  </div>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    {teacherRows.length} teachers
+                  </span>
+                </div>
+
+                {loading.assessments || loading.courses ? (
+                  <div className="flex min-h-[260px] items-center justify-center">
+                    <div className="space-y-2 text-center">
+                      <Clock3 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
+                      <p className="text-base font-semibold text-slate-900">Loading teacher operations</p>
+                      <p className="text-sm text-slate-600">Building workload overview from live academic data</p>
+                    </div>
+                  </div>
+                ) : teacherRows.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                    <Users className="mx-auto h-9 w-9 text-slate-400" />
+                    <p className="mt-2 text-sm font-medium text-slate-700">No active teachers found</p>
+                    <p className="text-xs text-slate-500">Assign teachers to courses to start operational monitoring.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {teacherRows.map((row) => {
+                      const tone = getLoadTone(row.workloadScore);
+                      const planMeta = teacherPlanMetaById[row.teacherId];
+                      const avatarUrl = planMeta?.avatarUrl || "";
+                      const avatarEmoji = planMeta?.avatarEmoji || "";
+                      const courseLimit = planMeta?.courseLimit ?? null;
+                      const studentLimit = planMeta?.studentLimit ?? null;
+                      const remainingCourses =
+                        courseLimit !== null ? Math.max(0, courseLimit - row.coursesCount) : null;
+                      const remainingStudents =
+                        studentLimit !== null ? Math.max(0, studentLimit - row.studentsCount) : null;
+                      return (
+                        <div
+                          key={row.teacherId}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <div className="inline-flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-sky-100 text-[11px] font-bold text-sky-700">
+                                  {avatarUrl ? (
+                                    <img
+                                      src={avatarUrl}
+                                      alt={`${row.teacherName} avatar`}
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : (
+                                    <span>{avatarEmoji || getInitials(row.teacherName)}</span>
+                                  )}
+                                </div>
+                                <p className="truncate text-sm font-semibold text-slate-900">{row.teacherName}</p>
+                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tone.badge}`}>
+                                  {getLoadLabel(row.workloadScore)}
+                                </span>
+                              </div>
+                              <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-slate-600 sm:grid-cols-4">
+                                <p>Courses: {row.coursesCount}</p>
+                                <p>Students: {row.studentsCount}</p>
+                                <p>Due 7d: {row.dueSoonCount}</p>
+                                <p>Overdue: {row.overdueCount}</p>
+                              </div>
+                              <div className="mt-1 grid grid-cols-1 gap-x-3 gap-y-0.5 text-xs text-slate-600 sm:grid-cols-3">
+                                <p>
+                                  Course usage:{" "}
+                                  <span className="font-semibold text-slate-800">
+                                    {courseLimit === null ? `${row.coursesCount} / 0` : `${row.coursesCount} / ${courseLimit}`}
+                                  </span>
+                                  {remainingCourses !== null ? (
+                                    <span className="ml-1 text-slate-500">({remainingCourses} left)</span>
+                                  ) : null}
+                                </p>
+                                <p>
+                                  Students out of:{" "}
+                                  <span className="font-semibold text-slate-800">
+                                    {studentLimit === null ? `${row.studentsCount} / 0` : `${row.studentsCount} / ${studentLimit}`}
+                                  </span>
+                                  {remainingStudents !== null ? (
+                                    <span className="ml-1 text-slate-500">({remainingStudents} left)</span>
+                                  ) : null}
+                                </p>
+                                <p>
+                                  Plan expires:{" "}
+                                  <span className="font-semibold text-slate-800">
+                                    {formatShortDate(planMeta?.expiresAt || null)}
+                                  </span>
+                                </p>
+                              </div>
+                              <p className="mt-0.5 text-[10px] text-slate-500">
+                                Plan: <span className="font-semibold text-slate-700">{planMeta?.planLabel || "Starter Annual"}</span>
+                              </p>
+                            </div>
+                            <p className={`text-lg font-extrabold ${tone.text}`}>{row.workloadScore}</p>
+                          </div>
+                          <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                            <div
+                              className={`h-full rounded-full transition-all duration-300 ${
+                                row.workloadScore >= 70
+                                  ? "bg-rose-600"
+                                  : row.workloadScore >= 50
+                                    ? "bg-amber-600"
+                                    : "bg-emerald-600"
+                              }`}
+                              style={{ width: `${row.workloadScore}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </article>
+
+              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Operational Flags</p>
+                    <p className="text-xs text-slate-500">Queue pressure and delivery risk signals.</p>
+                  </div>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    Monitor
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pending approvals</p>
+                    <p className="text-sm font-bold text-amber-700">{pendingApprovalsCount ?? "..."}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Payment pending</p>
+                    <p className="text-sm font-bold text-sky-700">{paymentPendingCount ?? "..."}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Unassigned courses</p>
+                    <p className="text-sm font-bold text-rose-700">{unassignedCoursesCount}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">No schedule</p>
+                    <p className="text-sm font-bold text-amber-700">{coursesWithoutScheduleCount}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">High load teachers</p>
+                    <p className="text-sm font-bold text-rose-700">{teachersWithHighLoadCount}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Rejected requests</p>
+                    <p className="text-sm font-bold text-slate-700">{rejectedCount ?? "..."}</p>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-2">
+                  <Link
+                    to="/admin/teacher-approvals"
+                    className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-center text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
+                  >
+                    Open Teacher Approvals
+                  </Link>
+                  <Link
+                    to="/admin/admins"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Open Admin Emails
+                  </Link>
+                </div>
+
+                {opsError ? (
+                  <p className="mt-2 text-xs text-amber-700">
+                    <MessageSquare className="mr-1 inline h-3.5 w-3.5" />
+                    {opsError}
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-slate-500">
+                    <CheckCircle2 className="mr-1 inline h-3.5 w-3.5 text-emerald-600" />
+                    Monitoring stream active.
+                  </p>
+                )}
+              </article>
+            </section>
+          </section>
+        </div>
+      </div>
     </DashboardLayout>
   );
 }

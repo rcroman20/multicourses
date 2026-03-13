@@ -82,7 +82,7 @@ const pageHeaderRules: HeaderRule[] = [
   { path: '/courses/:courseCode/grade-sheets', title: 'Grade Sheets', subtitle: 'Create and manage grade sheets' },
   { path: '/grades', title: 'Grades', subtitle: 'Student grades and summaries' },
   { path: '/slides', title: 'Slides', subtitle: 'Presentations and learning resources' },
-  { path: '/calendar', title: 'Calendar', subtitle: 'Your upcoming schedule and deadlines' },
+  { path: '/calendar', title: 'Calendar', subtitle: 'Your upcoming schedule, deadlines, and operational timeline' },
   { path: '/teacher/profile/:userId', title: 'Profile', subtitle: 'Profile and account settings' },
   { path: '/student/profile/:userId', title: 'Profile', subtitle: 'Profile and account settings' },
   { path: '/profile', title: 'Profile', subtitle: 'Profile and account settings' },
@@ -95,7 +95,7 @@ const pageHeaderRules: HeaderRule[] = [
   { path: '/admin/dashboard', title: 'Admin Dashboard', subtitle: 'Central admin workspace' },
   { path: '/admin/admins', title: 'Admin Emails', subtitle: 'Manage admin access by email' },
   { path: '/admin/teacher-approvals', title: 'Teacher Approvals', subtitle: 'Review and process teacher requests' },
-  { path: '/admin/teacher-ops', title: 'Teacher Operations', subtitle: 'Teacher operations and usage analytics' },
+  { path: '/admin/teacher-ops', title: 'Teacher Operations', subtitle: 'Active teacher workload and usage analytics' },
   { path: '/admin/deletions', title: 'Account Deletions', subtitle: 'Process account deletion requests' },
   { path: '/admin/inbox', title: 'Inbound Requests', subtitle: 'Contact and estimator messages' },
 ];
@@ -225,6 +225,42 @@ function formatNotificationTime(value: unknown): string {
   } catch {
     return '';
   }
+}
+
+function getNotificationTone(type: string | undefined, isUnread: boolean): {
+  itemClass: string;
+  dotClass: string;
+  newBadgeClass: string;
+} {
+  const tone = type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'info';
+
+  if (tone === 'success') {
+    return {
+      itemClass: isUnread
+        ? 'border-emerald-200 bg-emerald-50/85 hover:bg-emerald-100/75'
+        : 'border-emerald-100 bg-emerald-50/40 opacity-85 hover:bg-emerald-50/70',
+      dotClass: isUnread ? 'fill-emerald-500 text-emerald-500' : 'fill-emerald-300 text-emerald-300',
+      newBadgeClass: 'border-emerald-200 bg-emerald-100 text-emerald-700',
+    };
+  }
+
+  if (tone === 'warning') {
+    return {
+      itemClass: isUnread
+        ? 'border-amber-200 bg-amber-50/85 hover:bg-amber-100/75'
+        : 'border-amber-100 bg-amber-50/45 opacity-85 hover:bg-amber-50/70',
+      dotClass: isUnread ? 'fill-amber-500 text-amber-500' : 'fill-amber-300 text-amber-300',
+      newBadgeClass: 'border-amber-200 bg-amber-100 text-amber-700',
+    };
+  }
+
+  return {
+    itemClass: isUnread
+      ? 'border-sky-300 bg-sky-50 hover:bg-sky-100/80'
+      : 'border-sky-100 bg-sky-50/40 opacity-85 hover:bg-sky-50/70',
+    dotClass: isUnread ? 'fill-sky-500 text-sky-500' : 'fill-sky-300 text-sky-300',
+    newBadgeClass: 'border-sky-200 bg-sky-100 text-sky-700',
+  };
 }
 
 export function DashboardLayout({
@@ -475,6 +511,7 @@ export function DashboardLayout({
                           notifications.map((item) => {
                             const isUnread = item.read !== true;
                             const formattedTime = formatNotificationTime(item.createdAt);
+                            const tone = getNotificationTone(item.type, isUnread);
 
                             return (
                               <button
@@ -483,18 +520,14 @@ export function DashboardLayout({
                                 onClick={() => handleNotificationClick(item.id, item.link)}
                                 className={cn(
                                   'w-full rounded-xl border px-3 py-2.5 text-left transition-colors',
-                                  isUnread
-                                    ? 'border-sky-300 bg-sky-50 hover:bg-sky-100/80'
-                                    : 'border-slate-200 bg-slate-50/70 opacity-80 hover:bg-slate-100',
+                                  tone.itemClass,
                                 )}
                               >
                                 <div className="flex items-start gap-2">
                                   <Circle
                                     className={cn(
                                       'mt-1 h-2.5 w-2.5 flex-shrink-0',
-                                      isUnread
-                                        ? 'fill-sky-500 text-sky-500'
-                                        : 'fill-slate-300 text-slate-300',
+                                      tone.dotClass,
                                     )}
                                   />
 
@@ -509,7 +542,12 @@ export function DashboardLayout({
                                         {item.title || 'Notification'}
                                       </p>
                                       {isUnread ? (
-                                        <span className="rounded-full border border-sky-200 bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700">
+                                        <span
+                                          className={cn(
+                                            'rounded-full border px-1.5 py-0.5 text-[10px] font-bold',
+                                            tone.newBadgeClass,
+                                          )}
+                                        >
                                           NEW
                                         </span>
                                       ) : null}

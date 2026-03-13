@@ -1,13 +1,37 @@
 User-agent: *
 Allow: /
 
-# Rutas privadas de la aplicación (requieren autenticación)
+# Public assets
+Allow: /favicon.ico
+Allow: /logo.png
+Allow: /manifest.webmanifest
+Allow: /sitemap.xml
+
+# Authentication and approval flow
+Disallow: /auth
+Disallow: /teacher-approval-waiting
+Disallow: /teacher-approval-rejected
+
+# Private LMS areas
+Disallow: /admin
 Disallow: /student
 Disallow: /teacher
+Disallow: /calendar
 Disallow: /courses
 Disallow: /grades
 Disallow: /slides
 Disallow: /students
 Disallow: /statistics
+Disallow: /profile
+
+# Legacy and duplicate entry points
+Disallow: /acerca-de
+Disallow: /estudiante
+Disallow: /docente
+Disallow: /estadisticas
+Disallow: /cursos
+Disallow: /notas
+Disallow: /inscribir-estudiante
+Disallow: /diapositivas
 
 Sitemap: https://multicourses.web.app/sitemap.xml

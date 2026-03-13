@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAcademic } from "@/contexts/AcademicContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { InstitutionCaptureModal } from "@/components/common/InstitutionCaptureModal";
 import { format } from "date-fns";
 import {
   BookOpen,
@@ -32,18 +33,31 @@ import {
 } from "lucide-react";
 import {
   collection,
+  doc,
+  documentId,
+  getDoc,
   getDocs,
+  limit,
   query,
   where,
-  orderBy,
   Timestamp,
 } from "firebase/firestore";
 import { firebaseDB } from "@/lib/firebase";
+import { unitService } from "@/lib/unitService";
 import { enUS } from "date-fns/locale";
 import {
   courseBackupService,
   type CourseBackupSnapshot,
 } from "@/lib/services/courseBackupService";
+import { backfillTransferredCourseContent } from "@/lib/services/courseTransferService";
+import { TEACHER_ONBOARDING_COURSE_CODE } from "@/lib/services/teacherOnboardingService";
+import {
+  getInstitutionSaveErrorMessage,
+  getInstitutionSuggestions,
+  getUserStoredInstitution,
+  isInstitutionMissing,
+  saveUserInstitution,
+} from "@/lib/services/institutionProfileService";
 
 interface GradeSheetStudent {
   studentId: string;
@@ -125,6 +139,31 @@ const stripHtmlPreview = (value?: string): string => {
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, value));
+
+const toDateOrNull = (value: unknown): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    try {
+      return (value as { toDate: () => Date }).toDate();
+    } catch {
+      return null;
+    }
+  }
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const addMonths = (baseDate: Date, months: number): Date => {
+  const next = new Date(baseDate.getTime());
+  next.setMonth(next.getMonth() + months);
+  return next;
+};
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -228,9 +267,14 @@ const formatDueDateTime = (value?: string): string => {
 const isWithinNextSevenDays = (value?: string): boolean => {
   const dueDate = getDueComparisonDate(value);
   if (!dueDate) return false;
-  const now = new Date();
-  const limit = new Date(now.getTime() + 7 * DAY_IN_MS);
-  return dueDate >= now && dueDate <= limit;
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const limit = new Date(todayStart);
+  limit.setDate(limit.getDate() + 7);
+  limit.setHours(23, 59, 59, 999);
+
+  return dueDate >= todayStart && dueDate <= limit;
 };
 
 const parseTimeToMinutes = (value?: string): number | null => {
@@ -331,12 +375,39 @@ const formatClassScheduleSlot = (slot: CourseClassScheduleSlot, includeDay = fal
 const resolveUpcomingTag = (
   item: { assessmentType?: string; type?: string },
 ): { label: string; tone: "activity" | "forum" | "announcement" } => {
-  const rawType = String(item.assessmentType || item.type || "").trim().toLowerCase();
-  if (rawType.includes("forum")) {
+  const assessmentType = String(item.assessmentType || "").trim().toLowerCase();
+  const activityType = String(item.type || "").trim().toLowerCase();
+  const combinedType = `${activityType} ${assessmentType}`.trim();
+
+  if (combinedType.includes("forum") || combinedType.includes("foro")) {
     return { label: "Forum", tone: "forum" };
   }
-  if (rawType.includes("announcement") || rawType.includes("aviso")) {
+  if (combinedType.includes("announcement") || combinedType.includes("aviso")) {
     return { label: "Announcement", tone: "announcement" };
+  }
+  if (activityType.includes("quiz")) {
+    return { label: "Quiz", tone: "activity" };
+  }
+  if (activityType.includes("exam") || activityType.includes("examen")) {
+    return { label: "Exam", tone: "activity" };
+  }
+  if (activityType.includes("homework") || activityType.includes("tarea")) {
+    return { label: "Homework", tone: "activity" };
+  }
+  if (activityType.includes("project") || activityType.includes("proyecto")) {
+    return { label: "Project", tone: "activity" };
+  }
+  if (activityType.includes("participation") || activityType.includes("participacion")) {
+    return { label: "Participation", tone: "activity" };
+  }
+  if (activityType.includes("self_evaluation") || activityType.includes("self-evaluation")) {
+    return { label: "Self Eval", tone: "activity" };
+  }
+  if (assessmentType.includes("delivery") || activityType.includes("delivery")) {
+    return { label: "Delivery", tone: "activity" };
+  }
+  if (assessmentType.includes("assessment")) {
+    return { label: "Assessment", tone: "activity" };
   }
   return { label: "Activity", tone: "activity" };
 };
@@ -349,6 +420,7 @@ interface Slide {
   createdAt: Timestamp;
   weekId: string;
   order: number;
+  courseId?: string;
 }
 
 interface CourseSlide extends Slide {
@@ -375,6 +447,7 @@ interface Week {
   topic: string;
   unitId: string;
   createdAt: Timestamp;
+  courseId?: string;
 }
 
 interface Period {
@@ -465,6 +538,7 @@ type UpcomingActivityItem = {
   courseCode: string;
   type: string;
   assessmentType?: string;
+  link?: string;
 };
 
 type TodayClassItem = {
@@ -473,6 +547,34 @@ type TodayClassItem = {
   courseLabel: string;
   courseCode: string;
   sortOrder: number;
+};
+
+type SelectedCourseResourceCounts = {
+  slidesCount: number;
+  filesCount: number;
+};
+
+type MandatoryCourseQuizProgress = {
+  courseId: string;
+  courseCode: string;
+  courseName: string;
+  totalThemes: number;
+  approvedThemes: number;
+  pendingThemes: number;
+  progressPercentage: number;
+};
+
+const chunkValues = (values: string[], size = 10): string[][] => {
+  const normalized = Array.from(
+    new Set(values.map((value) => String(value || "").trim()).filter(Boolean)),
+  );
+  const chunks: string[][] = [];
+
+  for (let index = 0; index < normalized.length; index += size) {
+    chunks.push(normalized.slice(index, index + size));
+  }
+
+  return chunks;
 };
 
 export default function TeacherDashboard() {
@@ -502,10 +604,23 @@ export default function TeacherDashboard() {
   const restoreFileInputRef = useRef<HTMLInputElement | null>(null);
   const touchStartXRef = useRef<number | null>(null);
   const [activeSnapshotIndex, setActiveSnapshotIndex] = useState(0);
+  const [institutionModalOpen, setInstitutionModalOpen] = useState(false);
+  const [institutionValue, setInstitutionValue] = useState("");
+  const [institutionSuggestions, setInstitutionSuggestions] = useState<string[]>([]);
+  const [savingInstitution, setSavingInstitution] = useState(false);
+  const [institutionError, setInstitutionError] = useState("");
+  const [selectedCourseResourceCounts, setSelectedCourseResourceCounts] =
+    useState<SelectedCourseResourceCounts>({ slidesCount: 0, filesCount: 0 });
+  const [mandatoryCourseQuizProgress, setMandatoryCourseQuizProgress] =
+    useState<MandatoryCourseQuizProgress | null>(null);
+  const [loadingMandatoryCourseQuizProgress, setLoadingMandatoryCourseQuizProgress] =
+    useState(false);
+  const backfilledCourseIdsRef = useRef<Set<string>>(new Set());
   const selectedCourse = useMemo(
     () => courses.find((course) => course.id === selectedCourseId) || null,
     [courses, selectedCourseId],
   );
+  const institutionRoleLabel = user?.role === "admin" ? "Admin" : "Teacher";
   const courseById = useMemo(
     () => new Map(courses.map((course) => [course.id, course])),
     [courses],
@@ -514,6 +629,7 @@ export default function TeacherDashboard() {
     () => new Set(courses.map((course) => course.id)),
     [courses],
   );
+
   const upcomingActivitiesAllCourses = useMemo<UpcomingActivityItem[]>(() => {
     return assessments
       .filter((assessment) => {
@@ -546,8 +662,7 @@ export default function TeacherDashboard() {
           (getDueComparisonDate(b.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER);
         if (dueDelta !== 0) return dueDelta;
         return a.courseName.localeCompare(b.courseName);
-      })
-      .slice(0, 8);
+      });
   }, [assessments, courseById, ownedCourseIds]);
   const todayClassesAllCourses = useMemo<TodayClassItem[]>(() => {
     const todayDayIndex = new Date().getDay();
@@ -779,35 +894,99 @@ export default function TeacherDashboard() {
   }, [isAuthenticated, user, navigate]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const loadInstitutionProfile = async () => {
+      if (!isAuthenticated || !user?.id) {
+        if (!cancelled) {
+          setInstitutionModalOpen(false);
+        }
+        return;
+      }
+
+      if (user.role !== "docente" && user.role !== "admin") {
+        if (!cancelled) {
+          setInstitutionModalOpen(false);
+        }
+        return;
+      }
+
+      try {
+        const [storedInstitution, options] = await Promise.all([
+          getUserStoredInstitution(user.id, user.role),
+          getInstitutionSuggestions(),
+        ]);
+        if (cancelled) return;
+
+        setInstitutionSuggestions(options);
+        setInstitutionError("");
+
+        if (isInstitutionMissing(storedInstitution)) {
+          setInstitutionValue("");
+          setInstitutionModalOpen(true);
+          return;
+        }
+
+        setInstitutionValue(storedInstitution);
+        setInstitutionModalOpen(false);
+      } catch {
+        if (cancelled) return;
+        setInstitutionModalOpen(true);
+      }
+    };
+
+    void loadInstitutionProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, user?.id, user?.role]);
+
+  useEffect(() => {
+    let active = true;
+
     const loadAllData = async () => {
       if (!user?.id) return;
 
       setLoading(true);
 
       try {
+        const loadedCourses = await fetchCourses();
+        const assessmentsPromise = fetchAssessments(loadedCourses);
+        const mandatoryProgressPromise = fetchMandatoryCourseQuizProgress();
+
         await Promise.all([
-          fetchCourses(),
-          fetchGradeSheets(),
-          fetchAssessments(),
-          fetchSubmissions(),
-          fetchAllSlides(),
-          fetchAllUnits(),
-          fetchAllWeeks(),
-          fetchPeriods(),
-          fetchCourseWeeks(),
-          fetchCourseFiles(),
-          fetchStudents(),
+          fetchGradeSheets(loadedCourses),
+          assessmentsPromise,
+          fetchStudents(loadedCourses),
+          mandatoryProgressPromise,
+        ]);
+
+        const loadedAssessments = await assessmentsPromise;
+        await fetchSubmissions(loadedAssessments);
+
+        if (!active) return;
+        setLoading(false);
+
+        void Promise.allSettled([
+          fetchLegacyCourseContent(loadedCourses),
+          fetchPeriods(loadedCourses),
+          fetchCourseWeeks(loadedCourses),
+          fetchCourseFiles(loadedCourses),
+          runTransferredCourseBackfill(loadedCourses),
         ]);
       } catch {
         return;
-      } finally {
-        setLoading(false);
       }
     };
 
     if (isAuthenticated && user?.role === "docente") {
-      loadAllData();
+      void loadAllData();
     }
+
+    return () => {
+      active = false;
+    };
   }, [isAuthenticated, user]);
 
   useEffect(() => {
@@ -841,6 +1020,106 @@ export default function TeacherDashboard() {
       24,
     );
   }, [courses, isAuthenticated, user?.id, user?.name, user?.role]);
+
+  useEffect(() => {
+    if (!selectedCourse?.id) {
+      setSelectedCourseResourceCounts({ slidesCount: 0, filesCount: 0 });
+      return;
+    }
+
+    let active = true;
+
+    const fetchByChunk = async (
+      collectionName: string,
+      field: string,
+      values: string[],
+    ) => {
+      const snapshots = await Promise.all(
+        chunkValues(values).map((chunk) =>
+          getDocs(
+            query(
+              collection(firebaseDB, collectionName),
+              where(field, "in", chunk),
+            ),
+          ),
+        ),
+      );
+
+      return snapshots.flatMap((snapshot) => snapshot.docs);
+    };
+
+    const loadSelectedCourseResourceCounts = async () => {
+      try {
+        const courseId = selectedCourse.id;
+        const [
+          inferredUnits,
+          directSlidesSnap,
+          directFilesSnap,
+          periodsSnap,
+          modernWeeksSnap,
+        ] = await Promise.all([
+          unitService.getByCourse(courseId),
+          getDocs(query(collection(firebaseDB, "diapositivas"), where("courseId", "==", courseId))),
+          getDocs(query(collection(firebaseDB, "course_files"), where("courseId", "==", courseId))),
+          getDocs(query(collection(firebaseDB, "periods"), where("courseId", "==", courseId))),
+          getDocs(query(collection(firebaseDB, "weeks"), where("courseId", "==", courseId))),
+        ]);
+        const inferredSlidesCount = inferredUnits.reduce(
+          (sum, unit) =>
+            sum +
+            (unit.weeks || []).reduce(
+              (weekSum, week) => weekSum + ((week.slides || []).length || 0),
+              0,
+            ),
+          0,
+        );
+        const legacyWeekIds = inferredUnits.flatMap((unit) =>
+          (unit.weeks || []).map((week) => String(week.id || "").trim()).filter(Boolean),
+        );
+        const modernWeekIds = modernWeeksSnap.docs.map((docSnap) => docSnap.id);
+        const periodIds = periodsSnap.docs.map((docSnap) => docSnap.id);
+
+        const [filesByLegacyWeek, filesByModernWeek, filesByPeriod] =
+          await Promise.all([
+            fetchByChunk("course_files", "weekId", legacyWeekIds),
+            fetchByChunk("course_files", "weekId", modernWeekIds),
+            fetchByChunk("course_files", "periodId", periodIds),
+          ]);
+
+        if (!active) return;
+
+        const uniqueSlideIds = new Set<string>();
+        directSlidesSnap.docs.forEach((docSnap) => uniqueSlideIds.add(docSnap.id));
+
+        const uniqueFileIds = new Set<string>();
+        directFilesSnap.docs.forEach((docSnap) => uniqueFileIds.add(docSnap.id));
+        filesByLegacyWeek.forEach((docSnap) => uniqueFileIds.add(docSnap.id));
+        filesByModernWeek.forEach((docSnap) => uniqueFileIds.add(docSnap.id));
+        filesByPeriod.forEach((docSnap) => uniqueFileIds.add(docSnap.id));
+
+        setSelectedCourseResourceCounts({
+          slidesCount: Math.max(uniqueSlideIds.size, inferredSlidesCount),
+          filesCount: uniqueFileIds.size,
+        });
+      } catch {
+        if (!active) return;
+        setSelectedCourseResourceCounts({ slidesCount: 0, filesCount: 0 });
+      }
+    };
+
+    if (!backfilledCourseIdsRef.current.has(selectedCourse.id)) {
+      void runTransferredCourseBackfill([selectedCourse]).then(() => {
+        if (!active) return;
+        void loadSelectedCourseResourceCounts();
+      });
+    }
+
+    void loadSelectedCourseResourceCounts();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedCourse?.id]);
 
   const loadBackupSnapshots = async () => {
     if (!user?.id) return;
@@ -960,6 +1239,34 @@ export default function TeacherDashboard() {
     }
   };
 
+  const handleSaveInstitution = async () => {
+    if (!user?.id || savingInstitution) return;
+
+    setInstitutionError("");
+    setSavingInstitution(true);
+    try {
+      const savedInstitution = await saveUserInstitution({
+        userId: user.id,
+        role: user.role,
+        email: user.email,
+        name: user.name,
+        institutionName: institutionValue,
+      });
+
+      setInstitutionValue(savedInstitution);
+      setInstitutionSuggestions((current) =>
+        Array.from(new Set([...current, savedInstitution])).sort((left, right) =>
+          left.localeCompare(right),
+        ),
+      );
+      setInstitutionModalOpen(false);
+    } catch (error) {
+      setInstitutionError(getInstitutionSaveErrorMessage(error));
+    } finally {
+      setSavingInstitution(false);
+    }
+  };
+
   const convertTimestamp = (timestamp: Timestamp | Date | string): Date => {
     if (timestamp instanceof Date) return timestamp;
     if (timestamp instanceof Timestamp) return timestamp.toDate();
@@ -967,7 +1274,7 @@ export default function TeacherDashboard() {
     return new Date();
   };
 
-  const fetchCourses = async () => {
+  const fetchCourses = async (): Promise<Course[]> => {
     try {
       const coursesRef = collection(firebaseDB, "cursos");
       const q = query(coursesRef, where("teacherId", "==", user?.id));
@@ -999,292 +1306,553 @@ export default function TeacherDashboard() {
       });
 
       setCourses(coursesData);
+      return coursesData;
     } catch {
-      return;
+      return [];
     }
   };
 
-  const fetchGradeSheets = async () => {
-    if (!user?.id) return;
+  const fetchGradeSheets = async (teacherCourses: Course[] = []) => {
+    const sourceCourses = teacherCourses.length > 0 ? teacherCourses : courses;
+    const courseIds = Array.from(
+      new Set(
+        sourceCourses
+          .map((course) => String(course.id || "").trim())
+          .filter((courseId) => courseId.length > 0),
+      ),
+    );
+
+    if (courseIds.length === 0) {
+      setGradeSheets([]);
+      return;
+    }
 
     try {
       const gradeSheetsRef = collection(firebaseDB, "gradeSheets");
-      const q = query(gradeSheetsRef, where("teacherId", "==", user.id));
-
-      const querySnapshot = await getDocs(q);
       const sheets: GradeSheet[] = [];
+      const seenIds = new Set<string>();
+      const chunks: string[][] = [];
 
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        sheets.push({
-          id: doc.id,
-          title: data.title || "",
-          courseId: data.courseId || "",
-          courseName: data.courseName || "",
-          teacherId: data.teacherId || "",
-          teacherName: data.teacherName || "",
-          students: data.students || [],
-          isPublished: data.isPublished || false,
-          gradingPeriod: data.gradingPeriod || "",
-          activities: data.activities || [],
-          createdAt: data.createdAt || Timestamp.now(),
-          updatedAt: data.updatedAt || Timestamp.now(),
+      for (let index = 0; index < courseIds.length; index += 10) {
+        chunks.push(courseIds.slice(index, index + 10));
+      }
+
+      const snapshots = await Promise.all(
+        chunks.map((chunk) => getDocs(query(gradeSheetsRef, where("courseId", "in", chunk)))),
+      );
+
+      snapshots.forEach((querySnapshot) => {
+        querySnapshot.forEach((doc) => {
+          if (seenIds.has(doc.id)) return;
+          seenIds.add(doc.id);
+
+          const data = doc.data();
+          sheets.push({
+            id: doc.id,
+            title: data.title || "",
+            courseId: data.courseId || "",
+            courseName: data.courseName || "",
+            teacherId: data.teacherId || "",
+            teacherName: data.teacherName || "",
+            students: data.students || [],
+            isPublished: data.isPublished || false,
+            gradingPeriod: data.gradingPeriod || "",
+            activities: data.activities || [],
+            createdAt: data.createdAt || Timestamp.now(),
+            updatedAt: data.updatedAt || Timestamp.now(),
+          });
         });
       });
 
       setGradeSheets(sheets);
     } catch {
+      setGradeSheets([]);
       return;
     }
   };
 
-  const fetchAssessments = async () => {
-    if (!user?.id) return;
+  const fetchAssessments = async (teacherCourses: Course[] = []): Promise<Assessment[]> => {
+    const sourceCourses = teacherCourses.length > 0 ? teacherCourses : courses;
+    const courseIds = Array.from(
+      new Set(
+        sourceCourses
+          .map((course) => String(course.id || "").trim())
+          .filter((courseId) => courseId.length > 0),
+      ),
+    );
+
+    if (courseIds.length === 0) {
+      setAssessments([]);
+      return [];
+    }
 
     try {
       const assessmentsRef = collection(firebaseDB, "assessments");
-      const q = query(assessmentsRef, where("createdBy", "==", user.id));
-
-      const querySnapshot = await getDocs(q);
       const assessmentList: Assessment[] = [];
+      const seenIds = new Set<string>();
+      const chunks: string[][] = [];
 
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        assessmentList.push({
-          id: doc.id,
-          name: data.name || "",
-          courseId: data.courseId || "",
-          type: data.type || "",
-          assessmentType: data.assessmentType || "assessment",
-          maxPoints: data.maxPoints || 0,
-          passingScore: data.passingScore || 0,
-          percentage: data.percentage || 0,
-          dueDate: data.dueDate || "",
-          description: data.description || "",
-          status: data.status || "draft",
-          gradeSheetId: data.gradeSheetId,
-          createdAt: data.createdAt || new Date().toISOString(),
-          createdBy: data.createdBy || "",
+      for (let index = 0; index < courseIds.length; index += 10) {
+        chunks.push(courseIds.slice(index, index + 10));
+      }
+
+      const snapshots = await Promise.all(
+        chunks.map((chunk) => getDocs(query(assessmentsRef, where("courseId", "in", chunk)))),
+      );
+
+      snapshots.forEach((querySnapshot) => {
+        querySnapshot.forEach((doc) => {
+          if (seenIds.has(doc.id)) return;
+          seenIds.add(doc.id);
+
+          const data = doc.data();
+          assessmentList.push({
+            id: doc.id,
+            name: data.name || "",
+            courseId: data.courseId || "",
+            type: data.type || "",
+            assessmentType: data.assessmentType || "assessment",
+            maxPoints: data.maxPoints || 0,
+            passingScore: data.passingScore || 0,
+            percentage: data.percentage || 0,
+            dueDate: data.dueDate || "",
+            description: data.description || "",
+            status: data.status || "draft",
+            gradeSheetId: data.gradeSheetId,
+            createdAt: data.createdAt || new Date().toISOString(),
+            createdBy: data.createdBy || "",
+          });
         });
       });
 
       assessmentList.sort((a, b) => {
         if (!a.dueDate) return 1;
         if (!b.dueDate) return -1;
-        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+        const dueA = getDueComparisonDate(a.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        const dueB = getDueComparisonDate(b.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        return dueA - dueB;
       });
 
       setAssessments(assessmentList);
+      return assessmentList;
     } catch {
-      return;
+      setAssessments([]);
+      return [];
     }
   };
 
-  const fetchSubmissions = async () => {
+  const fetchSubmissions = async (sourceAssessments: Assessment[] = []) => {
+    const assessmentIds = Array.from(
+      new Set(
+        sourceAssessments
+          .map((assessment) => String(assessment.id || "").trim())
+          .filter((assessmentId) => assessmentId.length > 0),
+      ),
+    );
+
+    if (assessmentIds.length === 0) {
+      setSubmissions([]);
+      return;
+    }
+
     try {
       const submissionsRef = collection(firebaseDB, "submissions");
-      const querySnapshot = await getDocs(submissionsRef);
-
       const submissionsList: Submission[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        submissionsList.push({
-          id: doc.id,
-          assessmentId: data.assessmentId || "",
-          studentId: data.studentId || "",
-          status: data.status || "pending",
-          grade: data.grade,
-          submittedAt: data.submittedAt || Timestamp.now(),
-          gradedAt: data.gradedAt,
-          wordCount: data.wordCount,
-          characterCount: data.characterCount,
-          content: data.content,
+      const seenIds = new Set<string>();
+      const snapshots = await Promise.all(
+        chunkValues(assessmentIds).map((chunk) =>
+          getDocs(query(submissionsRef, where("assessmentId", "in", chunk))),
+        ),
+      );
+
+      snapshots.forEach((querySnapshot) => {
+        querySnapshot.forEach((doc) => {
+          if (seenIds.has(doc.id)) return;
+          seenIds.add(doc.id);
+
+          const data = doc.data();
+          submissionsList.push({
+            id: doc.id,
+            assessmentId: data.assessmentId || "",
+            studentId: data.studentId || "",
+            status: data.status || "pending",
+            grade: data.grade,
+            submittedAt: data.submittedAt || Timestamp.now(),
+            gradedAt: data.gradedAt,
+            wordCount: data.wordCount,
+            characterCount: data.characterCount,
+            content: data.content,
+          });
         });
       });
 
       setSubmissions(submissionsList);
     } catch {
-      return;
+      setSubmissions([]);
     }
   };
 
-  const fetchAllSlides = async () => {
+  const fetchLegacyCourseContent = async (teacherCourses: Course[] = []) => {
+    const sourceCourses = teacherCourses.length > 0 ? teacherCourses : courses;
+    const courseIds = Array.from(
+      new Set(
+        sourceCourses
+          .map((course) => String(course.id || "").trim())
+          .filter((courseId) => courseId.length > 0),
+      ),
+    );
+
+    if (courseIds.length === 0) {
+      setUnits([]);
+      setWeeks([]);
+      setSlides([]);
+      return;
+    }
+
     try {
-      const slidesRef = collection(firebaseDB, "diapositivas");
-      const q = query(slidesRef, orderBy("createdAt", "desc"));
+      const courseUnitGroups = await Promise.all(courseIds.map((courseId) => unitService.getByCourse(courseId)));
+      const unitMap = new Map<string, Unit>();
+      const weekMap = new Map<string, Week>();
+      const slideMap = new Map<string, Slide>();
 
-      const querySnapshot = await getDocs(q);
-      const slideList: Slide[] = [];
+      courseUnitGroups.flat().forEach((unit) => {
+        unitMap.set(unit.id, {
+          id: unit.id,
+          name: unit.name || "",
+          description: unit.description || "",
+          courseId: unit.courseId || "",
+          order: unit.order || 0,
+          createdAt: (unit.createdAt as Timestamp) || Timestamp.now(),
+        });
 
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        slideList.push({
-          id: doc.id,
-          title: data.title || "",
-          description: data.description || "",
-          canvaUrl: data.canvaUrl || "",
-          createdAt: data.createdAt || Timestamp.now(),
-          weekId: data.weekId || "",
-          order: data.order || 0,
+        (unit.weeks || []).forEach((week) => {
+          const weekRecord = week as unknown as Record<string, unknown>;
+          const weekCourseId =
+            typeof weekRecord.courseId === "string" && weekRecord.courseId.trim()
+              ? weekRecord.courseId.trim()
+              : unit.courseId || "";
+
+          weekMap.set(week.id, {
+            id: week.id,
+            number: week.number || 1,
+            topic: week.topic || "",
+            unitId: week.unitId || unit.id,
+            createdAt: (week.createdAt as Timestamp) || Timestamp.now(),
+            courseId: weekCourseId,
+          });
+
+          (week.slides || []).forEach((slide) => {
+            const slideRecord = slide as unknown as Record<string, unknown>;
+            slideMap.set(slide.id, {
+              id: slide.id,
+              title: slide.title || "",
+              description: slide.description || "",
+              canvaUrl: slide.canvaUrl || "",
+              createdAt: (slide.createdAt as Timestamp) || Timestamp.now(),
+              weekId: slide.weekId || week.id,
+              order: slide.order || 0,
+              courseId:
+                typeof slideRecord.courseId === "string" && slideRecord.courseId.trim()
+                  ? slideRecord.courseId.trim()
+                  : weekCourseId,
+            });
+          });
         });
       });
 
-      setSlides(slideList);
+      setUnits(Array.from(unitMap.values()));
+      setWeeks(Array.from(weekMap.values()));
+      setSlides(
+        Array.from(slideMap.values()).sort(
+          (left, right) =>
+            convertTimestamp(right.createdAt).getTime() - convertTimestamp(left.createdAt).getTime(),
+        ),
+      );
     } catch {
-      return;
+      setUnits([]);
+      setWeeks([]);
+      setSlides([]);
     }
   };
 
-  const fetchAllUnits = async () => {
-    try {
-      const unitsRef = collection(firebaseDB, "unidades");
-      const q = query(unitsRef);
+  const fetchStudents = async (teacherCourses: Course[] = []) => {
+    const sourceCourses = teacherCourses.length > 0 ? teacherCourses : courses;
+    const studentIds = Array.from(
+      new Set(
+        sourceCourses.flatMap((course) =>
+          (course.enrolledStudents || []).filter(
+            (studentId): studentId is string =>
+              typeof studentId === "string" && studentId.trim().length > 0,
+          ),
+        ),
+      ),
+    );
 
-      const querySnapshot = await getDocs(q);
-      const unitList: Unit[] = [];
-
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        unitList.push({
-          id: doc.id,
-          name: data.name || "",
-          description: data.description || "",
-          courseId: data.courseId || "",
-          order: data.order || 0,
-          createdAt: data.createdAt || Timestamp.now(),
-        });
-      });
-
-      setUnits(unitList);
-    } catch {
+    if (studentIds.length === 0) {
+      setStudents([]);
       return;
     }
-  };
-
-  const fetchAllWeeks = async () => {
-    try {
-      const weeksRef = collection(firebaseDB, "semanas");
-      const q = query(weeksRef);
-
-      const querySnapshot = await getDocs(q);
-      const weekList: Week[] = [];
-
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        weekList.push({
-          id: doc.id,
-          number: data.number || 1,
-          topic: data.topic || "",
-          unitId: data.unitId || "",
-          createdAt: data.createdAt || Timestamp.now(),
-        });
-      });
-
-      setWeeks(weekList);
-    } catch {
-      return;
-    }
-  };
-
-  const fetchStudents = async () => {
-    if (!user?.id) return;
 
     try {
       const studentsRef = collection(firebaseDB, "estudiantes");
-      const querySnapshot = await getDocs(studentsRef);
-
       const studentList: Student[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        studentList.push({
-          id: doc.id,
-          name: data.name || "",
-          email: data.email || "",
-          idNumber: data.idNumber || "",
-          whatsApp: data.whatsApp,
-          courses: data.courses || [],
+      const snapshots = await Promise.all(
+        chunkValues(studentIds).map((chunk) =>
+          getDocs(query(studentsRef, where(documentId(), "in", chunk))),
+        ),
+      );
+
+      snapshots.forEach((querySnapshot) => {
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          studentList.push({
+            id: doc.id,
+            name: data.name || "",
+            email: data.email || "",
+            idNumber: data.idNumber || "",
+            whatsApp: data.whatsApp,
+            courses: data.courses || [],
+          });
         });
       });
 
       setStudents(studentList);
     } catch {
-      return;
+      setStudents([]);
     }
   };
 
-  const fetchPeriods = async () => {
+  const fetchPeriods = async (teacherCourses: Course[] = []) => {
+    const sourceCourses = teacherCourses.length > 0 ? teacherCourses : courses;
+    const courseIds = sourceCourses.map((course) => course.id);
+    if (courseIds.length === 0) {
+      setPeriods([]);
+      return;
+    }
+
     try {
       const periodsRef = collection(firebaseDB, "periods");
-      const querySnapshot = await getDocs(periodsRef);
+      const snapshots = await Promise.all(
+        chunkValues(courseIds).map((chunk) =>
+          getDocs(query(periodsRef, where("courseId", "in", chunk))),
+        ),
+      );
 
-      const periodList: Period[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        periodList.push({
-          id: doc.id,
-          courseId: data.courseId || "",
-          name: data.name || "",
-          number: data.number || 0,
-          order: data.order || 0,
+      const periodMap = new Map<string, Period>();
+      snapshots.forEach((snapshot) => {
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          periodMap.set(docSnap.id, {
+            id: docSnap.id,
+            courseId: data.courseId || "",
+            name: data.name || "",
+            number: data.number || 0,
+            order: data.order || 0,
+          });
         });
       });
 
-      setPeriods(periodList);
+      setPeriods(Array.from(periodMap.values()));
     } catch {
-      return;
+      setPeriods([]);
     }
   };
 
-  const fetchCourseWeeks = async () => {
+  const fetchCourseWeeks = async (teacherCourses: Course[] = []) => {
+    const sourceCourses = teacherCourses.length > 0 ? teacherCourses : courses;
+    const courseIds = sourceCourses.map((course) => course.id);
+    if (courseIds.length === 0) {
+      setCourseWeeks([]);
+      return;
+    }
+
     try {
       const weeksRef = collection(firebaseDB, "weeks");
-      const querySnapshot = await getDocs(weeksRef);
+      const snapshots = await Promise.all(
+        chunkValues(courseIds).map((chunk) =>
+          getDocs(query(weeksRef, where("courseId", "in", chunk))),
+        ),
+      );
 
-      const weekList: CourseWeek[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        weekList.push({
-          id: doc.id,
-          courseId: data.courseId || "",
-          periodId: data.periodId || "",
-          number: data.number || 0,
-          topic: data.topic || "",
-          order: data.order || 0,
+      const weekMap = new Map<string, CourseWeek>();
+      snapshots.forEach((snapshot) => {
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          weekMap.set(docSnap.id, {
+            id: docSnap.id,
+            courseId: data.courseId || "",
+            periodId: data.periodId || "",
+            number: data.number || 0,
+            topic: data.topic || "",
+            order: data.order || 0,
+          });
         });
       });
 
-      setCourseWeeks(weekList);
+      setCourseWeeks(Array.from(weekMap.values()));
     } catch {
-      return;
+      setCourseWeeks([]);
     }
   };
 
-  const fetchCourseFiles = async () => {
+  const fetchCourseFiles = async (teacherCourses: Course[] = []) => {
+    const sourceCourses = teacherCourses.length > 0 ? teacherCourses : courses;
+    const courseIds = sourceCourses.map((course) => course.id);
+    if (courseIds.length === 0) {
+      setCourseFiles([]);
+      return;
+    }
+
     try {
       const filesRef = collection(firebaseDB, "course_files");
-      const querySnapshot = await getDocs(filesRef);
+      const snapshots = await Promise.all(
+        chunkValues(courseIds).map((chunk) =>
+          getDocs(query(filesRef, where("courseId", "in", chunk))),
+        ),
+      );
 
-      const filesList: CourseFile[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        filesList.push({
-          id: doc.id,
-          courseId: data.courseId || "",
-          periodId: data.periodId || "",
-          weekId: data.weekId || "",
-          name: data.name || "",
-          type: data.type || "",
-          size: data.size || 0,
-          uploadedBy: data.uploadedBy || "",
-          uploadedAt: data.uploadedAt,
-          url: data.url || "",
+      const fileMap = new Map<string, CourseFile>();
+      snapshots.forEach((snapshot) => {
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          fileMap.set(docSnap.id, {
+            id: docSnap.id,
+            courseId: data.courseId || "",
+            periodId: data.periodId || "",
+            weekId: data.weekId || "",
+            name: data.name || "",
+            type: data.type || "",
+            size: data.size || 0,
+            uploadedBy: data.uploadedBy || "",
+            uploadedAt: data.uploadedAt,
+            url: data.url || "",
+          });
         });
       });
 
-      setCourseFiles(filesList);
+      setCourseFiles(Array.from(fileMap.values()));
     } catch {
+      setCourseFiles([]);
+    }
+  };
+
+  const fetchMandatoryCourseQuizProgress = async () => {
+    if (!user?.id) {
+      setMandatoryCourseQuizProgress(null);
       return;
     }
+
+    setLoadingMandatoryCourseQuizProgress(true);
+    try {
+      const mandatoryCourseSnapshot = await getDocs(
+        query(
+          collection(firebaseDB, "cursos"),
+          where("code", "==", TEACHER_ONBOARDING_COURSE_CODE),
+          limit(1),
+        ),
+      );
+
+      const mandatoryCourseDoc = mandatoryCourseSnapshot.docs[0];
+      if (!mandatoryCourseDoc) {
+        setMandatoryCourseQuizProgress(null);
+        return;
+      }
+
+      const mandatoryCourseData = mandatoryCourseDoc.data() as Record<string, unknown>;
+      const mandatoryCourseId = mandatoryCourseDoc.id;
+      const mandatoryCourseCode = String(
+        mandatoryCourseData.code || TEACHER_ONBOARDING_COURSE_CODE,
+      ).trim();
+      const mandatoryCourseName = String(mandatoryCourseData.name || "Mandatory Course").trim();
+
+      const [questionsSnapshot, attemptsSnapshot] = await Promise.all([
+        getDocs(
+          query(
+            collection(firebaseDB, "exerciseQuestions"),
+            where("courseId", "==", mandatoryCourseId),
+          ),
+        ),
+        getDocs(
+          query(
+            collection(firebaseDB, "quizAttempts"),
+            where("courseId", "==", mandatoryCourseId),
+            where("studentId", "==", user.id),
+          ),
+        ),
+      ]);
+
+      const themeSet = new Set<string>();
+      questionsSnapshot.forEach((questionDoc) => {
+        const payload = questionDoc.data() as Record<string, unknown>;
+        const theme = String(payload.theme || "").trim();
+        const isPublished =
+          typeof payload.isPublished === "boolean" ? payload.isPublished : true;
+        if (!theme || !isPublished) return;
+        themeSet.add(theme);
+      });
+
+      const approvedThemeSet = new Set<string>();
+      attemptsSnapshot.forEach((attemptDoc) => {
+        const payload = attemptDoc.data() as Record<string, unknown>;
+        const theme = String(payload.theme || "").trim();
+        const percentage = Number(payload.percentage || 0);
+        if (!theme || !themeSet.has(theme)) return;
+        if (percentage >= 80) {
+          approvedThemeSet.add(theme);
+        }
+      });
+
+      const totalThemes = themeSet.size;
+      const approvedThemes = approvedThemeSet.size;
+      const pendingThemes = Math.max(0, totalThemes - approvedThemes);
+      const progressPercentage =
+        totalThemes > 0 ? Math.round((approvedThemes / totalThemes) * 100) : 0;
+
+      setMandatoryCourseQuizProgress({
+        courseId: mandatoryCourseId,
+        courseCode: mandatoryCourseCode || TEACHER_ONBOARDING_COURSE_CODE,
+        courseName: mandatoryCourseName || "Mandatory Course",
+        totalThemes,
+        approvedThemes,
+        pendingThemes,
+        progressPercentage,
+      });
+    } catch {
+      setMandatoryCourseQuizProgress(null);
+    } finally {
+      setLoadingMandatoryCourseQuizProgress(false);
+    }
+  };
+
+  const runTransferredCourseBackfill = async (teacherCourses: Course[] = []) => {
+    const sourceCourses = teacherCourses.length > 0 ? teacherCourses : courses;
+    const courseIds = Array.from(
+      new Set(
+        sourceCourses
+          .map((course) => String(course.id || "").trim())
+          .filter((courseId) => courseId.length > 0),
+      ),
+    );
+
+    if (courseIds.length === 0) return;
+
+    const pendingCourseIds = courseIds.filter(
+      (courseId) => !backfilledCourseIdsRef.current.has(courseId),
+    );
+    if (pendingCourseIds.length === 0) return;
+
+    pendingCourseIds.forEach((courseId) => {
+      backfilledCourseIdsRef.current.add(courseId);
+    });
+
+    await Promise.all(
+      pendingCourseIds.map(async (courseId) => {
+        await Promise.allSettled([
+          unitService.backfillCourseContentCourseIds(courseId),
+          backfillTransferredCourseContent(courseId),
+        ]);
+      }),
+    );
   };
 
   const getCourseStudents = () => {
@@ -1340,21 +1908,17 @@ export default function TeacherDashboard() {
     const courseUnits = units.filter(
       (unit) => unit.courseId === selectedCourse.id,
     );
-
-    if (courseUnits.length === 0) {
-      return [];
-    }
-
-    const unitIds = courseUnits.map((unit) => unit.id);
-    const courseWeeks = weeks.filter((week) => unitIds.includes(week.unitId));
-
-    if (courseWeeks.length === 0) {
-      return [];
-    }
-
-    const weekIds = courseWeeks.map((week) => week.id);
-    const courseSlides = slides.filter((slide) =>
-      weekIds.includes(slide.weekId),
+    const unitIds = new Set(courseUnits.map((unit) => unit.id));
+    const courseWeeks = weeks.filter(
+      (week) =>
+        unitIds.has(week.unitId) ||
+        String(week.courseId || "").trim() === selectedCourse.id,
+    );
+    const weekIds = new Set(courseWeeks.map((week) => week.id));
+    const courseSlides = slides.filter(
+      (slide) =>
+        weekIds.has(slide.weekId) ||
+        String(slide.courseId || "").trim() === selectedCourse.id,
     );
 
     const slidesWithInfo: CourseSlide[] = courseSlides.map((slide) => {
@@ -1373,15 +1937,11 @@ export default function TeacherDashboard() {
       };
     });
 
-    const result = slidesWithInfo
-      .sort((a, b) => {
-        const dateA = convertTimestamp(a.createdAt).getTime();
-        const dateB = convertTimestamp(b.createdAt).getTime();
-        return dateB - dateA;
-      })
-      .slice(0, 4);
-
-    return result;
+    return slidesWithInfo.sort((a, b) => {
+      const dateA = convertTimestamp(a.createdAt).getTime();
+      const dateB = convertTimestamp(b.createdAt).getTime();
+      return dateB - dateA;
+    });
   };
 
   const getCourseSubmissions = () => {
@@ -1704,23 +2264,46 @@ export default function TeacherDashboard() {
     const selectedWeeks = courseWeeks.filter(
       (w) => w.courseId === selectedCourse.id,
     );
+    const legacyUnitIds = new Set(
+      units
+        .filter((unit) => unit.courseId === selectedCourse.id)
+        .map((unit) => unit.id),
+    );
+    const legacyWeeks = weeks.filter(
+      (week) =>
+        legacyUnitIds.has(week.unitId) ||
+        String(week.courseId || "").trim() === selectedCourse.id,
+    );
+    const selectedWeekIds = new Set([
+      ...selectedWeeks.map((week) => week.id),
+      ...legacyWeeks.map((week) => week.id),
+    ]);
+    const selectedPeriodIds = new Set(selectedPeriods.map((period) => period.id));
     const selectedFiles = courseFiles.filter(
-      (f) => f.courseId === selectedCourse.id,
+      (file) =>
+        file.courseId === selectedCourse.id ||
+        (file.weekId ? selectedWeekIds.has(file.weekId) : false) ||
+        (file.periodId ? selectedPeriodIds.has(file.periodId) : false),
     );
 
     const fileWeekIds = new Set(
       selectedFiles.map((f) => f.weekId).filter(Boolean),
     );
-    const weeksWithFiles = selectedWeeks.filter((w) =>
+    const effectiveWeeks = Array.from(
+      new Map(
+        [...selectedWeeks, ...legacyWeeks].map((week) => [week.id, week]),
+      ).values(),
+    );
+    const weeksWithFiles = effectiveWeeks.filter((w) =>
       fileWeekIds.has(w.id),
     ).length;
 
     return {
       periodsCount: selectedPeriods.length,
-      weeksCount: selectedWeeks.length,
+      weeksCount: effectiveWeeks.length,
       filesCount: selectedFiles.length,
       weeksWithFiles,
-      weeksWithoutFiles: Math.max(0, selectedWeeks.length - weeksWithFiles),
+      weeksWithoutFiles: Math.max(0, effectiveWeeks.length - weeksWithFiles),
     };
   };
 
@@ -1735,10 +2318,18 @@ export default function TeacherDashboard() {
       (assessment.assessmentType || "").toLowerCase() === "quiz",
   ).length;
   const courseSlides = getCourseSlides();
+  const effectiveCourseSlidesCount = Math.max(
+    courseSlides.length,
+    selectedCourseResourceCounts.slidesCount,
+  );
   const pendingGrading = getPendingGrading();
   const missingSubmissions = getMissingSubmissions();
   const assessmentHealth = getAssessmentHealth();
   const contentCoverage = getContentCoverage();
+  const effectiveFilesCount = Math.max(
+    contentCoverage.filesCount,
+    selectedCourseResourceCounts.filesCount,
+  );
   const actionAlertsTotal =
     pendingGrading.length +
     missingSubmissions.length +
@@ -1746,9 +2337,9 @@ export default function TeacherDashboard() {
     courseStats.totalAtRisk;
   const operationalSnapshotTotal =
     upcomingAssessments.length +
-    courseSlides.length +
+    effectiveCourseSlidesCount +
     courseQuizCount +
-    contentCoverage.filesCount;
+    effectiveFilesCount;
   const snapshotCards = useMemo<SnapshotCardModel[]>(
     () => [
       {
@@ -1848,7 +2439,7 @@ export default function TeacherDashboard() {
           {
             icon: Presentation,
             label: "Slides",
-            value: courseSlides.length,
+            value: effectiveCourseSlidesCount,
             iconClassName: "text-violet-600",
           },
           {
@@ -1873,7 +2464,7 @@ export default function TeacherDashboard() {
       contentCoverage.weeksCount,
       contentCoverage.weeksWithFiles,
       courseQuizCount,
-      courseSlides.length,
+      effectiveCourseSlidesCount,
       courseStats.approvalRate,
       courseStats.averageGrade,
       courseStats.totalAtRisk,
@@ -1913,7 +2504,7 @@ export default function TeacherDashboard() {
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="space-y-2 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
-                <p className="text-lg font-semibold text-slate-900">
+                <p className="text-base font-semibold text-slate-900">
                   Loading your dashboard
                 </p>
                 <p className="text-sm text-slate-600">
@@ -1923,6 +2514,19 @@ export default function TeacherDashboard() {
             </div>
           </div>
         </div>
+        <InstitutionCaptureModal
+          open={institutionModalOpen}
+          roleLabel={institutionRoleLabel}
+          institutionValue={institutionValue}
+          suggestions={institutionSuggestions}
+          saving={savingInstitution}
+          errorMessage={institutionError}
+          onInstitutionChange={(value) => {
+            setInstitutionValue(value);
+            if (institutionError) setInstitutionError("");
+          }}
+          onSave={handleSaveInstitution}
+        />
       </DashboardLayout>
     );
   }
@@ -1954,7 +2558,7 @@ export default function TeacherDashboard() {
                     Course Workspace
                   </span>
                 </div>
-                <h1 className="mt-2 truncate text-2xl font-bold text-slate-900">
+                <h1 className="mt-2 truncate text-xl font-bold text-slate-900 sm:text-2xl">
                   {selectedCourse?.name || "Select a course"}
                 </h1>
                 <div className="mt-1 flex items-center gap-2 text-sm text-slate-600">
@@ -1988,7 +2592,7 @@ export default function TeacherDashboard() {
                     <p className="text-[11px] uppercase tracking-wide text-slate-500">
                       Course Average
                     </p>
-                    <p className="text-xl font-bold leading-tight text-slate-900">
+                    <p className="text-lg font-bold leading-tight text-slate-900">
                       {courseStats.averageGrade}
                       <span className="text-sm font-medium text-slate-500"> / 5.0</span>
                     </p>
@@ -1997,7 +2601,7 @@ export default function TeacherDashboard() {
                     <p className="text-[11px] uppercase tracking-wide text-slate-500">
                       Approval
                     </p>
-                    <p className="text-xl font-bold leading-tight text-slate-900">
+                    <p className="text-lg font-bold leading-tight text-slate-900">
                       {courseStats.approvalRate}%
                     </p>
                   </div>
@@ -2005,7 +2609,7 @@ export default function TeacherDashboard() {
                     <p className="text-[11px] uppercase tracking-wide text-slate-500">
                       Assessments
                     </p>
-                    <p className="text-xl font-bold leading-tight text-slate-900">
+                    <p className="text-lg font-bold leading-tight text-slate-900">
                       {courseStats.totalAssessments}
                     </p>
                   </div>
@@ -2074,7 +2678,7 @@ export default function TeacherDashboard() {
                       <div className="mt-2 flex items-end justify-between gap-2">
                         <div className="flex items-center gap-1.5">
                           <HeartPulse className={`h-4 w-4 ${course.tone.text}`} />
-                          <p className={`text-2xl font-extrabold ${course.tone.text}`}>
+                          <p className={`text-xl font-extrabold ${course.tone.text}`}>
                             {course.healthScore}
                             <span className="ml-0.5 text-xs font-semibold text-slate-500">
                               /100
@@ -2189,7 +2793,7 @@ export default function TeacherDashboard() {
                     </div>
 
                     <div className="mt-2 flex items-end gap-1">
-                      <p className={`text-4xl font-extrabold leading-none ${activeSnapshotCard.iconClassName}`}>
+                      <p className={`text-3xl font-extrabold leading-none ${activeSnapshotCard.iconClassName}`}>
                         {activeSnapshotCard.value}
                       </p>
                       <span className="pb-1 text-sm font-semibold text-slate-500">
@@ -2249,7 +2853,7 @@ export default function TeacherDashboard() {
                   <Clock className="h-4 w-4 text-teal-700" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900">Today's Classes</h2>
+                  <h2 className="text-base font-bold text-slate-900">Today's Classes</h2>
                   <p className="text-xs text-slate-500">Live schedule across your courses</p>
                 </div>
               </div>
@@ -2305,8 +2909,8 @@ export default function TeacherDashboard() {
                     <CalendarClock className="h-4 w-4 text-sky-600" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-bold text-slate-900">Upcoming Activities</h2>
-                    <p className="text-xs text-slate-500">Next 7 days • all courses</p>
+                    <h2 className="text-base font-bold text-slate-900">Upcoming Activities</h2>
+                    <p className="text-xs text-slate-500">Next 7 days • your courses</p>
                   </div>
                 </div>
                 <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">
@@ -2334,12 +2938,23 @@ export default function TeacherDashboard() {
                         : tag.tone === "announcement"
                           ? "border-amber-200 bg-amber-50 text-amber-800"
                           : "border-sky-200 bg-cyan-50 text-sky-800";
-                    const activityLink = activity.courseCode
-                      ? `/courses/${activity.courseCode}/assessments/${activity.id}`
-                      : "/courses";
+                    const activityLink =
+                      activity.link ||
+                      (activity.courseCode
+                        ? `/courses/${activity.courseCode}/assessments/${activity.id}`
+                        : "/courses");
 
                     return (
-                      <Link key={activity.id} to={activityLink} className="block">
+                      <Link
+                        key={activity.id}
+                        to={activityLink}
+                        className="block"
+                        onClick={() => {
+                          if (activity.courseId && ownedCourseIds.has(activity.courseId)) {
+                            setSelectedCourseId(activity.courseId);
+                          }
+                        }}
+                      >
                         <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition-colors hover:border-sky-300 hover:bg-sky-50/50">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
@@ -2371,105 +2986,187 @@ export default function TeacherDashboard() {
               )}
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-violet-100">
-                    <Zap className="h-4 w-4 text-violet-700" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-900">Quick Actions</h2>
-                    <p className="text-xs text-slate-600 mt-1">
-                      Shortcuts for daily teaching tasks
-                    </p>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-100">
+                      <ListChecks className="h-4 w-4 text-cyan-700" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">
+                        Course Detail ({mandatoryCourseQuizProgress?.courseCode || TEACHER_ONBOARDING_COURSE_CODE})
+                      </h2>
+                      <p className="text-xs text-slate-600 mt-1">
+                        Course overview and progress
+                      </p>
+                    </div>
                   </div>
                 </div>
+
+                {loadingMandatoryCourseQuizProgress ? (
+                  <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 py-6">
+                    <Loader2 className="h-5 w-5 animate-spin text-sky-600" />
+                  </div>
+                ) : !mandatoryCourseQuizProgress ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center">
+                    <p className="text-sm font-medium text-slate-700">No mandatory course data</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      We could not load quiz progress for the mandatory teacher course.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {mandatoryCourseQuizProgress.courseName}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {mandatoryCourseQuizProgress.courseCode}
+                      </p>
+                    </div>
+
+                    <div className="flex items-end justify-between gap-3">
+                      <div>
+                        <p className="text-3xl font-extrabold leading-none text-slate-900">
+                          {mandatoryCourseQuizProgress.progressPercentage}%
+                        </p>
+                        <p className="mt-1 text-xs text-slate-600">
+                          Approved themes progress
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">
+                        {mandatoryCourseQuizProgress.approvedThemes}/{mandatoryCourseQuizProgress.totalThemes}
+                      </span>
+                    </div>
+
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className="h-full rounded-full bg-sky-600 transition-all duration-300"
+                        style={{
+                          width: `${Math.max(0, Math.min(100, mandatoryCourseQuizProgress.progressPercentage))}%`,
+                        }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <span>Approved: {mandatoryCourseQuizProgress.approvedThemes}</span>
+                      <span>Pending: {mandatoryCourseQuizProgress.pendingThemes}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Progress is calculated by quizzes approved with at least 80%.
+                    </p>
+
+                    <Link
+                      to={`/courses/${mandatoryCourseQuizProgress.courseCode}/exercise-bank`}
+                      className="inline-flex h-8 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
+                    >
+                      Open mandatory course
+                    </Link>
+                  </div>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Link
-                  to="/courses/create"
-                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
-                >
-                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100">
-                    <Plus className="h-4 w-4 text-sky-700" />
-                  </div>
-                  <p className="text-sm font-semibold text-slate-900">Course</p>
-                  <p className="mt-1 text-xs text-slate-500">Create new</p>
-                </Link>
 
-                <Link
-                  to="/grades"
-                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
-                >
-                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-violet-100">
-                    <FileSpreadsheet className="h-4 w-4 text-violet-700" />
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-violet-100">
+                      <Zap className="h-4 w-4 text-violet-700" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">Quick Actions</h2>
+                      <p className="text-xs text-slate-600 mt-1">
+                        Shortcuts for daily teaching tasks
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-sm font-semibold text-slate-900">Grade</p>
-                  <p className="mt-1 text-xs text-slate-500">{courseGradeSheets.length} sheets</p>
-                </Link>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Link
+                    to="/courses/create"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100">
+                      <Plus className="h-4 w-4 text-sky-700" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-900">Course</p>
+                    <p className="mt-1 text-xs text-slate-500">Create new</p>
+                  </Link>
 
-                <Link
-                  to="/slides"
-                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
-                >
-                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100">
-                    <Presentation className="h-4 w-4 text-indigo-700" />
-                  </div>
-                  <p className="text-sm font-semibold text-slate-900">Slides</p>
-                  <p className="mt-1 text-xs text-slate-500">{courseSlides.length} ready</p>
-                </Link>
+                  <Link
+                    to="/grades"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-violet-100">
+                      <FileSpreadsheet className="h-4 w-4 text-violet-700" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-900">Grade</p>
+                    <p className="mt-1 text-xs text-slate-500">{courseGradeSheets.length} sheets</p>
+                  </Link>
 
-                <Link
-                  to={
-                    selectedCourse
-                      ? `/courses/${selectedCourse.code}/files`
-                      : "/courses"
-                  }
-                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
-                >
-                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-teal-100">
-                    <FolderOpen className="h-4 w-4 text-teal-700" />
-                  </div>
-                  <p className="text-sm font-semibold text-slate-900">Materials</p>
-                  <p className="mt-1 text-xs text-slate-500">{contentCoverage.filesCount} files</p>
-                </Link>
+                  <Link
+                    to="/slides"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100">
+                      <Presentation className="h-4 w-4 text-indigo-700" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-900">Slides</p>
+                    <p className="mt-1 text-xs text-slate-500">{effectiveCourseSlidesCount} ready</p>
+                  </Link>
 
-                <Link
-                  to="/students/list"
-                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
-                >
-                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100">
-                    <Users className="h-4 w-4 text-emerald-700" />
-                  </div>
-                  <p className="text-sm font-semibold text-slate-900">Students</p>
-                  <p className="mt-1 text-xs text-slate-500">{courseStudents.length} enrolled</p>
-                </Link>
+                  <Link
+                    to={
+                      selectedCourse
+                        ? `/courses/${selectedCourse.code}/files`
+                        : "/courses"
+                    }
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-teal-100">
+                      <FolderOpen className="h-4 w-4 text-teal-700" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-900">Materials</p>
+                    <p className="mt-1 text-xs text-slate-500">{effectiveFilesCount} files</p>
+                  </Link>
 
-                <Link
-                  to="/calendar"
-                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
-                >
-                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100">
-                    <CalendarClock className="h-4 w-4 text-amber-700" />
-                  </div>
-                  <p className="text-sm font-semibold text-slate-900">Calendar</p>
-                  <p className="mt-1 text-xs text-slate-500">Today + upcoming</p>
-                </Link>
+                  <Link
+                    to="/students/list"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100">
+                      <Users className="h-4 w-4 text-emerald-700" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-900">Students</p>
+                    <p className="mt-1 text-xs text-slate-500">{courseStudents.length} enrolled</p>
+                  </Link>
 
-                <Link
-                  to={
-                    selectedCourse
-                      ? `/courses/${selectedCourse.code}/exercise-bank`
-                      : "/courses"
-                  }
-                  className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
-                >
-                  <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100">
-                    <ListChecks className="h-4 w-4 text-rose-700" />
-                  </div>
-                  <p className="text-sm font-semibold text-slate-900">Quiz</p>
-                  <p className="mt-1 text-xs text-slate-500">{courseQuizCount} quizzes</p>
-                </Link>
+                  <Link
+                    to="/calendar"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100">
+                      <CalendarClock className="h-4 w-4 text-amber-700" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-900">Calendar</p>
+                    <p className="mt-1 text-xs text-slate-500">Today + upcoming</p>
+                  </Link>
+
+                  <Link
+                    to={
+                      selectedCourse
+                        ? `/courses/${selectedCourse.code}/exercise-bank`
+                        : "/courses"
+                    }
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100">
+                      <ListChecks className="h-4 w-4 text-rose-700" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-900">Quiz</p>
+                    <p className="mt-1 text-xs text-slate-500">{courseQuizCount} quizzes</p>
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
@@ -2484,7 +3181,7 @@ export default function TeacherDashboard() {
           <div className="w-full max-w-4xl max-h-[85vh] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
             <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
               <div>
-                <h3 className="text-lg font-bold text-slate-900">
+                <h3 className="text-base font-bold text-slate-900">
                   Backup & Recovery Center
                 </h3>
                 <p className="text-sm text-slate-600">
@@ -2606,6 +3303,19 @@ export default function TeacherDashboard() {
           </div>
         </div>
       )}
+      <InstitutionCaptureModal
+        open={institutionModalOpen}
+        roleLabel={institutionRoleLabel}
+        institutionValue={institutionValue}
+        suggestions={institutionSuggestions}
+        saving={savingInstitution}
+        errorMessage={institutionError}
+        onInstitutionChange={(value) => {
+          setInstitutionValue(value);
+          if (institutionError) setInstitutionError("");
+        }}
+        onSave={handleSaveInstitution}
+      />
     </DashboardLayout>
   );
 }

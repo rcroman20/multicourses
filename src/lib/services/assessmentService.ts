@@ -4,11 +4,33 @@ import { db } from '@/lib/firebase';
 import { Assessment, Grade } from '@/types/academic';
 
 type AssessmentRecord = Record<string, unknown>;
+const ASSESSMENT_COLLECTIONS = ['assessments', 'evaluaciones'] as const;
+type CourseAssessmentLookupOptions = {
+  courseCode?: string;
+  courseName?: string;
+};
+
+type StudentGradeLookupOptions = {
+  courseCode?: string;
+  courseName?: string;
+};
+
+const normalizeMatchText = (value: unknown): string =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
 
 const toParsedNumber = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value);
+    const parsed = Number(
+      value
+        .trim()
+        .replace(/\s+/g, "")
+        .replace(/,/g, "."),
+    );
     if (Number.isFinite(parsed)) return parsed;
   }
   return null;
@@ -94,6 +116,35 @@ const mapAssessmentDoc = (
   forumRequirements: normalizeForumRequirements(data) as (Assessment & { forumRequirements?: unknown })["forumRequirements"],
 });
 
+const getAssessmentRefCandidates = (assessmentId: string) =>
+  ASSESSMENT_COLLECTIONS.map((collectionName) => ({
+    collectionName,
+    ref: doc(db, collectionName, assessmentId),
+  }));
+
+const matchesCourseReference = (
+  data: AssessmentRecord,
+  lookup: { courseId: string; courseCode: string; courseName: string },
+): boolean => {
+  const courseId = String(data.courseId || "").trim();
+  const courseCode = normalizeMatchText(data.courseCode);
+  const courseName = normalizeMatchText(data.courseName);
+
+  const hasCourseIdLookup = lookup.courseId.length > 0;
+  const hasCourseCodeLookup = lookup.courseCode.length > 0;
+  const hasCourseNameLookup = lookup.courseName.length > 0;
+
+  if (hasCourseIdLookup && courseId && courseId === lookup.courseId) return true;
+  if (hasCourseCodeLookup && courseCode && courseCode === lookup.courseCode) return true;
+  if (hasCourseNameLookup && courseName && courseName === lookup.courseName) return true;
+
+  if (hasCourseIdLookup && !hasCourseCodeLookup && !hasCourseNameLookup) return false;
+  if (!hasCourseIdLookup && hasCourseCodeLookup && !hasCourseNameLookup) return false;
+  if (!hasCourseIdLookup && !hasCourseCodeLookup && hasCourseNameLookup) return false;
+
+  return false;
+};
+
 export const assessmentService = {
   // Crear evaluación
   async createAssessment(assessment: Omit<Assessment, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
@@ -113,8 +164,18 @@ export const assessmentService = {
   // Actualizar evaluación
   async updateAssessment(id: string, data: Partial<Assessment>): Promise<void> {
     try {
-      const assessmentRef = doc(db, 'assessments', id);
-      await updateDoc(assessmentRef, {
+      const candidates = getAssessmentRefCandidates(id);
+      for (const candidate of candidates) {
+        const snap = await getDoc(candidate.ref);
+        if (!snap.exists()) continue;
+        await updateDoc(candidate.ref, {
+          ...data,
+          updatedAt: Timestamp.now()
+        });
+        return;
+      }
+      // Fallback to primary collection for forward compatibility.
+      await updateDoc(candidates[0].ref, {
         ...data,
         updatedAt: Timestamp.now()
       });
@@ -133,28 +194,81 @@ export const assessmentService = {
       );
       await Promise.all(deletePromises);
       
-      // Luego eliminar la evaluación
-      await deleteDoc(doc(db, 'assessments', id));
+      // Luego eliminar la evaluación (compatible with legacy transferred records).
+      const candidates = getAssessmentRefCandidates(id);
+      for (const candidate of candidates) {
+        const snap = await getDoc(candidate.ref);
+        if (!snap.exists()) continue;
+        await deleteDoc(candidate.ref);
+        return;
+      }
+
+      // Fallback to primary collection.
+      await deleteDoc(candidates[0].ref);
     } catch (error) {
       throw error;
     }
   },
 
   // Obtener evaluaciones de un curso
-  async getCourseAssessments(courseId: string): Promise<Assessment[]> {
+  async getCourseAssessments(courseId: string, options?: CourseAssessmentLookupOptions): Promise<Assessment[]> {
     try {
-      const q = query(
-        collection(db, 'assessments'),
-        where('courseId', '==', courseId)
-      );
-      const snapshot = await getDocs(q);
-      const assessments = snapshot.docs.map((docSnapshot) =>
-        mapAssessmentDoc(
-          docSnapshot.id,
-          docSnapshot.data() as AssessmentRecord,
-          this.convertTimestamp,
+      const normalizedCourseId = String(courseId || "").trim();
+      const rawCourseCode = String(options?.courseCode || "").trim();
+      const rawCourseName = String(options?.courseName || "").trim();
+      const querySpecs: Array<{ field: "courseId" | "courseCode" | "courseName"; value: string }> = [];
+
+      if (normalizedCourseId) querySpecs.push({ field: "courseId", value: normalizedCourseId });
+      if (rawCourseCode) querySpecs.push({ field: "courseCode", value: rawCourseCode });
+      if (rawCourseName) querySpecs.push({ field: "courseName", value: rawCourseName });
+
+      if (querySpecs.length === 0) return [];
+
+      const snapshotsByQuery = await Promise.allSettled(
+        ASSESSMENT_COLLECTIONS.flatMap((collectionName) =>
+          querySpecs.map((spec) =>
+            getDocs(
+              query(
+                collection(db, collectionName),
+                where(spec.field, '==', spec.value),
+              ),
+            ),
+          ),
         ),
       );
+
+      const snapshots = snapshotsByQuery
+        .filter(
+          (
+            result,
+          ): result is PromiseFulfilledResult<Awaited<ReturnType<typeof getDocs>>> =>
+            result.status === "fulfilled",
+        )
+        .map((result) => result.value);
+
+      const lookup = {
+        courseId: normalizedCourseId,
+        courseCode: normalizeMatchText(rawCourseCode),
+        courseName: normalizeMatchText(rawCourseName),
+      };
+
+      const assessmentsById = new Map<string, Assessment>();
+      snapshots.forEach((snapshot) => {
+        snapshot.docs.forEach((docSnapshot) => {
+          const rawData = docSnapshot.data() as AssessmentRecord;
+          if (!matchesCourseReference(rawData, lookup)) return;
+          if (assessmentsById.has(docSnapshot.id)) return;
+          assessmentsById.set(
+            docSnapshot.id,
+            mapAssessmentDoc(
+              docSnapshot.id,
+              rawData,
+              this.convertTimestamp,
+            ),
+          );
+        });
+      });
+      const assessments = Array.from(assessmentsById.values());
       
       // Ordenar manualmente por fecha de creación
       return assessments.sort((a, b) => {
@@ -170,22 +284,18 @@ export const assessmentService = {
   // Obtener evaluación por ID
   async getById(assessmentId: string): Promise<Assessment | null> {
     try {
-      console.log('🔍 Buscando evaluación con ID:', assessmentId);
-      const docRef = doc(db, 'assessments', assessmentId);
-      const docSnap = await getDoc(docRef);
-      
-      if (docSnap.exists()) {
+      for (const candidate of getAssessmentRefCandidates(assessmentId)) {
+        const docSnap = await getDoc(candidate.ref);
+        if (!docSnap.exists()) continue;
+
         const data = docSnap.data();
-        console.log('✅ Evaluación encontrada:', data.name);
         return mapAssessmentDoc(
           docSnap.id,
           data as AssessmentRecord,
           this.convertTimestamp,
         );
-      } else {
-        console.log('❌ Evaluación NO encontrada en Firestore');
-        return null;
       }
+      return null;
     } catch (error) {
       throw error;
     }
@@ -194,32 +304,26 @@ export const assessmentService = {
 // En assessmentService.ts - REEMPLAZAR ESTE MÉTODO
 async getAssessmentById(assessmentId: string): Promise<Assessment | null> {
   try {
-    console.log('Buscando evaluación con ID:', assessmentId);
-    
-    const docRef = doc(db, 'assessments', assessmentId); // Cambiar 'this.collectionName' por 'assessments'
-    const docSnap = await getDoc(docRef);
-    
-    if (!docSnap.exists()) {
-      console.log('No se encontró el documento');
-      return null;
-    }
-    
-    const data = docSnap.data();
-    console.log('Datos encontrados:', data);
-    
-    const mapped = mapAssessmentDoc(
-      docSnap.id,
-      data as AssessmentRecord,
-      this.convertTimestamp,
-    );
+    for (const candidate of getAssessmentRefCandidates(assessmentId)) {
+      const docSnap = await getDoc(candidate.ref);
+      if (!docSnap.exists()) continue;
 
-    return {
-      ...mapped,
-      assessmentType: (data.assessmentType as Assessment["assessmentType"]) || 'assessment',
-      deliveryType: (data.deliveryType as Assessment["deliveryType"]) || 'text',
-      startDate: (data.startDate as Assessment["startDate"]) || null,
-      dueDate: (data.dueDate as Assessment["dueDate"]) || null,
-    } as Assessment;
+      const data = docSnap.data();
+      const mapped = mapAssessmentDoc(
+        docSnap.id,
+        data as AssessmentRecord,
+        this.convertTimestamp,
+      );
+
+      return {
+        ...mapped,
+        assessmentType: (data.assessmentType as Assessment["assessmentType"]) || 'assessment',
+        deliveryType: (data.deliveryType as Assessment["deliveryType"]) || 'text',
+        startDate: (data.startDate as Assessment["startDate"]) || null,
+        dueDate: (data.dueDate as Assessment["dueDate"]) || null,
+      } as Assessment;
+    }
+    return null;
   } catch (error) {
     throw error;
   }
@@ -267,7 +371,7 @@ async getAssessmentById(assessmentId: string): Promise<Assessment | null> {
           assessmentId: data.assessmentId || '',
           studentId: data.studentId || '',
           courseId: data.courseId || '',
-          value: data.value || 0,
+          value: pickNumber([data.value], 0),
           gradedBy: data.gradedBy || '',
           comment: data.comment || '',
           gradedAt: this.convertTimestamp(data.gradedAt),
@@ -281,22 +385,87 @@ async getAssessmentById(assessmentId: string): Promise<Assessment | null> {
   },
 
   // Obtener calificaciones de un estudiante en un curso
-  async getStudentGrades(studentId: string, courseId: string): Promise<Grade[]> {
+  async getStudentGrades(
+    studentId: string,
+    courseId: string,
+    options?: StudentGradeLookupOptions,
+  ): Promise<Grade[]> {
     try {
-      const q = query(
-        collection(db, 'grades'),
-        where('studentId', '==', studentId),
-        where('courseId', '==', courseId)
-      );
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => {
-        const data = doc.data();
+      const normalizedCourseId = String(courseId || "").trim();
+      const normalizedCourseCode = normalizeMatchText(options?.courseCode);
+      const normalizedCourseName = normalizeMatchText(options?.courseName);
+
+      const [strictSnapshot, studentSnapshot] = await Promise.all([
+        normalizedCourseId
+          ? getDocs(
+              query(
+                collection(db, 'grades'),
+                where('studentId', '==', studentId),
+                where('courseId', '==', normalizedCourseId),
+              ),
+            )
+          : Promise.resolve(null),
+        getDocs(
+          query(
+            collection(db, 'grades'),
+            where('studentId', '==', studentId),
+          ),
+        ),
+      ]);
+
+      const mergedDocs = new Map<string, Awaited<ReturnType<typeof getDocs>>["docs"][number]>();
+      strictSnapshot?.docs.forEach((docSnap) => mergedDocs.set(docSnap.id, docSnap));
+      studentSnapshot.docs.forEach((docSnap) => mergedDocs.set(docSnap.id, docSnap));
+
+      const assessmentCourseCache = new Map<string, { courseId: string; courseCode: string; courseName: string } | null>();
+
+      const matchesGradeCourse = async (data: Record<string, unknown>) => {
+        const gradeCourseId = String(data.courseId || "").trim();
+        const gradeCourseCode = normalizeMatchText(data.courseCode);
+        const gradeCourseName = normalizeMatchText(data.courseName);
+
+        if (normalizedCourseId && gradeCourseId && gradeCourseId === normalizedCourseId) return true;
+        if (normalizedCourseCode && gradeCourseCode && gradeCourseCode === normalizedCourseCode) return true;
+        if (normalizedCourseName && gradeCourseName && gradeCourseName === normalizedCourseName) return true;
+
+        const assessmentId = String(data.assessmentId || "").trim();
+        if (!assessmentId) return false;
+
+        if (!assessmentCourseCache.has(assessmentId)) {
+          const linkedAssessment = await this.getAssessmentById(assessmentId);
+          assessmentCourseCache.set(
+            assessmentId,
+            linkedAssessment
+              ? {
+                  courseId: String(linkedAssessment.courseId || "").trim(),
+                  courseCode: normalizeMatchText(
+                    (linkedAssessment as unknown as Record<string, unknown>).courseCode,
+                  ),
+                  courseName: normalizeMatchText(
+                    (linkedAssessment as unknown as Record<string, unknown>).courseName,
+                  ),
+                }
+              : null,
+          );
+        }
+
+        const linkedCourse = assessmentCourseCache.get(assessmentId);
+        if (!linkedCourse) return false;
+        if (normalizedCourseId && linkedCourse.courseId && linkedCourse.courseId === normalizedCourseId) return true;
+        if (normalizedCourseCode && linkedCourse.courseCode && linkedCourse.courseCode === normalizedCourseCode) return true;
+        if (normalizedCourseName && linkedCourse.courseName && linkedCourse.courseName === normalizedCourseName) return true;
+
+        return false;
+      };
+
+      const allCandidateGrades = Array.from(mergedDocs.values()).map((docSnap) => {
+        const data = docSnap.data();
         return {
-          id: doc.id,
+          id: docSnap.id,
           assessmentId: data.assessmentId || '',
           studentId: data.studentId || '',
           courseId: data.courseId || '',
-          value: data.value || 0,
+          value: pickNumber([data.value], 0),
           gradedBy: data.gradedBy || '',
           comment: data.comment || '',
           gradedAt: this.convertTimestamp(data.gradedAt),
@@ -304,6 +473,19 @@ async getAssessmentById(assessmentId: string): Promise<Assessment | null> {
           ...data
         } as Grade;
       });
+
+      const results = await Promise.all(
+        allCandidateGrades.map(async (grade) => {
+          const matches = await matchesGradeCourse(grade as unknown as Record<string, unknown>);
+          if (!matches) return null;
+          return {
+            ...grade,
+            courseId: normalizedCourseId || String(grade.courseId || "").trim(),
+          };
+        }),
+      );
+
+      return results.filter((item): item is Grade => item !== null);
     } catch (error) {
       throw error;
     }
@@ -324,7 +506,7 @@ async getAssessmentById(assessmentId: string): Promise<Assessment | null> {
           assessmentId: data.assessmentId || '',
           studentId: data.studentId || '',
           courseId: data.courseId || '',
-          value: data.value || 0,
+          value: pickNumber([data.value], 0),
           gradedBy: data.gradedBy || '',
           comment: data.comment || '',
           gradedAt: this.convertTimestamp(data.gradedAt),
@@ -355,7 +537,7 @@ async getAssessmentById(assessmentId: string): Promise<Assessment | null> {
         assessmentId: data.assessmentId || '',
         studentId: data.studentId || '',
         courseId: data.courseId || '',
-        value: data.value || 0,
+        value: pickNumber([data.value], 0),
         gradedBy: data.gradedBy || '',
         comment: data.comment || '',
         gradedAt: this.convertTimestamp(data.gradedAt),

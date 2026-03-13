@@ -7,7 +7,7 @@ import { isTeacherPlanExpired } from '@/lib/services/teacherPlanAccessService';
 
 interface ProtectedRouteProps {
   children: ReactNode;
-  requiredRole?: UserRole;
+  requiredRole?: UserRole | UserRole[];
 }
 
 const getRoleHomePath = (role?: UserRole): string => {
@@ -89,8 +89,11 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
     return <Navigate to={getRoleHomePath(user?.role)} replace />;
   }
 
-  if (requiredRole && user?.role !== requiredRole) {
-    return <Navigate to={getRoleHomePath(user?.role)} replace />;
+  if (requiredRole) {
+    const allowedRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+    if (!allowedRoles.includes(user?.role as UserRole)) {
+      return <Navigate to={getRoleHomePath(user?.role)} replace />;
+    }
   }
 
   return <>{children}</>;

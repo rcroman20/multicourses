@@ -1,4 +1,5 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 
@@ -7,6 +8,8 @@ setGlobalOptions({ maxInstances: 10 });
 
 const OWNER_ADMIN_EMAIL = "rcroman20@gmail.com";
 const MAX_STUDENTS_PER_COURSE = 35;
+const ADMIN_ACCESS_DOC_PATH = ["adminConfig", "access"];
+const ADMIN_PERMISSIONS_DOC_PATH = ["adminConfig", "delegatedPermissions"];
 
 const LEGACY_DEFAULT_PLAN = {
   id: "scale",
@@ -92,6 +95,177 @@ function normalizeSchedule(rawSchedule) {
     .filter(Boolean);
 }
 
+function stripBackupServerFields(input) {
+  const next = { ...(input || {}) };
+  delete next.id;
+  delete next.createdAt;
+  delete next.updatedAt;
+  return next;
+}
+
+async function fetchBackupCollectionByCourse(db, collectionName, courseId) {
+  const snapshot = await db
+    .collection(collectionName)
+    .where("courseId", "==", courseId)
+    .get();
+
+  return snapshot.docs.map((item) => ({
+    id: item.id,
+    data: stripBackupServerFields(item.data() || {}),
+  }));
+}
+
+async function buildCourseBackupPayload(db, courseId) {
+  const courseSnap = await db.collection("cursos").doc(courseId).get();
+  if (!courseSnap.exists) {
+    throw new Error("Course not found");
+  }
+
+  const courseData = courseSnap.data() || {};
+  const [
+    assessments,
+    gradeSheets,
+    periods,
+    weeks,
+    files,
+    exerciseQuestions,
+    exerciseThemeLinks,
+    units,
+    legacyAssessments,
+  ] = await Promise.all([
+    fetchBackupCollectionByCourse(db, "assessments", courseId),
+    fetchBackupCollectionByCourse(db, "gradeSheets", courseId),
+    fetchBackupCollectionByCourse(db, "periods", courseId),
+    fetchBackupCollectionByCourse(db, "weeks", courseId),
+    fetchBackupCollectionByCourse(db, "course_files", courseId),
+    fetchBackupCollectionByCourse(db, "exerciseQuestions", courseId),
+    fetchBackupCollectionByCourse(db, "exerciseThemeLinks", courseId),
+    fetchBackupCollectionByCourse(db, "unidades", courseId),
+    fetchBackupCollectionByCourse(db, "evaluaciones", courseId),
+  ]);
+
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    source: {
+      courseId,
+      courseCode: String(courseData.code || ""),
+      courseName: String(courseData.name || ""),
+      teacherId: typeof courseData.teacherId === "string" ? courseData.teacherId : undefined,
+    },
+    data: {
+      course: { id: courseSnap.id, data: stripBackupServerFields(courseData) },
+      assessments,
+      gradeSheets,
+      periods,
+      weeks,
+      files,
+      exerciseQuestions,
+      exerciseThemeLinks,
+      units,
+      legacyAssessments,
+    },
+  };
+}
+
+async function cleanupExpiredCourseBackups(db, retentionDays = 7) {
+  const cutoff = admin.firestore.Timestamp.fromDate(
+    new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000),
+  );
+  const snapshot = await db
+    .collection("courseBackups")
+    .where("createdAt", "<", cutoff)
+    .get();
+
+  if (snapshot.empty) return 0;
+
+  for (let index = 0; index < snapshot.docs.length; index += 450) {
+    const batch = db.batch();
+    snapshot.docs.slice(index, index + 450).forEach((docSnap) => batch.delete(docSnap.ref));
+    await batch.commit();
+  }
+  return snapshot.size;
+}
+
+async function createAutomaticCourseBackups(db, intervalHours = 24) {
+  const intervalMs = Math.max(1, intervalHours) * 60 * 60 * 1000;
+  const now = Date.now();
+  const coursesSnap = await db.collection("cursos").get();
+  const latestBackupByCourseId = new Map();
+  const teacherContextById = new Map();
+  const backupsSnap = await db.collection("courseBackups").get();
+
+  backupsSnap.docs.forEach((docSnap) => {
+    const data = docSnap.data() || {};
+    const courseId = String(data.courseId || "").trim();
+    const createdAt = toDateOrNull(data.createdAt);
+    if (!courseId || !createdAt) return;
+    const current = latestBackupByCourseId.get(courseId) || 0;
+    const createdAtMs = createdAt.getTime();
+    if (createdAtMs > current) {
+      latestBackupByCourseId.set(courseId, createdAtMs);
+    }
+  });
+
+  let created = 0;
+  let skipped = 0;
+
+  for (const courseDoc of coursesSnap.docs) {
+    const courseData = courseDoc.data() || {};
+    const courseId = courseDoc.id;
+    const teacherId = String(courseData.teacherId || "").trim();
+    if (!teacherId) {
+      skipped += 1;
+      continue;
+    }
+
+    let teacherData = teacherContextById.get(teacherId);
+    if (!teacherData) {
+      const teacherSnap = await db.collection("usuarios").doc(teacherId).get();
+      teacherData = teacherSnap.exists ? teacherSnap.data() || {} : {};
+      teacherContextById.set(teacherId, teacherData);
+    }
+    const teacherRole = normalizeRole(teacherData.role || teacherData.requestedRole);
+    const teacherApproval = normalizeApprovalStatus(teacherData.teacherApprovalStatus);
+    const teacherPlanStatus = String(teacherData.teacherPlanStatus || "active").trim().toLowerCase();
+
+    if (teacherRole !== "docente") {
+      skipped += 1;
+      continue;
+    }
+    if (teacherApproval && teacherApproval !== "approved") {
+      skipped += 1;
+      continue;
+    }
+    if (teacherPlanStatus === "expired") {
+      skipped += 1;
+      continue;
+    }
+
+    const lastBackupMs = latestBackupByCourseId.get(courseId) || 0;
+    if (lastBackupMs > 0 && now - lastBackupMs < intervalMs) {
+      skipped += 1;
+      continue;
+    }
+
+    const payload = await buildCourseBackupPayload(db, courseId);
+    await db.collection("courseBackups").add({
+      teacherId,
+      teacherName: String(courseData.teacherName || teacherData.name || "Teacher"),
+      courseId: payload.source.courseId,
+      courseCode: payload.source.courseCode,
+      courseName: payload.source.courseName,
+      exportedAt: payload.exportedAt,
+      payload,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      source: "scheduled_daily_backup",
+    });
+    created += 1;
+  }
+
+  return { created, skipped };
+}
+
 function getTeacherPlanContext(userData, studentData) {
   const primary = userData || {};
   const secondary = studentData || {};
@@ -160,17 +334,48 @@ async function deleteSubcollectionDocs(db, parentRef, subcollectionName) {
   await batch.commit();
 }
 
+async function getDelegatedAdminContext(auth, db) {
+  const callerEmail = normalizeEmail(auth?.token?.email);
+  if (callerEmail === OWNER_ADMIN_EMAIL) {
+    return {
+      isOwner: true,
+      isDelegatedAdmin: false,
+      permissions: {},
+    };
+  }
+
+  const [accessSnap, permissionsSnap] = await Promise.all([
+    db.doc(ADMIN_ACCESS_DOC_PATH.join("/")).get(),
+    db.doc(ADMIN_PERMISSIONS_DOC_PATH.join("/")).get(),
+  ]);
+
+  const accessData = accessSnap.exists ? accessSnap.data() || {} : {};
+  const permissionsData = permissionsSnap.exists ? permissionsSnap.data() || {} : {};
+  const delegatedAdminUserIds = Array.isArray(accessData.delegatedAdminUserIds)
+    ? accessData.delegatedAdminUserIds.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+
+  return {
+    isOwner: false,
+    isDelegatedAdmin: delegatedAdminUserIds.includes(String(auth?.uid || "").trim()),
+    permissions: permissionsData,
+  };
+}
+
+async function assertCallerCanManageDeletions(auth, db) {
+  const context = await getDelegatedAdminContext(auth, db);
+  if (context.isOwner) return;
+  if (context.isDelegatedAdmin && context.permissions.manageDeletions === true) return;
+
+  throw new HttpsError(
+    "permission-denied",
+    "You do not have permission to process account deletions.",
+  );
+}
+
 exports.deleteUserByAdmin = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Authentication is required.");
-  }
-
-  const callerEmail = normalizeEmail(request.auth.token?.email);
-  if (callerEmail !== OWNER_ADMIN_EMAIL) {
-    throw new HttpsError(
-      "permission-denied",
-      "Only the owner admin can delete Auth users from this panel.",
-    );
   }
 
   const userId = String(request.data?.userId || "").trim();
@@ -180,6 +385,7 @@ exports.deleteUserByAdmin = onCall(async (request) => {
   }
 
   const db = admin.firestore();
+  await assertCallerCanManageDeletions(request.auth, db);
   const userDocRef = db.collection("usuarios").doc(userId);
   const studentDocRef = db.collection("estudiantes").doc(userId);
 
@@ -235,6 +441,24 @@ exports.deleteUserByAdmin = onCall(async (request) => {
 
   return { ok: true, userId };
 });
+
+exports.runAutomaticCourseBackups = onSchedule(
+  {
+    schedule: "every 24 hours",
+    timeZone: "America/Bogota",
+  },
+  async () => {
+    const db = admin.firestore();
+    const deleted = await cleanupExpiredCourseBackups(db, 7);
+    const result = await createAutomaticCourseBackups(db, 24);
+
+    console.log("Automatic course backups run completed.", {
+      created: result.created,
+      skipped: result.skipped,
+      deleted,
+    });
+  },
+);
 
 exports.createCourseWithPlan = onCall(async (request) => {
   if (!request.auth?.uid) {

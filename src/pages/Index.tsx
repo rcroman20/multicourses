@@ -2,6 +2,7 @@ import { type ComponentType, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { SeoHead } from "@/components/common/SeoHead";
 import {
   ArrowRight,
   BadgeCheck,
@@ -124,12 +125,12 @@ const cacheAudience = (value: LandingAudience): void => {
 };
 
 const dashboardShellClassName =
-  "relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6";
+  "relative rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-8";
 
-const cardClassName = "rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4";
-const softCardClassName = "rounded-2xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm sm:p-4";
+const cardClassName = "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm";
+const softCardClassName = "rounded-2xl border border-slate-200 bg-slate-50/70 p-5 shadow-sm";
 const statPillClassName =
-  "rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600";
+  "rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600";
 const inputClassName =
   "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100";
 
@@ -534,838 +535,624 @@ export default function Index() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-2 sm:px-6 lg:px-2">
-      <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
-      <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
+    <div className="relative min-h-screen overflow-x-hidden bg-slate-50">
+      <SeoHead
+        title="Academic platform for teachers and students"
+        description="MultiCourses helps teachers run courses, students follow academic progress, and institutions manage approvals, plans, and operational control in one platform."
+        canonicalPath="/"
+        keywords="academic platform, LMS, teacher tools, student dashboard, course management, institutional education software"
+      />
+      {/* Background decorative elements */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-20 -top-20 h-64 w-64 rounded-full bg-sky-100/50 blur-[80px]" />
+        <div className="absolute -right-20 -bottom-20 h-64 w-64 rounded-full bg-emerald-100/50 blur-[80px]" />
+        <div className="absolute left-1/2 top-1/3 h-96 w-96 -translate-x-1/2 rounded-full bg-indigo-100/30 blur-[100px]" />
+      </div>
 
       <div
-        className={`relative mx-auto w-full max-w-[1200px] transition ${
+        className={`relative mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 transition ${
           audience ? "" : "pointer-events-none select-none blur-[1px]"
         }`}
       >
-        <div className={dashboardShellClassName}>
-          <div className="space-y-4">
-            <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-2.5 shadow-sm">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1">
-                  <Sparkles className="h-3.5 w-3.5 text-sky-700" />
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-                    MultiCourses
+        {/* Navigation */}
+        <nav className="mb-8 flex items-center justify-between">
+          <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-white/80 px-4 py-2 backdrop-blur-sm">
+            <Sparkles className="h-4 w-4 text-sky-700" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+              MultiCourses
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate("/about")}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-white hover:text-sky-700"
+            >
+              About
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/contact")}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-white hover:text-sky-700"
+            >
+              Contact
+            </button>
+          </div>
+        </nav>
+
+        {/* Hero Section */}
+        <section className="mb-12 rounded-3xl border border-slate-200 bg-white/80 p-8 backdrop-blur-sm shadow-xl">
+          <div className="grid gap-8 lg:grid-cols-2 lg:gap-12">
+            <div>
+              <div className="mb-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleAudienceChange("teacher")}
+                  className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                    isTeacherView
+                      ? "border-sky-300 bg-sky-100 text-sky-800"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  <GraduationCap className="h-4 w-4" />
+                  For Teachers
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAudienceChange("student")}
+                  className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                    !isTeacherView
+                      ? "border-emerald-300 bg-emerald-100 text-emerald-800"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  <BookOpen className="h-4 w-4" />
+                  For Students
+                </button>
+              </div>
+
+              <h1 className="mb-4 text-4xl font-bold tracking-tight text-slate-900 lg:text-5xl">
+                {isTeacherView ? (
+                  <>
+                    Teach, evaluate,
+                    <br />
+                    <span className="text-sky-600">scale your academic operation</span>
+                  </>
+                ) : (
+                  <>
+                    Learn, track your grades,
+                    <br />
+                    <span className="text-emerald-600">stay on top of courses</span>
+                  </>
+                )}
+              </h1>
+
+              <p className="mb-6 text-lg text-slate-600">
+                {isTeacherView
+                  ? "Configure classes, monitor student performance, and apply plan limits with an admin-controlled flow."
+                  : "Get a cleaner study experience with course context, grade visibility, and direct access to your learning materials."}
+              </p>
+
+              <div className="flex flex-wrap gap-4">
+                <button
+                  type="button"
+                  onClick={handlePrimaryAction}
+                  className="inline-flex h-12 items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-sky-600 px-6 text-sm font-semibold text-white shadow-lg shadow-sky-200 transition hover:from-sky-600 hover:to-sky-700"
+                >
+                  {ctaPrimary}
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Trust badges */}
+              <div className="mt-8 flex flex-wrap gap-2">
+                {trustedInstitutions.map((name) => (
+                  <span
+                    key={name}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600"
+                  >
+                    {name}
                   </span>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => navigate("/about")}
-                    className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
-                  >
-                    About
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => navigate("/contact")}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
-                  >
-                    <Mail className="h-3.5 w-3.5" />
-                    Contact
-                  </button>
-                </div>
-              </div>
-            </section>
-
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
-              <div className="pointer-events-none absolute -left-16 -top-20 h-40 w-40 rounded-full bg-sky-200/20" />
-              <div className="pointer-events-none absolute -bottom-24 -right-20 h-48 w-48 rounded-full bg-indigo-200/20" />
-
-              <div className="relative space-y-4">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1">
-                    <Layers3 className="h-3.5 w-3.5 text-sky-700" />
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-                      {isTeacherView ? "Teacher Control Center" : "Student Success Workspace"}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleAudienceChange("teacher")}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
-                        isTeacherView
-                          ? "border-sky-300 bg-sky-100 text-sky-800"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
-                      }`}
-                    >
-                      <GraduationCap className="h-3.5 w-3.5" />
-                      Teacher view
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAudienceChange("student")}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
-                        !isTeacherView
-                          ? "border-emerald-300 bg-emerald-100 text-emerald-800"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
-                      }`}
-                    >
-                      <BookOpen className="h-3.5 w-3.5" />
-                      Student view
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <h1 className="mt-2 text-2xl font-bold text-slate-900 sm:text-3xl">
-                      {isTeacherView
-                        ? "Teach, evaluate, and scale your academic operation"
-                        : "Learn, track your grades, and stay on top of courses"}
-                    </h1>
-                    <p className="mt-2 max-w-3xl text-sm text-slate-600">
-                      {isTeacherView
-                        ? "Configure classes, monitor student performance, and apply plan limits with an admin-controlled flow."
-                        : "Get a cleaner study experience with course context, grade visibility, and direct access to your learning materials."}
-                    </p>
-                  </div>
-
-                  <div className="w-full lg:w-auto lg:min-w-[320px]">
-                    <div className="grid grid-cols-2 gap-2">
-                      {heroSnapshotCards.map((snapshot) => (
-                        <div
-                          key={snapshot.label}
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-2.5"
-                        >
-                          <p className="text-[11px] uppercase tracking-wide text-slate-500">{snapshot.label}</p>
-                          <p className="text-sm font-bold leading-tight text-slate-900">{snapshot.value}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={handlePrimaryAction}
-                    className="inline-flex h-11 items-center gap-2 rounded-xl border border-sky-500 bg-gradient-to-b from-sky-500 to-sky-600 px-5 text-sm font-semibold text-white shadow-[0_14px_24px_-16px_rgba(2,132,199,0.9)] transition hover:from-sky-600 hover:to-sky-700"
-                  >
-                    {ctaPrimary}
-                    <ArrowRight className="h-4 w-4" />
-                  </button>
-                
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
-              <div className="flex flex-col gap-3">
-                <div className="min-w-0">
-                  <p className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    Ready to start
-                  </p>
-                  <h2 className="mt-2 text-xl font-bold text-slate-900">
-                    {isTeacherView
-                      ? "Turn your teaching workflow into a scalable operation"
-                      : "Stay focused and never lose track of your academic progress"}
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {isTeacherView
-                      ? "Submit your request, get approved, and unlock teacher features by plan."
-                      : "Sign in and start using your student dashboard with cleaner context."}
-                  </p>
-                </div>
-                <p className="text-xs text-slate-500">
-                  Use the main action buttons above to continue.
-                </p>
-              </div>
-            </section>
-
-            <section className={softCardClassName}>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {isTeacherView ? "How teacher onboarding works" : "How student success flow works"}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {isTeacherView
-                      ? "Clear steps from request to monetized classroom operation."
-                      : "Simple onboarding from account creation to consistent academic progress."}
-                  </p>
-                </div>
-                <span className={statPillClassName}>
-                  4-step path
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                {roadmap.map((item) => (
-                  <article key={item.step} className="rounded-xl border border-slate-200 bg-white p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.step}</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900">{item.title}</p>
-                    <p className="mt-1 text-xs text-slate-600">{item.description}</p>
-                  </article>
                 ))}
               </div>
-            </section>
+            </div>
 
-            {isTeacherView && (
-              <section className={cardClassName}>
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">Teacher Plans</p>
-                    <p className="text-xs text-slate-500">
-                      Pick your tier and activate teacher features with admin approval.
-                    </p>
-                  </div>
-                  <span className={statPillClassName}>
-                    {TEACHER_PLAN_OPTIONS.length} options
-                  </span>
+            {/* Snapshot cards */}
+            <div className="grid grid-cols-2 gap-4">
+              {heroSnapshotCards.map((snapshot) => (
+                <div
+                  key={snapshot.label}
+                  className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                >
+                  <p className="text-xs uppercase tracking-wide text-slate-500">{snapshot.label}</p>
+                  <p className="text-xl font-bold text-slate-900">{snapshot.value}</p>
                 </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
-                <div className="grid grid-cols-1 gap-3 xl:grid-cols-12">
-                  <article className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50/70 p-3 xl:col-span-3 xl:order-2 xl:self-start">
-                    <div className="pointer-events-none absolute -right-12 -top-10 h-24 w-24 rounded-full bg-sky-200/30" />
-                    <div className="pointer-events-none absolute -bottom-12 -left-10 h-24 w-24 rounded-full bg-emerald-200/25" />
-                    {!showNeedEstimator ? (
-                      <div className="relative space-y-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">Need more capacity?</p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            If your institution needs more scale, calculate your recommended annual plan.
-                          </p>
+        {/* Features Grid */}
+        <section className="mb-12">
+          <div className="mb-6 text-center">
+            <span className={statPillClassName}>Features</span>
+            <h2 className="mt-3 text-3xl font-bold text-slate-900">
+              {isTeacherView ? "Everything you need to teach effectively" : "Everything you need to learn effectively"}
+            </h2>
+          </div>
+
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {featureCards.map((feature) => {
+              const Icon = feature.icon;
+              return (
+                <div
+                  key={feature.title}
+                  className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md"
+                >
+                  <div className={`mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl ${feature.tone}`}>
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <h3 className="mb-2 text-lg font-semibold text-slate-900">{feature.title}</h3>
+                  <p className="text-sm text-slate-600">{feature.description}</p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Roadmap Section */}
+        <section className="mb-12 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <div className="mb-6 text-center">
+            <span className={statPillClassName}>4-step path</span>
+            <h2 className="mt-3 text-3xl font-bold text-slate-900">
+              {isTeacherView ? "How teacher onboarding works" : "How student success flow works"}
+            </h2>
+            <p className="mt-2 text-slate-600">
+              {isTeacherView
+                ? "Clear steps from request to monetized classroom operation."
+                : "Simple onboarding from account creation to consistent academic progress."}
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {roadmap.map((item, index) => (
+              <div key={item.step} className="relative">
+                {index < roadmap.length - 1 && (
+                  <div className="absolute left-1/2 top-8 hidden w-full lg:block">
+                    <div className="border-t-2 border-dashed border-slate-200" />
+                  </div>
+                )}
+                <div className="relative rounded-xl border border-slate-200 bg-white p-4">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-sky-600">{item.step}</span>
+                  <h3 className="mt-2 text-lg font-semibold text-slate-900">{item.title}</h3>
+                  <p className="mt-1 text-sm text-slate-600">{item.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Value Pillars */}
+        <section className="mb-12">
+          <div className="mb-6 text-center">
+            <span className={statPillClassName}>Why choose us</span>
+            <h2 className="mt-3 text-3xl font-bold text-slate-900">
+              {isTeacherView ? "Built for professional educators" : "Designed for student success"}
+            </h2>
+          </div>
+
+          <div className="grid gap-6 sm:grid-cols-3">
+            {valuePillars.map((pillar) => {
+              const Icon = pillar.icon;
+              return (
+                <div key={pillar.title} className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className={`mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl ${pillar.tone}`}>
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <h3 className="mb-2 text-lg font-semibold text-slate-900">{pillar.title}</h3>
+                  <p className="text-sm text-slate-600">{pillar.description}</p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Teacher Plans Section (conditionally rendered) */}
+        {isTeacherView && (
+          <section className="mb-12 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+            <div className="mb-6 text-center">
+              <span className={statPillClassName}>Pricing</span>
+              <h2 className="mt-3 text-3xl font-bold text-slate-900">Simple, transparent annual plans</h2>
+              <p className="mt-2 text-slate-600">Choose the tier that fits your institution's needs</p>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-3">
+              {TEACHER_PLAN_OPTIONS.map((plan) => (
+                <div
+                  key={plan.id}
+                  className={`relative rounded-xl border p-6 ${
+                    plan.isPopular
+                      ? "border-emerald-300 bg-gradient-to-b from-emerald-50 to-white shadow-lg"
+                      : "border-slate-200 bg-white"
+                  }`}
+                >
+                  {plan.isPopular && (
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full border border-emerald-300 bg-white px-3 py-1 text-xs font-semibold text-emerald-700">
+                      <BadgeCheck className="mr-1 inline h-3 w-3" />
+                      Most Popular
+                    </span>
+                  )}
+
+                  <h3 className="text-xl font-bold text-slate-900">{plan.label}</h3>
+                  <div className="mt-4">
+                    <span className="text-3xl font-bold text-slate-900">{formatCop(plan.priceCop)}</span>
+                    <span className="text-sm text-slate-500">/{plan.durationLabel}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-500">{formatCop(plan.monthlyEquivalentCop)}/mo equivalent</p>
+
+                  <div className="mt-6 space-y-4">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">Courses</span>
+                      <span className="font-semibold text-slate-900">{plan.courseLimit}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">Students</span>
+                      <span className="font-semibold text-slate-900">{plan.studentLimit}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">Analytics</span>
+                      <span className="font-semibold text-slate-900">{plan.analyticsLabel}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">Support</span>
+                      <span className="font-semibold text-slate-900">{plan.supportLabel}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate(getTeacherPlanPath(plan.id))}
+                    className="mt-6 w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    View plan details
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Need Estimator */}
+            <div className="mt-8 rounded-xl border border-slate-200 bg-slate-50 p-6">
+              <div className="flex flex-col items-center justify-between gap-4 lg:flex-row">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">Need more capacity?</h3>
+                  <p className="text-sm text-slate-600">
+                    If your institution needs more scale, calculate your recommended annual plan.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNeedEstimator(!showNeedEstimator)}
+                  className="rounded-lg bg-sky-600 px-6 py-2 text-sm font-semibold text-white hover:bg-sky-700"
+                >
+                  {showNeedEstimator ? "Hide calculator" : "Calculate here"}
+                </button>
+              </div>
+
+              {showNeedEstimator && (
+                <div className="mt-6 grid gap-6 lg:grid-cols-2">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700">Courses needed</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={estimatorCourses}
+                        onChange={(event) => setEstimatorCourses(event.target.value)}
+                        className={inputClassName}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700">Total students needed</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={estimatorStudents}
+                        onChange={(event) => setEstimatorStudents(event.target.value)}
+                        className={inputClassName}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-white p-6">
+                    {estimatedPlan ? (
+                      <div>
+                        <h4 className="font-semibold text-slate-900">Recommended: {estimatedPlan.label}</h4>
+                        <div className="mt-4 space-y-2">
+                          <p className="text-sm text-slate-600">Annual price: {formatCop(estimatedPlan.priceCop)}</p>
+                          <p className="text-sm text-slate-600">Monthly equivalent: {formatCop(estimatedPlan.monthlyEquivalentCop)}</p>
+                          <p className="text-sm text-slate-600">Capacity: {estimatedPlan.courseLimit} courses / {estimatedPlan.studentLimit} students</p>
                         </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                            Annual plans
-                          </span>
-                          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                            Custom quotes
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowNeedEstimator(true)}
-                          className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-sky-500 bg-gradient-to-b from-sky-500 to-sky-600 px-3 text-sm font-semibold text-white transition hover:from-sky-600 hover:to-sky-700"
-                        >
-                          Calculate here
-                        </button>
                       </div>
                     ) : (
-                      <div className="relative">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-semibold text-slate-900">Need-based price estimator</p>
-                          <button
-                            type="button"
-                            onClick={() => setShowNeedEstimator(false)}
-                            className="inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-                          >
-                            Hide
-                          </button>
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-1 gap-2">
-                          <label className="space-y-1">
-                            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                              Courses needed
-                            </span>
-                            <input
-                              type="number"
-                              min={0}
-                              value={estimatorCourses}
-                              onChange={(event) => setEstimatorCourses(event.target.value)}
-                              className={inputClassName}
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                              Total students needed
-                            </span>
-                            <input
-                              type="number"
-                              min={0}
-                              value={estimatorStudents}
-                              onChange={(event) => setEstimatorStudents(event.target.value)}
-                              className={inputClassName}
-                            />
-                          </label>
-                        </div>
-
-                        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
-                          {estimatedPlan ? (
-                            <div className="space-y-1 text-xs text-slate-700">
-                              <p className="font-semibold text-slate-900">Recommended: {estimatedPlan.label}</p>
-                              <p>Estimated annual price: {formatCop(estimatedPlan.priceCop)}</p>
-                              <p>Equivalent monthly: {formatCop(estimatedPlan.monthlyEquivalentCop)}</p>
-                              <p>
-                                Capacity: {estimatedPlan.courseLimit} courses / {estimatedPlan.studentLimit} students
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="space-y-1 text-xs text-slate-700">
-                              <p className="font-semibold text-slate-900">Custom enterprise quote</p>
-                              <p>Estimated annual price from: {formatCop(estimatedCustomPriceCop)}</p>
-                              <p>Equivalent monthly from: {formatCop(estimatedCustomMonthlyCop)}</p>
-                              <p>
-                                Your needs exceed current top tier ({highestTierPlan?.label || "Scale Annual"}).
-                              </p>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
-                          <p className="text-sm font-semibold text-slate-900">
-                            Need a callback from our team?
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            Send your details and we will contact your institution with a plan recommendation.
-                          </p>
-
-                          <div className="mt-3 grid grid-cols-1 gap-2">
-                            <input
-                              type="text"
-                              value={leadName}
-                              onChange={(event) => setLeadName(event.target.value)}
-                              placeholder="Full name"
-                              className={inputClassName}
-                            />
-                            <input
-                              type="email"
-                              value={leadEmail}
-                              onChange={(event) => setLeadEmail(event.target.value)}
-                              placeholder="Work email"
-                              className={inputClassName}
-                            />
-                            <input
-                              type="text"
-                              value={leadInstitution}
-                              onChange={(event) => setLeadInstitution(event.target.value)}
-                              placeholder="Institution or organization"
-                              className={inputClassName}
-                            />
-                            <div className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
-                              Teacher
-                            </div>
-                            <textarea
-                              value={leadMessage}
-                              onChange={(event) => setLeadMessage(event.target.value)}
-                              rows={3}
-                              placeholder="Optional message (program size, timeline, extra requirements)"
-                              className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-                            />
-                            <button
-                              type="button"
-                              onClick={handleLeadSubmit}
-                              disabled={submittingLead}
-                              className="inline-flex h-10 items-center justify-center rounded-lg border border-sky-500 bg-gradient-to-b from-sky-500 to-sky-600 px-3 text-sm font-semibold text-white transition hover:from-sky-600 hover:to-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {submittingLead ? "Sending..." : "Send contact request"}
-                            </button>
-                          </div>
+                      <div>
+                        <h4 className="font-semibold text-slate-900">Custom enterprise quote</h4>
+                        <div className="mt-4 space-y-2">
+                          <p className="text-sm text-slate-600">Estimated annual from: {formatCop(estimatedCustomPriceCop)}</p>
+                          <p className="text-sm text-slate-600">Monthly from: {formatCop(estimatedCustomMonthlyCop)}</p>
+                          <p className="text-sm text-slate-500">Your needs exceed current top tier.</p>
                         </div>
                       </div>
                     )}
-                  </article>
+                  </div>
 
-                  <div className="xl:col-span-9 xl:order-1">
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {TEACHER_PLAN_OPTIONS.map((plan) => (
-                        <article
-                          key={plan.id}
-                          className={`relative flex h-full flex-col rounded-xl border p-3 text-left transition-colors ${
-                            plan.isPopular
-                              ? "border-emerald-300 bg-gradient-to-b from-emerald-50 to-white"
-                              : "border-slate-200 bg-white hover:border-slate-300 hover:bg-sky-50/60"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                                {plan.label}
-                              </p>
-                              <p className="mt-1 text-2xl font-extrabold text-slate-900">
-                                {formatCop(plan.priceCop)}
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                {plan.durationLabel} · {plan.billingLabel}
-                              </p>
-                              <p className="text-[11px] text-slate-500">
-                                {formatCop(plan.monthlyEquivalentCop)} / month equivalent
-                              </p>
-                            </div>
-                            {plan.isPopular ? (
-                              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                                <BadgeCheck className="h-3 w-3" />
-                                Popular
-                              </span>
-                            ) : null}
-                          </div>
-
-                          <div className="mt-3 grid grid-cols-2 gap-1.5">
-                            <p className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-[11px] font-semibold text-slate-700">
-                              Courses
-                              <span className="block text-sm text-slate-900">{plan.courseLimit}</span>
-                            </p>
-                            <p className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-[11px] font-semibold text-slate-700">
-                              Students
-                              <span className="block text-sm text-slate-900">{plan.studentLimit}</span>
-                            </p>
-                          </div>
-
-                          <div className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-[11px] text-slate-600">
-                            <p>{plan.analyticsLabel}</p>
-                            <p>{plan.supportLabel}</p>
-                            <p>Estimated average: ~35 students per course</p>
-                          </div>
+                  {/* Contact Form */}
+                  <div className="lg:col-span-2">
+                    <div className="rounded-lg border border-slate-200 bg-white p-6">
+                      <h4 className="mb-4 text-lg font-semibold text-slate-900">Request a callback</h4>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <input
+                          type="text"
+                          value={leadName}
+                          onChange={(event) => setLeadName(event.target.value)}
+                          placeholder="Full name"
+                          className={inputClassName}
+                        />
+                        <input
+                          type="email"
+                          value={leadEmail}
+                          onChange={(event) => setLeadEmail(event.target.value)}
+                          placeholder="Work email"
+                          className={inputClassName}
+                        />
+                        <input
+                          type="text"
+                          value={leadInstitution}
+                          onChange={(event) => setLeadInstitution(event.target.value)}
+                          placeholder="Institution"
+                          className={inputClassName}
+                        />
+                        <div className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                          Teacher
+                        </div>
+                        <div className="sm:col-span-2">
+                          <textarea
+                            value={leadMessage}
+                            onChange={(event) => setLeadMessage(event.target.value)}
+                            rows={3}
+                            placeholder="Optional message"
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
                           <button
                             type="button"
-                            onClick={() => navigate(getTeacherPlanPath(plan.id))}
-                            className="mt-auto inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                            onClick={handleLeadSubmit}
+                            disabled={submittingLead}
+                            className="w-full rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
                           >
-                            View plan details
+                            {submittingLead ? "Sending..." : "Send contact request"}
                           </button>
-                        </article>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <article className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                  <p className="text-sm font-semibold text-slate-900">Pricing matrix</p>
-                  <p className="text-xs text-slate-500">
-                    Compare all annual tiers feature by feature.
-                  </p>
-                  <div className="mt-3 space-y-2 md:hidden">
-                    {teacherPricingMatrixRows.map((row) => (
-                      <article key={row.feature} className="rounded-lg border border-slate-200 bg-white p-2">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          {row.feature}
-                        </p>
-                        <div className="mt-1 grid grid-cols-1 gap-1">
-                          {TEACHER_PLAN_OPTIONS.map((plan) => (
-                            <p
-                              key={`${row.feature}-${plan.id}-mobile`}
-                              className="inline-flex items-center gap-1 text-xs text-slate-600"
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                              <span className="font-semibold text-slate-700">{plan.label}:</span>
-                              {row.values[plan.id]}
-                            </p>
-                          ))}
                         </div>
-                      </article>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 hidden md:block">
-                    <div className="grid grid-cols-[minmax(0,1.2fr)_repeat(3,minmax(0,1fr))] gap-1">
-                      <div className="rounded-md bg-white px-2 py-2 text-xs font-semibold text-slate-700">Feature</div>
-                      {TEACHER_PLAN_OPTIONS.map((plan) => (
-                        <div
-                          key={`${plan.id}-header`}
-                          className="rounded-md bg-white px-2 py-2 text-xs font-semibold text-slate-700"
-                        >
-                          {plan.label}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-1 space-y-1">
-                      {teacherPricingMatrixRows.map((row) => (
-                        <div
-                          key={row.feature}
-                          className="grid grid-cols-[minmax(0,1.2fr)_repeat(3,minmax(0,1fr))] gap-1"
-                        >
-                          <div className="rounded-md border border-slate-200 bg-white px-2 py-2 text-xs font-medium text-slate-700">
-                            {row.feature}
-                          </div>
-                          {TEACHER_PLAN_OPTIONS.map((plan) => (
-                            <div
-                              key={`${row.feature}-${plan.id}-desktop`}
-                              className="rounded-md border border-slate-200 bg-white px-2 py-2 text-xs text-slate-600"
-                            >
-                              <span className="inline-flex items-center gap-1">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                                {row.values[plan.id]}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </article>
-              </section>
-            )}
-
-            <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              {featureCards.map((feature) => {
-                const Icon = feature.icon;
-                return (
-                  <article
-                    key={feature.title}
-                    className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Feature</p>
-                        <p className="mt-1.5 text-sm font-bold text-slate-900">{feature.title}</p>
                       </div>
-                      <span className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${feature.tone}`}>
-                        <Icon className="h-4 w-4" />
-                      </span>
-                    </div>
-                    <p className="mt-2 text-xs text-slate-600">{feature.description}</p>
-                  </article>
-                );
-              })}
-            </section>
-    <section className={softCardClassName}>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {isTeacherView ? "Why institutions choose MultiCourses" : "Why students stay with MultiCourses"}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {isTeacherView
-                      ? "Built to sell, operate, and scale teacher workflows with control."
-                      : "Built to keep learners organized, focused, and accountable every week."}
-                  </p>
-                </div>
-                <span className={statPillClassName}>
-                  Professional value
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                {valuePillars.map((pillar) => {
-                  const Icon = pillar.icon;
-                  return (
-                    <article key={pillar.title} className="rounded-xl border border-slate-200 bg-white p-3">
-                      <span className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${pillar.tone}`}>
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <p className="mt-2 text-sm font-semibold text-slate-900">{pillar.title}</p>
-                      <p className="mt-1 text-xs text-slate-600">{pillar.description}</p>
-                    </article>
-                  );
-                })}
-              </div>
-            </section>     <section className={cardClassName}>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {isTeacherView ? "Who should use this landing" : "Who benefits most from this workspace"}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {isTeacherView
-                      ? "Position the product clearly for educators and institutions."
-                      : "Show how the product supports different student profiles."}
-                  </p>
-                </div>
-                <span className={statPillClassName}>
-                  Core segments
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                {segments.map((segment) => {
-                  const Icon = segment.icon;
-                  return (
-                    <article key={segment.title} className="rounded-xl border border-slate-200 bg-white p-3">
-                      <span className={`inline-flex h-9 w-9 items-center justify-center rounded-xl ${segment.tone}`}>
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <p className="mt-2 text-sm font-semibold text-slate-900">{segment.title}</p>
-                      <p className="mt-1 text-xs text-slate-600">{segment.description}</p>
-                    </article>
-                  );
-                })}
-              </div>
-            </section>
-            <section className={cardClassName}>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">Trusted by academic teams</p>
-                  <p className="text-xs text-slate-500">
-                    {isTeacherView
-                      ? "Built to operate and sell teacher workflows professionally."
-                      : "Built to improve student consistency and class follow-up."}
-                  </p>
-                </div>
-                <span className={statPillClassName}>
-                  Production-ready
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Institutions and teams
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {trustedInstitutions.map((name) => (
-                      <span
-                        key={name}
-                        className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700"
-                      >
-                        {name}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  {salesMetrics.map((metric) => (
-                    <article
-                      key={metric.label}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2.5"
-                    >
-                      <p className="text-[11px] uppercase tracking-wide text-slate-500">{metric.label}</p>
-                      <p className="text-lg font-bold text-slate-900">{metric.value}</p>
-                      <p className="text-[11px] text-slate-500">{metric.hint}</p>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            </section>
-
-        
-
-       
-
-            <section className={cardClassName}>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">Before vs After MultiCourses</p>
-                  <p className="text-xs text-slate-500">
-                    {isTeacherView
-                      ? "Communicate operational ROI for decision makers."
-                      : "Communicate learning clarity for students and families."}
-                  </p>
-                </div>
-                <span className={statPillClassName}>
-                  Clear outcomes
-                </span>
-              </div>
-
-              <div className="space-y-2">
-                {comparisonRows.map((row, index) => (
-                  <article key={`${row.before}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                    <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">Before</p>
-                      <p className="text-sm text-rose-800">{row.before}</p>
-                    </div>
-                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">With MultiCourses</p>
-                      <p className="text-sm text-emerald-800">{row.after}</p>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-       
-
-            {!isTeacherView && (
-              <section className={cardClassName}>
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">Student Experience</p>
-                    <p className="text-xs text-slate-500">
-                      Everything students need to stay focused and up to date.
-                    </p>
-                  </div>
-                  <span className={statPillClassName}>
-                    Academic flow
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                  <article className="rounded-xl border border-slate-200 bg-white p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Courses</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900">Switch context per class</p>
-                    <p className="mt-1 text-xs text-slate-600">
-                      Open a specific course and keep dashboard data aligned to that class.
-                    </p>
-                  </article>
-                  <article className="rounded-xl border border-slate-200 bg-white p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Grades</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900">Understand your current status</p>
-                    <p className="mt-1 text-xs text-slate-600">
-                      Quickly review progress and pending submissions before deadlines.
-                    </p>
-                  </article>
-                  <article className="rounded-xl border border-slate-200 bg-white p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Materials</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900">Open resources faster</p>
-                    <p className="mt-1 text-xs text-slate-600">
-                      Access files, slides, and activities from a cleaner, central workflow.
-                    </p>
-                  </article>
-                </div>
-              </section>
-            )}
-
-            <section className={softCardClassName}>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">FAQ</p>
-                  <p className="text-xs text-slate-500">
-                    {isTeacherView
-                      ? "Answers for plan, approval, and access lifecycle."
-                      : "Answers for learning workflow and student experience."}
-                  </p>
-                </div>
-                <span className={statPillClassName}>
-                  Quick answers
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <article className="rounded-xl border border-slate-200 bg-white p-3">
-                  <p className="text-sm font-semibold text-slate-900">
-                    {isTeacherView ? "When do teacher features get enabled?" : "How do I follow one course at a time?"}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-600">
-                    {isTeacherView
-                      ? "After admin approval and plan assignment. If payment or plan status changes, access updates safely."
-                      : "Select a course as active context. Dashboard cards and metrics align to that selected course."}
-                  </p>
-                </article>
-                <article className="rounded-xl border border-slate-200 bg-white p-3">
-                  <p className="text-sm font-semibold text-slate-900">
-                    {isTeacherView ? "Can I scale to more students later?" : "Can I see pending tasks quickly?"}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-600">
-                    {isTeacherView
-                      ? "Yes. Upgrade plan tiers to increase course and student capacity without losing your data."
-                      : "Yes. Pending work and progress indicators are exposed directly in your workspace cards."}
-                  </p>
-                </article>
-              </div>
-
-              <div className="mt-2 rounded-xl border border-slate-200 bg-white p-3">
-                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <Rocket className="h-3.5 w-3.5 text-slate-500" />
-                  Sales-ready message
-                </p>
-                <p className="mt-1 text-sm text-slate-700">
-                  {isTeacherView
-                    ? "Sell a managed, plan-based teacher workspace with clear limits, approval governance, and scalable operations."
-                    : "Offer students a focused academic cockpit where progress, deadlines, and materials stay in sync."}
-                </p>
-              </div>
-            </section>
-
-            <section className="relative overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-white via-emerald-50/40 to-sky-50 p-4 shadow-sm">
-              <div className="pointer-events-none absolute -left-14 -top-16 h-36 w-36 rounded-full bg-emerald-200/30" />
-              <div className="pointer-events-none absolute -bottom-20 -right-16 h-40 w-40 rounded-full bg-sky-200/30" />
-
-              <div className="relative grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.2fr)_280px]">
-                <div>
-                  <p className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-100/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
-                    <span aria-hidden="true">🐄</span>
-                    Donation campaign
-                  </p>
-                  <h3 className="mt-2 text-xl font-bold text-slate-900">Support MultiCourses</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-700">
-                    We are raising <span className="font-semibold">$5,000,000 COP</span> to bring our academic
-                    platform to institutions that need it, free of charge.
-                  </p>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-700">
-                    Your support helps more schools access a modern, engaging, and simple way to manage education.
-                  </p>
-
-                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <div className="rounded-xl border border-emerald-200 bg-white px-3 py-2.5">
-                      <p className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-                        <Target className="h-3.5 w-3.5" />
-                        Goal
-                      </p>
-                      <p className="text-sm font-bold text-slate-900">$5,000,000 COP</p>
-                    </div>
-                    <div className="rounded-xl border border-emerald-200 bg-white px-3 py-2.5">
-                      <p className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-                        <HeartPulse className="h-3.5 w-3.5" />
-                        Impact
-                      </p>
-                      <p className="text-sm font-bold text-slate-900">Free access for schools</p>
                     </div>
                   </div>
                 </div>
+              )}
+            </div>
+          </section>
+        )}
 
-                <aside className="rounded-xl border border-emerald-200 bg-white/90 p-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Take action</p>
-                  <p className="mt-1 text-sm text-slate-700">
-                    Every contribution helps us reach more students and teachers.
-                  </p> <br />
-                  <p className="mt-1 text-sm text-slate-700">
-                    Thanks for your contribution
-                  </p>
-                  <a
-                    href={VAKI_PAGE_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-emerald-500 bg-gradient-to-b from-emerald-500 to-emerald-600 px-5 text-sm font-semibold text-white shadow-[0_14px_28px_-16px_rgba(5,150,105,0.9)] transition hover:from-emerald-600 hover:to-emerald-700"
-                  >
-                    <span aria-hidden="true">🐄</span>
-                    DONATE
-                  </a>
-                </aside>
-              </div>
-            </section>
-
-            <footer className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
-              <p>© {new Date().getFullYear()} MultiCourses</p>
-              <p className="inline-flex items-center gap-1.5">
-                <Users2 className="h-3.5 w-3.5" />
-                {isTeacherView
-                  ? "Built for teachers, institutions, and administrators"
-                  : "Built for students, classes, and academic follow-up"}
-              </p>
-            </footer>
+        {/* Segments Section */}
+        <section className="mb-12 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <div className="mb-6 text-center">
+            <span className={statPillClassName}>Who it's for</span>
+            <h2 className="mt-3 text-3xl font-bold text-slate-900">
+              {isTeacherView ? "Perfect for educators and institutions" : "Designed for every type of learner"}
+            </h2>
           </div>
-        </div>
+
+          <div className="grid gap-6 sm:grid-cols-3">
+            {segments.map((segment) => {
+              const Icon = segment.icon;
+              return (
+                <div key={segment.title} className="rounded-xl border border-slate-200 bg-white p-6">
+                  <div className={`mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl ${segment.tone}`}>
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <h3 className="mb-2 text-lg font-semibold text-slate-900">{segment.title}</h3>
+                  <p className="text-sm text-slate-600">{segment.description}</p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Comparison Section */}
+        <section className="mb-12 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <div className="mb-6 text-center">
+            <span className={statPillClassName}>Before & After</span>
+            <h2 className="mt-3 text-3xl font-bold text-slate-900">The MultiCourses difference</h2>
+          </div>
+
+          <div className="space-y-4">
+            {comparisonRows.map((row, index) => (
+              <div key={index} className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-rose-700">Before</p>
+                  <p className="text-slate-800">{row.before}</p>
+                </div>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">With MultiCourses</p>
+                  <p className="text-slate-800">{row.after}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Metrics Section */}
+        <section className="mb-12 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <div className="mb-6 text-center">
+            <span className={statPillClassName}>By the numbers</span>
+            <h2 className="mt-3 text-3xl font-bold text-slate-900">Key metrics at a glance</h2>
+          </div>
+
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {salesMetrics.map((metric) => (
+              <div key={metric.label} className="text-center">
+                <p className="text-3xl font-bold text-slate-900">{metric.value}</p>
+                <p className="mt-1 text-sm font-medium text-slate-600">{metric.label}</p>
+                <p className="mt-1 text-xs text-slate-500">{metric.hint}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* FAQ Section */}
+        <section className="mb-12 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <div className="mb-6 text-center">
+            <span className={statPillClassName}>FAQ</span>
+            <h2 className="mt-3 text-3xl font-bold text-slate-900">Frequently asked questions</h2>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 p-4">
+              <h3 className="mb-2 font-semibold text-slate-900">
+                {isTeacherView ? "When do teacher features get enabled?" : "How do I follow one course at a time?"}
+              </h3>
+              <p className="text-sm text-slate-600">
+                {isTeacherView
+                  ? "After admin approval and plan assignment. If payment or plan status changes, access updates safely."
+                  : "Select a course as active context. Dashboard cards and metrics align to that selected course."}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 p-4">
+              <h3 className="mb-2 font-semibold text-slate-900">
+                {isTeacherView ? "Can I scale to more students later?" : "Can I see pending tasks quickly?"}
+              </h3>
+              <p className="text-sm text-slate-600">
+                {isTeacherView
+                  ? "Yes. Upgrade plan tiers to increase course and student capacity without losing your data."
+                  : "Yes. Pending work and progress indicators are exposed directly in your workspace cards."}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Donation Campaign */}
+        <section className="mb-12 rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-8 shadow-sm">
+          <div className="grid gap-6 lg:grid-cols-2 lg:gap-12">
+            <div>
+              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700">
+                <span>🐄</span>
+                Support our mission
+              </span>
+              <h2 className="mt-4 text-3xl font-bold text-slate-900">Help us reach more schools</h2>
+              <p className="mt-4 text-lg text-slate-600">
+                We're raising <span className="font-semibold">$5,000,000 COP</span> to bring our academic platform to 
+                institutions that need it, completely free of charge.
+              </p>
+              <div className="mt-6 flex gap-4">
+                <div className="rounded-lg border border-emerald-200 bg-white p-4">
+                  <Target className="mb-2 h-5 w-5 text-emerald-600" />
+                  <p className="text-sm font-medium text-slate-600">Goal</p>
+                  <p className="text-xl font-bold text-slate-900">$5,000,000 COP</p>
+                </div>
+                <div className="rounded-lg border border-emerald-200 bg-white p-4">
+                  <HeartPulse className="mb-2 h-5 w-5 text-emerald-600" />
+                  <p className="text-sm font-medium text-slate-600">Impact</p>
+                  <p className="text-xl font-bold text-slate-900">Free access</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col items-center justify-center rounded-xl border border-emerald-200 bg-white p-8 text-center">
+              <Rocket className="mb-4 h-12 w-12 text-emerald-600" />
+              <h3 className="mb-2 text-xl font-bold text-slate-900">Make a difference today</h3>
+              <p className="mb-6 text-slate-600">Every contribution helps us reach more students and teachers.</p>
+              <a
+                href={VAKI_PAGE_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-12 items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-8 text-sm font-semibold text-white shadow-lg shadow-emerald-200 hover:from-emerald-600 hover:to-emerald-700"
+              >
+                <span>🐄</span>
+                DONATE NOW
+              </a>
+            </div>
+          </div>
+        </section>
+
+        {/* Final CTA */}
+        <section className="rounded-2xl bg-gradient-to-r from-sky-600 to-indigo-600 p-12 text-center text-white shadow-xl">
+          <h2 className="mb-4 text-3xl font-bold">
+            {isTeacherView ? "Ready to transform your teaching?" : "Ready to excel in your studies?"}
+          </h2>
+          <p className="mb-8 text-lg text-white/90">
+            {isTeacherView
+              ? "Join hundreds of educators already using MultiCourses"
+              : "Join thousands of students staying organized with MultiCourses"}
+          </p>
+          <button
+            type="button"
+            onClick={handlePrimaryAction}
+            className="inline-flex h-12 items-center gap-2 rounded-xl bg-white px-8 text-sm font-semibold text-sky-600 shadow-lg transition hover:bg-slate-100"
+          >
+            {ctaPrimary}
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </section>
+
+        {/* Footer */}
+        <footer className="mt-12 flex flex-wrap items-center justify-between gap-4 border-t border-slate-200 pt-8 text-sm text-slate-500">
+          <p>© {new Date().getFullYear()} MultiCourses. All rights reserved.</p>
+          <p className="inline-flex items-center gap-2">
+            <Users2 className="h-4 w-4" />
+            {isTeacherView
+              ? "Built for teachers, institutions, and administrators"
+              : "Built for students, classes, and academic follow-up"}
+          </p>
+        </footer>
       </div>
 
+      {/* Audience Selection Modal */}
       {!audience && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-[2px]">
-          <div className="w-full max-w-[760px] rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_24px_55px_-28px_rgba(15,23,42,0.65)] sm:p-5">
-            <p className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-              <Sparkles className="h-3.5 w-3.5" />
-              Welcome to MultiCourses
-            </p>
-            <h2 className="mt-2 text-2xl font-bold text-slate-900">You are...</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Choose your role to open the right landing experience.
-            </p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 shadow-2xl">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-4 py-2">
+              <Sparkles className="h-4 w-4 text-sky-700" />
+              <span className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+                Welcome to MultiCourses
+              </span>
+            </div>
+            
+            <h2 className="mb-2 text-3xl font-bold text-slate-900">How will you use MultiCourses?</h2>
+            <p className="mb-6 text-slate-600">Choose your role to see the right experience for you.</p>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={() => handleAudienceChange("teacher")}
-                className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-left transition hover:border-sky-300 hover:bg-sky-100/70"
+                className="group rounded-xl border-2 border-sky-200 bg-sky-50 p-6 text-left transition hover:border-sky-300 hover:bg-sky-100"
               >
-                <p className="inline-flex items-center gap-2 text-sm font-bold text-sky-800">
-                  <GraduationCap className="h-4 w-4" />
-                  Teacher
-                </p>
-                <p className="mt-1 text-xs text-slate-700">
-                  I want to manage courses, assessments, and teacher plan access.
+                <GraduationCap className="mb-4 h-8 w-8 text-sky-700" />
+                <h3 className="mb-2 text-xl font-bold text-sky-800 group-hover:text-sky-900">I'm a Teacher</h3>
+                <p className="text-sm text-slate-700">
+                  Manage courses, assessments, and track student progress with professional tools.
                 </p>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleAudienceChange("student")}
-                className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-left transition hover:border-emerald-300 hover:bg-emerald-100/70"
+                className="group rounded-xl border-2 border-emerald-200 bg-emerald-50 p-6 text-left transition hover:border-emerald-300 hover:bg-emerald-100"
               >
-                <p className="inline-flex items-center gap-2 text-sm font-bold text-emerald-800">
-                  <BookOpen className="h-4 w-4" />
-                  Student
-                </p>
-                <p className="mt-1 text-xs text-slate-700">
-                  I want to follow courses, grades, materials, and deadlines.
+                <BookOpen className="mb-4 h-8 w-8 text-emerald-700" />
+                <h3 className="mb-2 text-xl font-bold text-emerald-800 group-hover:text-emerald-900">I'm a Student</h3>
+                <p className="text-sm text-slate-700">
+                  Follow courses, track grades, access materials, and never miss a deadline.
                 </p>
               </button>
             </div>

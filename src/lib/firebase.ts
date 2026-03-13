@@ -1,7 +1,7 @@
 // src/lib/firebase.ts - ARCHIVO CORREGIDO
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { initializeFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
 import { getStorage } from "firebase/storage";
 
@@ -18,13 +18,23 @@ const firebaseConfig = {
 // Inicializar Firebase
 const firebaseApp = initializeApp(firebaseConfig);
 
+const shouldForceLongPolling = (() => {
+  if (typeof navigator === "undefined") return false;
+  const userAgent = navigator.userAgent || "";
+  const isSafari =
+    /Safari/i.test(userAgent) &&
+    !/Chrome|Chromium|CriOS|Android/i.test(userAgent);
+  return isSafari;
+})();
+
 // Obtener servicios
 export const firebaseAuth = getAuth(firebaseApp);
-export const firebaseDB = initializeFirestore(firebaseApp, {
-  // Improves compatibility in Safari / strict privacy environments.
-  experimentalAutoDetectLongPolling: true,
-  useFetchStreams: false,
-});
+export const firebaseDB = shouldForceLongPolling
+  ? initializeFirestore(firebaseApp, {
+      experimentalForceLongPolling: true,
+      useFetchStreams: false,
+    })
+  : getFirestore(firebaseApp);
 export const firebaseStorage = getStorage(firebaseApp); // <-- AÑADIR ESTO
 export const firebaseFunctions = getFunctions(firebaseApp);
 

@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAcademic } from "@/contexts/AcademicContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { getAccessibleCoursesForUser } from "@/lib/courseAccess";
 import { unitService, weekService, slideService } from "@/lib/unitService";
 import { notificationService } from "@/lib/services/notificationService";
 import { isNotificationAutomationEnabled } from "@/lib/services/notificationAutomation";
@@ -16,22 +17,18 @@ import {
   Trash2,
   X,
   Save,
-  Maximize2,
   BookOpen,
   Calendar,
   FileText,
   Loader2,
-  AlertTriangle, 
+  AlertTriangle,
   Search,
-  Eye,
   Sparkles,
-  Link as LinkIcon,
   Copy,
-  Play,
-  Clock,
   Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TEACHER_ONBOARDING_COURSE_CODE } from "@/lib/services/teacherOnboardingService";
 
 const modalInputClass =
   "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100";
@@ -45,19 +42,21 @@ export default function SlidesPage() {
   const { user } = useAuth();
   const { courses, units: contextUnits, selectedCourseId, setSelectedCourseId } = useAcademic();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [expandedUnits, setExpandedUnits] = useState<string[]>([]);
   const [expandedWeeks, setExpandedWeeks] = useState<string[]>([]);
-  const [selectedSlide, setSelectedSlide] = useState<string | null>(null);
   const [units, setUnits] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
+  const [selectedUnitFilter, setSelectedUnitFilter] = useState("");
+  const [showCourseStructure, setShowCourseStructure] = useState(false);
   const [courseBackfillExecuted, setCourseBackfillExecuted] = useState<string[]>([]);
+  const latestUnitsRequestRef = useRef(0);
 
   const [showUnitModal, setShowUnitModal] = useState(false);
   const [showWeekModal, setShowWeekModal] = useState(false);
   const [showSlideModal, setShowSlideModal] = useState(false);
+  const [creatingSlide, setCreatingSlide] = useState(false);
 
   const [unitForm, setUnitForm] = useState({
     name: "",
@@ -78,18 +77,47 @@ export default function SlidesPage() {
   });
 
   const isTeacher = user?.role === "docente";
+  const isAdmin = user?.role === "admin";
 
   const userCourses = useMemo(() => {
     if (!user) return [];
-    return isTeacher
-      ? courses.filter((c) => c.teacherId === user.id)
-      : courses.filter((c) => c.enrolledStudents.includes(user.id));
-  }, [courses, user, isTeacher]);
+    return getAccessibleCoursesForUser(courses, user, {
+      includeAllForAdmin: isAdmin,
+      includeEnrolledForTeacher: isTeacher,
+    });
+  }, [courses, user, isAdmin, isTeacher]);
 
   const selectedCourse = useMemo(
     () => userCourses.find((c) => c.id === selectedCourseId),
     [userCourses, selectedCourseId],
   );
+  const selectedCourseRecord = selectedCourse
+    ? (selectedCourse as unknown as Record<string, unknown>)
+    : null;
+  const isOnboardingCourse =
+    String(selectedCourse?.code || "")
+      .trim()
+      .toUpperCase() === TEACHER_ONBOARDING_COURSE_CODE;
+  const isMandatoryCourse =
+    isOnboardingCourse ||
+    Boolean(
+      selectedCourseRecord?.isMandatory ||
+        selectedCourseRecord?.mandatory ||
+        selectedCourseRecord?.required ||
+        selectedCourseRecord?.isRequired ||
+        selectedCourseRecord?.isMandatoryForTeachers ||
+        selectedCourseRecord?.mandatoryForTeachers ||
+        selectedCourseRecord?.mandatoryTeacherCourse ||
+        selectedCourseRecord?.requiredForTeachers ||
+        selectedCourseRecord?.requiredForDocentes ||
+        selectedCourseRecord?.obligatorio ||
+        selectedCourseRecord?.obligatorioDocentes ||
+        selectedCourseRecord?.obligatorioParaDocentes ||
+        selectedCourseRecord?.onboarding ||
+        selectedCourseRecord?.isOnboarding,
+    );
+  const canManageContent =
+    isAdmin || (isTeacher && selectedCourse?.teacherId === user?.id && !isMandatoryCourse);
 
   useEffect(() => {
     if (userCourses.length === 0) {
@@ -111,30 +139,52 @@ export default function SlidesPage() {
     }
   }, [contextUnits, selectedCourseId]);
 
-  const handleCourseChange = (courseId: string) => {
-    setSelectedCourseId(courseId);
+  useEffect(() => {
+    const targetCourseId = searchParams.get("courseId")?.trim();
+    if (!targetCourseId) return;
+    if (targetCourseId === selectedCourseId) return;
+    if (!userCourses.some((course) => course.id === targetCourseId)) return;
 
-    setSelectedSlide(null);
+    setSelectedCourseId(targetCourseId);
+  }, [searchParams, selectedCourseId, setSelectedCourseId, userCourses]);
+
+  const handleCourseChange = (courseId: string) => {
+    latestUnitsRequestRef.current += 1;
+    setSelectedCourseId(courseId);
+    setSelectedUnitFilter("");
+    setShowCourseStructure(false);
+
     setExpandedUnits([]);
     setExpandedWeeks([]);
     setUnits([]);
+    setLoading(false);
   };
 
-  const loadUnits = async () => {
-    if (!selectedCourseId) return;
+  const loadUnits = async (courseIdOverride?: string) => {
+    const targetCourseId = String(courseIdOverride || selectedCourseId || "").trim();
+    if (!targetCourseId) return;
 
+    const requestId = latestUnitsRequestRef.current + 1;
+    latestUnitsRequestRef.current = requestId;
     setLoading(true);
     try {
-      const loadedUnits = await unitService.getByCourse(selectedCourseId);
+      const loadedUnits = await unitService.getByCourse(targetCourseId);
+      if (requestId !== latestUnitsRequestRef.current) return;
       setUnits(loadedUnits);
     } catch {
     } finally {
+      if (requestId !== latestUnitsRequestRef.current) return;
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (!isTeacher || !selectedCourseId) return;
+    latestUnitsRequestRef.current += 1;
+    setLoading(false);
+  }, [selectedCourseId]);
+
+  useEffect(() => {
+    if (!canManageContent || !selectedCourseId) return;
     if (courseBackfillExecuted.includes(selectedCourseId)) return;
 
     let mounted = true;
@@ -143,13 +193,13 @@ export default function SlidesPage() {
       try {
         await unitService.backfillCourseContentCourseIds(selectedCourseId);
       } catch {
-      } finally {
-        if (!mounted) return;
-        setCourseBackfillExecuted((prev) =>
-          prev.includes(selectedCourseId) ? prev : [...prev, selectedCourseId],
-        );
-        await loadUnits();
       }
+
+      if (!mounted) return;
+      setCourseBackfillExecuted((prev) =>
+        prev.includes(selectedCourseId) ? prev : [...prev, selectedCourseId],
+      );
+      await loadUnits(selectedCourseId);
     };
 
     void runBackfill();
@@ -157,7 +207,36 @@ export default function SlidesPage() {
     return () => {
       mounted = false;
     };
-  }, [courseBackfillExecuted, isTeacher, selectedCourseId]);
+  }, [canManageContent, courseBackfillExecuted, selectedCourseId]);
+
+  useEffect(() => {
+    const targetCourseId = searchParams.get("courseId")?.trim();
+    const targetWeekId = searchParams.get("weekId")?.trim();
+    const targetSlideId = searchParams.get("slideId")?.trim();
+
+    if (!targetWeekId && !targetSlideId) return;
+    if (targetCourseId && targetCourseId !== selectedCourseId) return;
+
+    for (const unit of units) {
+      for (const week of unit.weeks || []) {
+        const weekMatches = targetWeekId ? week.id === targetWeekId : false;
+        const matchedSlide = targetSlideId
+          ? (week.slides || []).find((slide: any) => slide.id === targetSlideId)
+          : null;
+
+        if (!weekMatches && !matchedSlide) continue;
+
+        setExpandedUnits((prev) =>
+          prev.includes(unit.id) ? prev : [...prev, unit.id],
+        );
+        setExpandedWeeks((prev) =>
+          prev.includes(week.id) ? prev : [...prev, week.id],
+        );
+
+        return;
+      }
+    }
+  }, [searchParams, selectedCourseId, units]);
 
   const toggleUnit = (unitId: string) => {
     setExpandedUnits((prev) =>
@@ -191,6 +270,7 @@ export default function SlidesPage() {
         (week.slides || []).forEach((slide: any) => {
           slides.push({
             ...slide,
+            unitId: unit.id,
             weekNumber: week.number,
             weekTopic: week.topic,
             unitName: unit.name,
@@ -210,82 +290,10 @@ export default function SlidesPage() {
         slide.title.toLowerCase().includes(searchLower) ||
         slide.description?.toLowerCase().includes(searchLower) ||
         slide.unitName.toLowerCase().includes(searchLower) ||
-        slide.weekTopic?.toLowerCase().includes(searchLower),
+        slide.weekTopic?.toLowerCase().includes(searchLower) ||
+        slide.canvaUrl?.toLowerCase().includes(searchLower),
     );
   }, [allSlides, searchTerm]);
-
-  const selectedSlideData = useMemo(() => {
-    if (!selectedSlide) return null;
-
-    for (const unit of units) {
-      for (const week of unit.weeks || []) {
-        const slides = week.slides || [];
-        const slide = slides.find((s: any) => s.id === selectedSlide);
-        if (slide) return { slide, week, unit };
-      }
-    }
-    return null;
-  }, [selectedSlide, units]);
-
-  useEffect(() => {
-    if (selectedSlideData?.slide) {
-      const slide = selectedSlideData.slide;
-      const recent = {
-        id: slide.id,
-        title: slide.title,
-        unit: selectedSlideData.unit.name,
-        week: selectedSlideData.week.number,
-        timestamp: new Date().toISOString(),
-      };
-
-      setRecentlyViewed((prev) => {
-        const filtered = prev.filter((s) => s.id !== slide.id);
-        return [recent, ...filtered].slice(0, 5);
-      });
-    }
-  }, [selectedSlideData]);
-
-  const getCanvaEmbedUrl = (canvaUrl: string): string => {
-    try {
-      if (!canvaUrl || typeof canvaUrl !== "string") return "";
-
-      const cleanUrl = canvaUrl.trim().replace(/\s+/g, "");
-      if (!cleanUrl) return "";
-
-      if (cleanUrl.includes("?embed")) return cleanUrl;
-
-      if (
-        cleanUrl.includes("canva.com/design/") &&
-        cleanUrl.includes("/view")
-      ) {
-        return cleanUrl.includes("?")
-          ? cleanUrl.replace("/view?", "/view?embed&")
-          : cleanUrl + "?embed";
-      }
-
-      if (cleanUrl.includes("canva.com/design/")) {
-        const designMatch = cleanUrl.match(/canva\.com\/design\/([^/?]+)/);
-        if (designMatch?.[1]) {
-          return `https://www.canva.com/design/${designMatch[1]}/view?embed`;
-        }
-      }
-
-      return cleanUrl;
-    } catch {
-      return "";
-    }
-  };
-
-  const getCanvaNormalUrl = (canvaUrl: string): string => {
-    try {
-      if (!canvaUrl) return "";
-      return canvaUrl.includes("?embed")
-        ? canvaUrl.replace("?embed", "")
-        : canvaUrl;
-    } catch {
-      return canvaUrl || "";
-    }
-  };
 
   const isValidUrl = (urlString: string): boolean => {
     try {
@@ -295,6 +303,180 @@ export default function SlidesPage() {
       return false;
     }
   };
+
+  const normalizeResourceUrl = (value: string): string => {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return "";
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return `https://${trimmed}`;
+  };
+
+  const getResourceHost = (value: string): string => {
+    const normalized = normalizeResourceUrl(value);
+    if (!isValidUrl(normalized)) return "Invalid link";
+
+    try {
+      return new URL(normalized).hostname.replace(/^www\./, "");
+    } catch {
+      return "Invalid link";
+    }
+  };
+
+  const getCompactResourceLabel = (value: string): string => {
+    const original = String(value || "").trim();
+    if (!original) return "No link provided";
+
+    const normalized = normalizeResourceUrl(original);
+    const compact = (text: string, max = 42) =>
+      text.length <= max ? text : `${text.slice(0, max - 1)}...`;
+
+    if (!isValidUrl(normalized)) return compact(original);
+
+    try {
+      const url = new URL(normalized);
+      const host = url.hostname.replace(/^www\./, "");
+      const path = url.pathname.replace(/\/+$/, "");
+      return compact(`${host}${path}`);
+    } catch {
+      return compact(original);
+    }
+  };
+
+  const sortedSlides = useMemo(
+    () =>
+      [...filteredSlides].sort((a, b) => {
+        const unitCompare = String(a.unitName || "").localeCompare(String(b.unitName || ""));
+        if (unitCompare !== 0) return unitCompare;
+
+        const weekA = Number(a.weekNumber) || 0;
+        const weekB = Number(b.weekNumber) || 0;
+        if (weekA !== weekB) return weekA - weekB;
+
+        const orderA = Number(a.order) || 0;
+        const orderB = Number(b.order) || 0;
+        if (orderA !== orderB) return orderA - orderB;
+
+        return String(a.title || "").localeCompare(String(b.title || ""));
+      }),
+    [filteredSlides],
+  );
+
+  const unitFilterOptions = useMemo(
+    () =>
+      [...units]
+        .sort((a: any, b: any) => {
+          const bTime = new Date(b?.createdAt || b?.id || 0).getTime();
+          const aTime = new Date(a?.createdAt || a?.id || 0).getTime();
+          return bTime - aTime;
+        })
+        .map((unit: any) => ({
+          id: String(unit?.id || ""),
+          name: String(unit?.name || "Without unit"),
+        })),
+    [units],
+  );
+
+  useEffect(() => {
+    if (!selectedUnitFilter) return;
+    const filterStillAvailable = unitFilterOptions.some((unit) => unit.id === selectedUnitFilter);
+    if (!filterStillAvailable) {
+      setSelectedUnitFilter("");
+    }
+  }, [selectedUnitFilter, unitFilterOptions]);
+
+  const unitRecencyRank = useMemo(() => {
+    const rank = new Map<string, number>();
+
+    [...units]
+      .sort((a: any, b: any) => {
+        const bTime = new Date(b?.createdAt || b?.id || 0).getTime();
+        const aTime = new Date(a?.createdAt || a?.id || 0).getTime();
+        return bTime - aTime;
+      })
+      .forEach((unit: any, index: number) => {
+        const unitId = String(unit?.id || "").trim();
+        if (unitId) rank.set(unitId, index);
+      });
+
+    return rank;
+  }, [units]);
+
+  const slidesGroupedByUnit = useMemo(() => {
+    const grouped = new Map<
+      string,
+      { unitId: string; unitName: string; slides: any[] }
+    >();
+
+    sortedSlides.forEach((slide) => {
+      const unitName =
+        String(slide.unitName || "Without unit").trim() || "Without unit";
+      const unitId = String(slide.unitId || "").trim() || `unknown:${unitName}`;
+
+      if (!grouped.has(unitId)) {
+        grouped.set(unitId, { unitId, unitName, slides: [] });
+      }
+      grouped.get(unitId)?.slides.push(slide);
+    });
+
+    const fallbackRank = unitRecencyRank.size + 1000;
+
+    return Array.from(grouped.values()).sort((a, b) => {
+      const rankA = unitRecencyRank.get(a.unitId) ?? fallbackRank;
+      const rankB = unitRecencyRank.get(b.unitId) ?? fallbackRank;
+      if (rankA !== rankB) return rankA - rankB;
+      return a.unitName.localeCompare(b.unitName);
+    });
+  }, [sortedSlides, unitRecencyRank]);
+
+  const visibleSlidesByUnit = useMemo(() => {
+    if (!selectedUnitFilter) return slidesGroupedByUnit;
+    return slidesGroupedByUnit.filter((group) => group.unitId === selectedUnitFilter);
+  }, [selectedUnitFilter, slidesGroupedByUnit]);
+
+  const visibleSlidesCount = useMemo(
+    () =>
+      visibleSlidesByUnit.reduce(
+        (acc, group) => acc + (Array.isArray(group.slides) ? group.slides.length : 0),
+        0,
+      ),
+    [visibleSlidesByUnit],
+  );
+
+  const selectedUnitFilterLabel = useMemo(
+    () => unitFilterOptions.find((unit) => unit.id === selectedUnitFilter)?.name || "",
+    [selectedUnitFilter, unitFilterOptions],
+  );
+
+  const emptySlidesMessage = useMemo(() => {
+    if (allSlides.length === 0) {
+      return canManageContent
+        ? "Create your first slide to populate this library."
+        : "Your teacher has not published slides yet.";
+    }
+
+    if (selectedUnitFilter && searchTerm) {
+      return `No results in ${selectedUnitFilterLabel || "the selected unit"} for the current search term.`;
+    }
+
+    if (selectedUnitFilter) {
+      return `No slides found in ${selectedUnitFilterLabel || "the selected unit"}. Try All units.`;
+    }
+
+    if (searchTerm) {
+      return "No results for the current search term.";
+    }
+
+    return "No slides match the active filters.";
+  }, [allSlides.length, canManageContent, searchTerm, selectedUnitFilter, selectedUnitFilterLabel]);
+
+  const linkedSlidesCount = useMemo(
+    () =>
+      allSlides.filter((slide) => {
+        const normalized = normalizeResourceUrl(slide.canvaUrl || "");
+        return isValidUrl(normalized);
+      }).length,
+    [allSlides],
+  );
 
   const handleCreateUnit = async () => {
     if (!selectedCourseId) return;
@@ -351,8 +533,9 @@ export default function SlidesPage() {
   };
 
   const handleCreateSlide = async () => {
-    if (!slideForm.weekId || !selectedCourseId || !user?.id) return;
+    if (!slideForm.weekId || !selectedCourseId || !user?.id || creatingSlide) return;
 
+    setCreatingSlide(true);
     try {
       await slideService.create(slideForm);
 
@@ -384,6 +567,9 @@ export default function SlidesPage() {
       });
       await loadUnits();
     } catch {}
+    finally {
+      setCreatingSlide(false);
+    }
   };
 
   const closeUnitModal = () => {
@@ -437,40 +623,8 @@ export default function SlidesPage() {
     try {
       await slideService.delete(slideId);
       await loadUnits();
-      if (selectedSlide === slideId) setSelectedSlide(null);
     } catch {}
   };
-
-  const toggleFullscreen = () => {
-    const embedContainer = document.getElementById("canva-embed-container");
-    if (embedContainer) {
-      if (!document.fullscreenElement) {
-        embedContainer.requestFullscreen().then(() => {
-          setIsFullscreen(true);
-        });
-      } else {
-        document.exitFullscreen().then(() => {
-          setIsFullscreen(false);
-        });
-      }
-    }
-  };
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-    };
-  }, []);
-
-  const embedUrl = selectedSlideData
-    ? getCanvaEmbedUrl(selectedSlideData.slide.canvaUrl)
-    : "";
-  const hasValidEmbedUrl = embedUrl && isValidUrl(embedUrl);
   const totalWeeks = useMemo(
     () =>
       units.reduce(
@@ -508,78 +662,77 @@ export default function SlidesPage() {
 
         <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
-              <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
-              <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
-
-              <div className="relative z-10">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+              <div>
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1">
                       <Sparkles className="h-3.5 w-3.5" />
-                      Slides Workspace
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
+                        Slides Workspace
+                      </span>
                     </div>
-                    <h2 className="mt-3 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
+                    <h1 className="mt-2 text-xl font-bold text-slate-900 sm:text-2xl">
                       Presentation control center
-                    </h2>
-                    <p className="mt-1.5 max-w-3xl text-sm text-slate-600">
-                      Organize units and weeks, preview Canva decks, and keep classroom material structured.
+                    </h1>
+                    <p className="mt-1 max-w-3xl text-sm text-slate-600">
+                      Organize units and weeks, and share slides from any link source in one place.
                     </p>
                   </div>
-                  {isTeacher && (
+                  {canManageContent && (
                     <button
                       type="button"
                       onClick={() => setShowUnitModal(true)}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
                     >
-                      <Plus className="h-4 w-4" />
+                      <Plus className="h-4 w-4 text-sky-600" />
                       New unit
                     </button>
                   )}
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <BookOpen className="h-4 w-4" />
                       </div>
-                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{units.length}</p>
+                      <p className="shrink-0 text-lg font-bold leading-tight text-slate-900">{units.length}</p>
                     </div>
-                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Units</p>
+                    <p className="mt-1 text-[11px] uppercase tracking-wide text-slate-500">Units</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                         <Calendar className="h-4 w-4" />
                       </div>
-                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{totalWeeks}</p>
+                      <p className="shrink-0 text-lg font-bold leading-tight text-slate-900">{totalWeeks}</p>
                     </div>
-                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Weeks</p>
+                    <p className="mt-1 text-[11px] uppercase tracking-wide text-slate-500">Weeks</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                         <Presentation className="h-4 w-4" />
                       </div>
-                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{allSlides.length}</p>
+                      <p className="shrink-0 text-lg font-bold leading-tight text-slate-900">{allSlides.length}</p>
                     </div>
-                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Slides</p>
+                    <p className="mt-1 text-[11px] uppercase tracking-wide text-slate-500">Slides</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
-                        <Clock className="h-4 w-4" />
+                        <ExternalLink className="h-4 w-4" />
                       </div>
-                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{recentlyViewed.length}</p>
+                      <p className="shrink-0 text-lg font-bold leading-tight text-slate-900">{linkedSlidesCount}</p>
                     </div>
-                    <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Recent</p>
+                    <p className="mt-1 text-[11px] uppercase tracking-wide text-slate-500">Valid links</p>
                   </div>
                 </div>
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div className="flex-1 flex flex-col sm:flex-row gap-4">
                   <div className="flex-1">
@@ -601,6 +754,21 @@ export default function SlidesPage() {
                         </button>
                       )}
                     </div>
+                  </div>
+                  <div className="relative min-w-[180px]">
+                    <select
+                      value={selectedUnitFilter}
+                      onChange={(e) => setSelectedUnitFilter(e.target.value)}
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    >
+                      <option value="">All units</option>
+                      {unitFilterOptions.map((unit) => (
+                        <option key={unit.id} value={unit.id}>
+                          {unit.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   </div>
                   <div className="relative min-w-[180px]">
                     <select
@@ -626,42 +794,49 @@ export default function SlidesPage() {
                     <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   </div>
                 </div>
+                {selectedCourseId && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCourseStructure((prev) => !prev)}
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  >
+                    {showCourseStructure ? "Hide structure" : "Show structure"}
+                  </button>
+                )}
               </div>
 
-              {searchTerm && filteredSlides.length > 0 && (
+              {(searchTerm || selectedUnitFilter) && visibleSlidesCount > 0 && (
                 <div className="mt-4 pt-4 border-t border-slate-200">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-sky-600">
-                        Found {filteredSlides.length} slide
-                        {filteredSlides.length !== 1 ? "s" : ""}
+                        Showing {visibleSlidesCount} slide
+                        {visibleSlidesCount !== 1 ? "s" : ""}
                       </span>
-                      {selectedSlideData && (
-                        <span className="text-xs text-slate-500">
-                          • Currently viewing: {selectedSlideData.slide.title}
-                        </span>
-                      )}
                     </div>
                     <button
-                      onClick={() => setSearchTerm("")}
+                      onClick={() => {
+                        setSearchTerm("");
+                        setSelectedUnitFilter("");
+                      }}
                       className="text-sm text-slate-600 hover:text-slate-800 font-medium"
                     >
-                      Clear search
+                      Clear filters
                     </button>
                   </div>
                 </div>
               )}
 
-              {searchTerm && filteredSlides.length === 0 && allSlides.length > 0 && (
+              {(searchTerm || selectedUnitFilter) && visibleSlidesCount === 0 && allSlides.length > 0 && (
                 <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3">
                   <p className="text-sm font-semibold text-slate-700">No matching slides</p>
-                  <p className="text-xs text-slate-500">Try another term or clear the search.</p>
+                  <p className="text-xs text-slate-500">Try another term, another unit, or clear the filters.</p>
                 </div>
               )}
             </section>
 
         {!selectedCourseId && userCourses.length === 0 && (
-          <div className="bg-white border border-slate-100 rounded-2xl p-8 text-center shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
             <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-slate-100 flex items-center justify-center">
               <Presentation className="h-10 w-10 text-slate-400" />
             </div>
@@ -669,79 +844,44 @@ export default function SlidesPage() {
               No courses available
             </h3>
             <p className="text-slate-500 max-w-md mx-auto mb-6">
-              {isTeacher
-                ? "You have no courses assigned as a teacher. Contact the administrator."
-                : "You are not enrolled in any course. Contact your teacher."}
+              {isAdmin
+                ? "No courses created yet. Create a course to start organizing slides."
+                : isTeacher
+                  ? "You have no courses assigned as a teacher. Contact the administrator."
+                  : "You are not enrolled in any course. Contact your teacher."}
             </p>
-            {isTeacher && (
+            {(isTeacher || isAdmin) && (
               <button
                 type="button"
                 onClick={() => navigate("/courses/create")}
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 text-white font-medium hover:shadow-lg transition-all duration-300"
               >
                 <Plus className="h-4 w-4" />
-                Request Course Assignment
+                {isAdmin ? "Create course" : "Request Course Assignment"}
               </button>
             )}
           </div>
         )}
 
         {selectedCourseId && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-1">
-              <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+          <div className="space-y-6">
+            {showCourseStructure && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-5">
                   <div className="flex items-center gap-3">
                     <div className="h-8 w-8 rounded-xl bg-sky-100 flex items-center justify-center">
                       <FolderOpen className="h-4 w-4 text-sky-600" />
                     </div>
                     <div>
-                      <h3 className="font-bold text-lg text-slate-900">
+                      <h3 className="text-base font-bold text-slate-900">
                         Course Content
                       </h3>
-                      <p className="text-sm text-slate-500 mt-1">
+                      <p className="mt-1 text-xs text-slate-500">
                         {selectedCourse?.name}
                       </p>
                     </div>
                   </div>
                 </div>
-
-                {!isTeacher && recentlyViewed.length > 0 && (
-                  <div className="mb-5 hidden sm:block">
-                    <h4 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-sky-500" />
-                      Recently Viewed
-                    </h4>
-                    <div className="space-y-2">
-                      {recentlyViewed.slice(0, 3).map((slide) => (
-                        <button
-                          key={slide.id}
-                          onClick={() => setSelectedSlide(slide.id)}
-                          className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-100 border border-sky-100 hover:border-sky-200 transition-all duration-300 group"
-                        >
-                          <div className="h-8 w-8 rounded-lg bg-sky-600 flex items-center justify-center">
-                            <Eye className="h-4 w-4 text-white" />
-                          </div>
-                          <div className="flex-1 text-left">
-                            <p className="text-xs font-semibold text-slate-900 truncate">
-                              {slide.title}
-                            </p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="text-xs text-slate-500">
-                                Unit {slide.unit}
-                              </span>
-                              <span className="text-xs text-slate-500">•</span>
-                              <span className="text-xs text-slate-500">
-                                Week {slide.week}
-                              </span>
-                            </div>
-                          </div>
-                          <ChevronRight className="h-4 w-4 text-sky-400 group-hover:translate-x-1 transition-transform" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 <div className=" pr-2">
                   {units.length === 0 ? (
@@ -752,7 +892,7 @@ export default function SlidesPage() {
                       <p className="text-slate-500 font-medium">
                         No content available
                       </p>
-                      {isTeacher && (
+                      {canManageContent && (
                         <button
                           onClick={() => setShowUnitModal(true)}
                           className="inline-flex items-center gap-2 mt-4 px-4 py-2.5 bg-sky-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
@@ -813,7 +953,7 @@ export default function SlidesPage() {
                                   )}
                                 />
                               </button>
-                              {isTeacher && (
+                              {canManageContent && (
                                 <div className="flex gap-1 ml-3">
                                   <button
                                     onClick={() => {
@@ -848,7 +988,7 @@ export default function SlidesPage() {
                                     <p className="text-xs text-slate-500">
                                       No weeks available
                                     </p>
-                                    {isTeacher && (
+                                    {canManageContent && (
                                       <button
                                         onClick={() => {
                                           setWeekForm({
@@ -875,7 +1015,7 @@ export default function SlidesPage() {
                                         key={week.id}
                                         className="space-y-2"
                                       >
-                                        <div className="flex items-center justify-between px-3 py-2 bg-white rounded-lg border border-slate-100 hover:border-slate-200 transition-colors">
+                                        <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 transition-colors hover:border-slate-300">
                                           <div className="flex items-center gap-2">
                                             <button
                                               onClick={() =>
@@ -902,7 +1042,7 @@ export default function SlidesPage() {
                                               </p>
                                             </div>
                                           </div>
-                                          {isTeacher && (
+                                          {canManageContent && (
                                             <div className="flex gap-1">
                                               <button
                                                 onClick={() =>
@@ -954,7 +1094,7 @@ export default function SlidesPage() {
                                                 <p className="text-xs text-slate-500">
                                                   No slides available
                                                 </p>
-                                                {isTeacher && (
+                                                {canManageContent && (
                                                   <button
                                                     onClick={() => {
                                                       setSlideForm({
@@ -979,60 +1119,55 @@ export default function SlidesPage() {
                                                   (a: any, b: any) =>
                                                     b.order - a.order,
                                                 )
-                                                .map((slide: any) => (
-                                                  <div
-                                                    key={slide.id}
-                                                    className="flex items-center gap-2 bg-white rounded-lg border border-slate-100 hover:border-sky-200 transition-all duration-300 group"
-                                                  >
-                                                    <button
-                                                      onClick={() =>
-                                                        setSelectedSlide(
-                                                          slide.id,
-                                                        )
-                                                      }
-                                                      className={cn(
-                                                        "flex-1 flex items-center gap-3 px-3 py-2 rounded-l-lg text-left transition-all duration-300",
-                                                        selectedSlide ===
-                                                          slide.id
-                                                          ? "bg-sky-50 border-r-2 border-sky-500"
-                                                          : "hover:bg-sky-50/50",
-                                                      )}
+                                                .map((slide: any) => {
+                                                  const resourceUrl = normalizeResourceUrl(slide.canvaUrl || "");
+                                                  const hasValidResource = isValidUrl(resourceUrl);
+
+                                                  return (
+                                                    <div
+                                                      key={slide.id}
+                                                      className="group flex items-center gap-2 rounded-lg border border-slate-200 bg-white transition-colors hover:border-sky-200"
                                                     >
-                                                      <Presentation
-                                                        className={cn(
-                                                          "h-4 w-4 shrink-0 transition-colors",
-                                                          selectedSlide ===
-                                                            slide.id
-                                                            ? "text-sky-600"
-                                                            : "text-slate-600 group-hover:text-sky-500",
-                                                        )}
-                                                      />
-                                                      <div className="flex-1 min-w-0">
-                                                        <span className="text-xs font-medium text-slate-900 truncate block">
-                                                          {slide.title}
-                                                        </span>
-                                                        {slide.description && (
-                                                          <p className="text-xs text-slate-500 truncate mt-0.5">
-                                                            {slide.description}
-                                                          </p>
-                                                        )}
+                                                      <div className="flex-1 flex items-center gap-3 px-3 py-2">
+                                                        <Presentation className="h-4 w-4 shrink-0 text-slate-600 group-hover:text-sky-500 transition-colors" />
+                                                        <div className="flex-1 min-w-0">
+                                                          <span className="text-xs font-medium text-slate-900 truncate block">
+                                                            {slide.title}
+                                                          </span>
+                                                          {slide.description && (
+                                                            <p className="text-xs text-slate-500 truncate mt-0.5">
+                                                              {slide.description}
+                                                            </p>
+                                                          )}
+                                                        </div>
                                                       </div>
-                                                    </button>
-                                                    {isTeacher && (
-                                                      <button
-                                                        onClick={() =>
-                                                          handleDeleteSlide(
-                                                            slide.id,
-                                                          )
-                                                        }
-                                                        className="p-2 text-red-600 hover:bg-red-50 rounded-r-lg transition-colors hover:scale-110"
-                                                        title="Delete slide"
-                                                      >
-                                                        <Trash2 className="h-4 w-4" />
-                                                      </button>
-                                                    )}
-                                                  </div>
-                                                ))
+                                                      {hasValidResource && (
+                                                        <a
+                                                          href={resourceUrl}
+                                                          target="_blank"
+                                                          rel="noopener noreferrer"
+                                                          className="p-2 text-sky-600 hover:bg-sky-50 rounded-lg transition-colors"
+                                                          title="Open resource"
+                                                        >
+                                                          <ExternalLink className="h-4 w-4" />
+                                                        </a>
+                                                      )}
+                                                      {canManageContent && (
+                                                        <button
+                                                          onClick={() =>
+                                                            handleDeleteSlide(
+                                                              slide.id,
+                                                            )
+                                                          }
+                                                          className="p-2 text-red-600 hover:bg-red-50 rounded-r-lg transition-colors hover:scale-110"
+                                                          title="Delete slide"
+                                                        >
+                                                          <Trash2 className="h-4 w-4" />
+                                                        </button>
+                                                      )}
+                                                    </div>
+                                                  );
+                                                })
                                             )}
                                           </div>
                                         )}
@@ -1047,293 +1182,147 @@ export default function SlidesPage() {
                   )}
                 </div>
               </div>
-            </div>
+            )}
 
-            <div className="lg:col-span-2">
-              {selectedSlideData ? (
-                <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b bg-white">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className="text-xs px-2.5 py-1 bg-sky-100 text-sky-700 rounded-full font-medium">
-                            {selectedSlideData.unit.name}
-                          </span>
-                          <span className="text-xs px-2.5 py-1 bg-sky-100 text-sky-700 rounded-full font-medium">
-                            Week {selectedSlideData.week.number}
-                          </span>
-                          {selectedSlideData.week.topic && (
-                            <span className="text-xs text-slate-500 hidden sm:block">
-                              • {selectedSlideData.week.topic}
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="px-5 py-4 border-b border-slate-200 bg-white">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">Slides Library</h3>
+                      <p className="text-xs text-slate-500">Cards with full slide details and external resource links.</p>
+                    </div>
+                    <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+                      {visibleSlidesCount} visible
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-4">
+                  {visibleSlidesCount === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                      <h4 className="text-base font-semibold text-slate-900">No slides to display</h4>
+                      <p className="mt-1 text-sm text-slate-500">{emptySlidesMessage}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {visibleSlidesByUnit.map((group) => (
+                        <section key={group.unitId} className="space-y-3">
+                          <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-2">
+                            <h4 className="text-sm font-bold uppercase tracking-wide text-slate-700">
+                              {group.unitName}
+                            </h4>
+                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                              {group.slides.length} slide{group.slides.length !== 1 ? "s" : ""}
                             </span>
-                          )}
-                        </div>
-                        <h3 className="font-bold text-xl text-slate-900 mb-2">
-                          {selectedSlideData.slide.title}
-                        </h3>
-                        {selectedSlideData.slide.description && (
-                          <p className="text-sm text-slate-600 mb-3">
-                            {selectedSlideData.slide.description}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex gap-2 flex-wrap">
-                        <a
-                          href={getCanvaNormalUrl(
-                            selectedSlideData.slide.canvaUrl,
-                          )}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-sky-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 font-medium"
-                          title="View in Canva"
-                        >
-                          <ExternalLink className="h-4 w-4" />
-                          Open in Canva
-                        </a>
-                        {hasValidEmbedUrl && (
-                          <button
-                            onClick={toggleFullscreen}
-                            className="inline-flex items-center gap-2 px-4 py-2 border border-slate-300 text-slate-700 rounded-xl hover:bg-slate-50 hover:shadow-md transition-all duration-300 font-medium"
-                            title="Fullscreen"
-                          >
-                            <Maximize2 className="h-4 w-4" />
-                            Fullscreen
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                          </div>
 
-                  <div className="p-6">
-                    {hasValidEmbedUrl ? (
-                      <div
-                        id="canva-embed-container"
-                        className={cn(
-                          "relative rounded-xl overflow-hidden border-2 border-slate-200 shadow-xl transition-all duration-300 bg-white",
-                          isFullscreen ? "fixed inset-0 z-50" : "aspect-video",
-                        )}
-                      >
-                        <div className="absolute top-4 left-4 z-10">
-                          <div className="flex items-center gap-2 bg-black/70 text-white px-3 py-1.5 rounded-full text-xs font-medium backdrop-blur-sm">
-                            <Play className="h-3 w-3" />
-                            Presentation Mode
-                          </div>
-                        </div>
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                            {group.slides.map((slide: any) => {
+                              const resourceUrl = normalizeResourceUrl(slide.canvaUrl || "");
+                              const hasValidResource = isValidUrl(resourceUrl);
+                              const resourceHost = getResourceHost(slide.canvaUrl || "");
 
-                        <div
-                          className={cn(
-                            "w-full h-full",
-                            isFullscreen ? "" : "relative pb-[56.25%]",
-                          )}
-                        >
-                          <iframe
-                            loading="lazy"
-                            className={cn(
-                              "absolute top-0 left-0 w-full h-full border-0",
-                              isFullscreen ? "" : "rounded-xl",
-                            )}
-                            src={embedUrl}
-                            title={selectedSlideData.slide.title}
-                            allowFullScreen
-                            allow="fullscreen"
-                            sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
+                              return (
+                                <article
+                                  key={slide.id}
+                                  className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-200 hover:shadow-md"
+                                >
+                                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                                    <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+                                      Week {slide.weekNumber}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        "rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                                        hasValidResource
+                                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                          : "border-amber-200 bg-amber-50 text-amber-700",
+                                      )}
+                                    >
+                                      {resourceHost}
+                                    </span>
+                                  </div>
 
-                        {isFullscreen && (
-                          <div className="absolute top-4 right-4 z-10 flex gap-2">
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(
-                                  selectedSlideData.slide.canvaUrl,
-                                );
-                                alert("Link copied to clipboard!");
-                              }}
-                              className="p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors backdrop-blur-sm"
-                              title="Copy link"
-                            >
-                              <Copy className="h-5 w-5" />
-                            </button>
-                            <button
-                              onClick={toggleFullscreen}
-                              className="p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors backdrop-blur-sm"
-                              title="Exit fullscreen"
-                            >
-                              <X className="h-5 w-5" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="aspect-video bg-white rounded-2xl flex items-center justify-center border-2 border-dashed border-slate-300">
-                        <div className="text-center p-6 max-w-md">
-                          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-100 flex items-center justify-center">
-                            <AlertTriangle className="h-8 w-8 text-slate-500" />
-                          </div>
-                          <h4 className="font-semibold text-lg mb-2 text-slate-900">
-                            Preview Unavailable
-                          </h4>
-                          <p className="text-slate-500 mb-4">
-                            The Canva URL is invalid or cannot be embedded.
-                          </p>
-                          <a
-                            href={selectedSlideData.slide.canvaUrl || "#"}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 text-white font-medium hover:shadow-lg transition-all duration-300"
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                            Try Opening Directly
-                          </a>
-                        </div>
-                      </div>
-                    )}
+                                  <h4 className="text-base font-bold text-slate-900">{slide.title}</h4>
+                                  {slide.description && (
+                                    <p className="mt-1 text-sm text-slate-600">{slide.description}</p>
+                                  )}
 
-                    <div className="mt-6 bg-white rounded-xl border border-slate-100 p-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-8 w-8 rounded-lg bg-sky-100 flex items-center justify-center">
-                            <LinkIcon className="h-4 w-4 text-sky-600" />
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium text-slate-500">
-                              Canva Link
-                            </p>
-                            <a
-                              href={selectedSlideData.slide.canvaUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm font-medium text-sky-600 hover:text-sky-700 truncate block max-w-[200px]"
-                            >
-                              View on Canva
-                            </a>
-                          </div>
-                        </div>
+                                  <div className="mt-3 space-y-1.5 text-xs text-slate-500">
+                                    <p>
+                                      Topic:{" "}
+                                      <span className="font-medium text-slate-700">{slide.weekTopic || "No topic specified"}</span>
+                                    </p>
+                                    <p className="truncate">
+                                      Link:{" "}
+                                      <span
+                                        className="font-medium text-slate-700"
+                                        title={slide.canvaUrl || "No link provided"}
+                                      >
+                                        {getCompactResourceLabel(slide.canvaUrl || "")}
+                                      </span>
+                                    </p>
+                                  </div>
 
-                        <div className="flex items-center gap-3">
-                          <div className="h-8 w-8 rounded-lg bg-sky-100 flex items-center justify-center">
-                            <Calendar className="h-4 w-4 text-sky-600" />
-                          </div>
-                          <div>
-                            <p className="text-xs font-medium text-slate-500">
-                              Week Info
-                            </p>
-                            <p className="text-sm font-medium text-slate-900">
-                              Week {selectedSlideData.week.number} •{" "}
-                              {selectedSlideData.unit.name}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                                    {hasValidResource ? (
+                                      <a
+                                        href={resourceUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-700 transition hover:bg-sky-100"
+                                        title="Open link"
+                                        aria-label="Open link"
+                                      >
+                                        <ExternalLink className="h-3.5 w-3.5" />
+                                      </a>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
+                                        <AlertTriangle className="h-3.5 w-3.5" />
+                                        Invalid link
+                                      </span>
+                                    )}
 
-                    {hasValidEmbedUrl && (
-                      <div className="mt-4 p-4 bg-sky-50 rounded-xl border border-sky-100">
-                        <h4 className="text-sm font-semibold text-sky-900 mb-3 flex items-center gap-2">
-                          <Sparkles className="h-4 w-4" />
-                          Navigation Tips
-                        </h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div className="flex items-start gap-2 p-2 bg-white/50 rounded-lg">
-                            <div className="h-6 w-6 rounded bg-sky-600 text-white text-xs flex items-center justify-center font-bold">
-                              1
-                            </div>
-                            <div>
-                              <p className="text-xs font-medium text-slate-900">
-                                Arrow Keys
-                              </p>
-                              <p className="text-xs text-slate-600">
-                                Navigate between slides
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-start gap-2 p-2 bg-white/50 rounded-lg">
-                            <div className="h-6 w-6 rounded bg-sky-600 text-white text-xs flex items-center justify-center font-bold">
-                              2
-                            </div>
-                            <div>
-                              <p className="text-xs font-medium text-slate-900">
-                                Spacebar
-                              </p>
-                              <p className="text-xs text-slate-600">
-                                Play/pause presentation
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-start gap-2 p-2 bg-white/50 rounded-lg">
-                            <div className="h-6 w-6 rounded bg-sky-600 text-white text-xs flex items-center justify-center font-bold">
-                              3
-                            </div>
-                            <div>
-                              <p className="text-xs font-medium text-slate-900">
-                                Fullscreen
-                              </p>
-                              <p className="text-xs text-slate-600">
-                                Best viewing experience
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-white border border-slate-100 rounded-2xl p-4 text-center shadow-sm">
-                  <h3 className="font-bold text-2xl mb-2 text-slate-900">
-                    Select a Slide to View
-                  </h3>
-                  <p className="text-slate-500 max-w-md mx-auto mb-8">
-                    Choose a presentation from the sidebar to preview it here.
-                  </p>
+                                    {hasValidResource && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard
+                                            .writeText(resourceUrl)
+                                            .then(() => alert("Link copied to clipboard!"))
+                                            .catch(() => alert("Could not copy the link."));
+                                        }}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+                                        title="Copy link"
+                                        aria-label="Copy link"
+                                      >
+                                        <Copy className="h-3.5 w-3.5" />
+                                      </button>
+                                    )}
 
-                  {filteredSlides.length > 0 && (
-                    <div className="max-w-2xl mx-auto">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {filteredSlides.slice(0, 4).map((slide) => (
-                          <button
-                            key={slide.id}
-                            onClick={() => setSelectedSlide(slide.id)}
-                            className="flex items-center gap-3 p-4 rounded-xl bg-white border border-slate-200 hover:border-sky-200 hover:shadow-md transition-all duration-300 group text-left"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-slate-900 truncate text-sm">
-                                {slide.title}
-                              </p>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="text-xs px-1.5 py-0.5 bg-sky-50 text-sky-700 rounded">
-                                  {slide.unitName}
-                                </span>
-                                <span className="text-xs text-slate-500">
-                                  Week {slide.weekNumber}
-                                </span>
-                              </div>
-                            </div>
-                            <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-sky-500 group-hover:translate-x-1 transition-all" />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {filteredSlides.length === 0 && allSlides.length === 0 && (
-                    <div className="mt-6">
-                      <div className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-full">
-                        <Sparkles className="h-4 w-4 text-slate-500" />
-                        <span className="text-sm text-slate-600">
-                          No slides available yet.{" "}
-                          {isTeacher
-                            ? "Start by creating a unit!"
-                            : "Check back soon!"}
-                        </span>
-                      </div>
+                                    {canManageContent && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteSlide(slide.id)}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition hover:bg-red-100"
+                                        title="Delete slide"
+                                        aria-label="Delete slide"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ))}
                     </div>
                   )}
                 </div>
-              )}
+              </div>
             </div>
-          </div>
         )}
 
         {showUnitModal && (
@@ -1485,7 +1474,7 @@ export default function SlidesPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-slate-900">Add New Slide</h3>
-                    <p className="text-sm text-slate-600">Share a Canva presentation with your class.</p>
+                    <p className="text-sm text-slate-600">Share any presentation or resource link with your class.</p>
                   </div>
                 </div>
                 <button
@@ -1520,16 +1509,16 @@ export default function SlidesPage() {
                 </div>
 
                 <div>
-                  <label className={modalLabelClass}>Canva URL *</label>
+                  <label className={modalLabelClass}>Resource URL *</label>
                   <input
                     type="url"
                     className={modalInputClass}
                     value={slideForm.canvaUrl}
                     onChange={(e) => setSlideForm({ ...slideForm, canvaUrl: e.target.value })}
-                    placeholder="https://canva.com/design/..."
+                    placeholder="https://..."
                   />
                   <p className="mt-2 text-xs text-slate-500">
-                    Tip: use Canva Share and copy the View link.
+                    You can paste Canva, Google Slides, YouTube, Drive, or any public https:// link.
                   </p>
                 </div>
 
@@ -1540,11 +1529,20 @@ export default function SlidesPage() {
                   <button
                     type="button"
                     onClick={handleCreateSlide}
-                    disabled={!slideForm.title.trim() || !slideForm.canvaUrl.trim()}
+                    disabled={!slideForm.title.trim() || !slideForm.canvaUrl.trim() || creatingSlide}
                     className={modalPrimaryButtonClass}
                   >
-                    <Save className="h-4 w-4" />
-                    <span>Add Slide</span>
+                    {creatingSlide ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Adding...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4" />
+                        <span>Add Slide</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </div>

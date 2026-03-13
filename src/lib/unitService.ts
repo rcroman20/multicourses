@@ -37,76 +37,92 @@ const convertTimestamp = (timestamp: any): Date => {
   return new Date();
 };
 
+const loadUnitFromDoc = async (unitDoc: any): Promise<Unit> => {
+  const unitData = unitDoc.data();
+  const weeksSnapshot = await getDocs(
+    query(weeksCollection, where('unitId', '==', unitDoc.id)),
+  );
+  const weeks: Week[] = [];
+
+  for (const weekDoc of weeksSnapshot.docs) {
+    const weekData = weekDoc.data();
+    const slidesSnapshot = await getDocs(
+      query(slidesCollection, where('weekId', '==', weekDoc.id), orderBy('order', 'asc')),
+    );
+
+    const slides: Slide[] = slidesSnapshot.docs.map((slideDoc) => {
+      const slideData = slideDoc.data();
+      return {
+        id: slideDoc.id,
+        weekId: slideData.weekId || '',
+        title: slideData.title || '',
+        description: slideData.description || '',
+        canvaUrl: slideData.canvaUrl || '',
+        order: slideData.order || 0,
+        createdAt: convertTimestamp(slideData.createdAt),
+      } as Slide;
+    });
+
+    weeks.push({
+      id: weekDoc.id,
+      number: weekData.number || 0,
+      topic: weekData.topic || '',
+      unitId: weekData.unitId || '',
+      slides,
+      createdAt: convertTimestamp(weekData.createdAt),
+    });
+  }
+
+  return {
+    id: unitDoc.id,
+    name: unitData.name || '',
+    courseId: unitData.courseId || '',
+    description: unitData.description || '',
+    order: unitData.order || 0,
+    weeks,
+    createdAt: convertTimestamp(unitData.createdAt),
+  };
+};
+
 export const unitService = {
   getByCourse: async (courseId: string): Promise<Unit[]> => {
     try {
-      // Consulta SIMPLE sin orderBy que necesita índice
-      const q = query(
-        unitsCollection,
-        where('courseId', '==', courseId)
-        // QUITAR orderBy temporalmente
-        // orderBy('order', 'asc')
-      );
-      
+      const q = query(unitsCollection, where('courseId', '==', courseId));
       const snapshot = await getDocs(q);
-      
       const units: Unit[] = [];
-      
+
       for (const unitDoc of snapshot.docs) {
-        const unitData = unitDoc.data();
-        
-        // PARA SEMANAS: También quitar orderBy temporalmente
-        const weeksQuery = query(
-          weeksCollection,
-          where('unitId', '==', unitDoc.id)
-        );
-        
-        const weeksSnapshot = await getDocs(weeksQuery);
-        const weeks: Week[] = [];
-        
-        for (const weekDoc of weeksSnapshot.docs) {
-          const weekData = weekDoc.data();
-          
-          // Obtener diapositivas de esta semana
-          const slidesQuery = query(
-            slidesCollection,
-            where('weekId', '==', weekDoc.id),
-            orderBy('order', 'asc')
-          );
-          
-          const slidesSnapshot = await getDocs(slidesQuery);
-          const slides: Slide[] = slidesSnapshot.docs.map(slideDoc => {
-            const slideData = slideDoc.data();
-            return {
-              id: slideDoc.id,
-              weekId: slideData.weekId || '',
-              title: slideData.title || '',
-              description: slideData.description || '',
-              canvaUrl: slideData.canvaUrl || '',
-              order: slideData.order || 0,
-              createdAt: convertTimestamp(slideData.createdAt)
-            } as Slide;
+        units.push(await loadUnitFromDoc(unitDoc));
+      }
+
+      if (units.length === 0) {
+        const allUnitsSnapshot = await getDocs(unitsCollection);
+
+        for (const unitDoc of allUnitsSnapshot.docs) {
+          const unit = await loadUnitFromDoc(unitDoc);
+          const belongsToCourse = unit.weeks.some((week) => {
+            const weekRecord = week as unknown as Record<string, unknown>;
+            const weekCourseId = typeof weekRecord.courseId === 'string' ? weekRecord.courseId : '';
+            if (weekCourseId === courseId) return true;
+
+            return week.slides.some((slide) => {
+              const slideRecord = slide as unknown as Record<string, unknown>;
+              return typeof slideRecord.courseId === 'string' && slideRecord.courseId === courseId;
+            });
           });
-          
-          weeks.push({
-            id: weekDoc.id,
-            number: weekData.number || 0,
-            topic: weekData.topic || '',
-            unitId: weekData.unitId || '',
-            slides: slides,
-            createdAt: convertTimestamp(weekData.createdAt)
+
+          if (!belongsToCourse) continue;
+
+          units.push({
+            ...unit,
+            courseId,
           });
+
+          await updateDoc(doc(unitsCollection, unit.id), {
+            courseId,
+            updatedAt: serverTimestamp(),
+          }).catch(() => undefined);
         }
-        
-        units.push({
-          id: unitDoc.id,
-          name: unitData.name || '',
-          courseId: unitData.courseId || '',
-          description: unitData.description || '',
-          order: unitData.order || 0,
-          weeks: weeks,
-          createdAt: convertTimestamp(unitData.createdAt)
-        });
       }
 
       units.sort((a, b) => (a.order || 0) - (b.order || 0));

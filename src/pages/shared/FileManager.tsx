@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAcademic } from '@/contexts/AcademicContext';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { getAccessibleCoursesForUser } from '@/lib/courseAccess';
 import { 
   FileText, 
   X, 
@@ -37,13 +38,13 @@ import { cn } from '@/lib/utils';
 import { type CourseFile } from '@/lib/services/fileService';
 import { notificationService } from '@/lib/services/notificationService';
 import { isNotificationAutomationEnabled } from '@/lib/services/notificationAutomation';
+import { TEACHER_ONBOARDING_COURSE_CODE } from '@/lib/services/teacherOnboardingService';
 import { 
   collection, 
   addDoc, 
   getDocs, 
   query, 
   where, 
-  orderBy,
   doc,
   deleteDoc,
   updateDoc 
@@ -89,6 +90,10 @@ export default function FileManagerPage() {
   const [loading, setLoading] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedPeriodFilter, setSelectedPeriodFilter] = useState('');
+  const [selectedWeekFilter, setSelectedWeekFilter] = useState('');
+  const [showCourseStructure, setShowCourseStructure] = useState(false);
+  const [creatingFile, setCreatingFile] = useState(false);
   const [showFileModal, setShowFileModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [editingFile, setEditingFile] = useState<CourseFile | null>(null);
@@ -97,6 +102,9 @@ export default function FileManagerPage() {
 
   const [showDeletePeriodConfirm, setShowDeletePeriodConfirm] = useState<string | null>(null);
   const [showDeleteWeekConfirm, setShowDeleteWeekConfirm] = useState<string | null>(null);
+  const latestFilesRequestRef = useRef(0);
+  const latestWeeksRequestRef = useRef(0);
+  const latestPeriodsRequestRef = useRef(0);
   
   const [periods, setPeriods] = useState<Period[]>([]);
   const [weeks, setWeeks] = useState<Week[]>([]);
@@ -125,22 +133,70 @@ export default function FileManagerPage() {
   });
 
   const isTeacher = user?.role === 'docente';
+  const isAdmin = user?.role === 'admin';
 
   const userCourses = useMemo(() => {
     if (!user) return [];
-    return isTeacher
-      ? courses.filter(c => c.teacherId === user.id)
-      : courses.filter(c => c.enrolledStudents.includes(user.id));
-  }, [courses, user, isTeacher]);
+    return getAccessibleCoursesForUser(courses, user, {
+      includeAllForAdmin: isAdmin,
+      includeEnrolledForTeacher: isTeacher,
+    });
+  }, [courses, user, isAdmin, isTeacher]);
 
   const selectedCourse = useMemo(() => 
-    userCourses.find(c => c.id === selectedCourseId),
+    userCourses.find(c => c.id === selectedCourseId), 
     [userCourses, selectedCourseId]
   );
+  const isOnboardingCourse =
+    String(selectedCourse?.code || '').trim().toUpperCase() === TEACHER_ONBOARDING_COURSE_CODE;
+  const isMandatoryCourse =
+    isOnboardingCourse ||
+    Boolean(
+      (selectedCourse as Record<string, unknown> | null)?.isMandatory ||
+        (selectedCourse as Record<string, unknown> | null)?.mandatory ||
+        (selectedCourse as Record<string, unknown> | null)?.required ||
+        (selectedCourse as Record<string, unknown> | null)?.isRequired ||
+        (selectedCourse as Record<string, unknown> | null)?.isMandatoryForTeachers ||
+        (selectedCourse as Record<string, unknown> | null)?.mandatoryForTeachers ||
+        (selectedCourse as Record<string, unknown> | null)?.mandatoryTeacherCourse ||
+        (selectedCourse as Record<string, unknown> | null)?.requiredForTeachers ||
+        (selectedCourse as Record<string, unknown> | null)?.requiredForDocentes ||
+        (selectedCourse as Record<string, unknown> | null)?.obligatorio ||
+        (selectedCourse as Record<string, unknown> | null)?.obligatorioDocentes ||
+        (selectedCourse as Record<string, unknown> | null)?.obligatorioParaDocentes ||
+        (selectedCourse as Record<string, unknown> | null)?.onboarding ||
+        (selectedCourse as Record<string, unknown> | null)?.isOnboarding,
+    );
+  const canManageContent =
+    isAdmin || (isTeacher && selectedCourse?.teacherId === user?.id && !isMandatoryCourse);
+
+  const coerceToDate = (value: unknown): Date => {
+    if (value instanceof Date) return value;
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'toDate' in value &&
+      typeof (value as { toDate?: unknown }).toDate === 'function'
+    ) {
+      try {
+        return (value as { toDate: () => Date }).toDate();
+      } catch {
+        return new Date(0);
+      }
+    }
+    if (typeof value === 'string' || typeof value === 'number') {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    return new Date(0);
+  };
 
   const handleCourseChange = (courseId: string) => {
     setSelectedCourseId(courseId);
     setSelectedFile(null);
+    setSelectedPeriodFilter('');
+    setSelectedWeekFilter('');
+    setShowCourseStructure(false);
     setFiles([]);
     setPeriods([]);
     setWeeks([]);
@@ -150,55 +206,69 @@ export default function FileManagerPage() {
     }
   };
   const loadWeeks = async (courseId: string) => {
+    const requestId = latestWeeksRequestRef.current + 1;
+    latestWeeksRequestRef.current = requestId;
     try {
       const weeksRef = collection(firebaseDB, 'weeks');
       const q = query(
         weeksRef,
-        where('courseId', '==', courseId),
-        orderBy('order', 'asc')
+        where('courseId', '==', courseId)
       );
 
       const querySnapshot = await getDocs(q);
-      const weeksData: Week[] = querySnapshot.docs.map(doc => {
+      const weeksData: Week[] = querySnapshot.docs.map((doc) => {
         const data = doc.data();
         return {
           id: doc.id,
           ...data,
-          createdAt: data.createdAt?.toDate() || new Date()
+          createdAt: coerceToDate(data.createdAt)
         } as Week;
+      })
+      .sort((a, b) => {
+        const orderA = Number(a.order ?? 0);
+        const orderB = Number(b.order ?? 0);
+        if (orderA !== orderB) return orderA - orderB;
+        return a.createdAt.getTime() - b.createdAt.getTime();
       });
 
-      if (courseId !== selectedCourseId) return;
+      if (requestId !== latestWeeksRequestRef.current) return;
       setWeeks(weeksData);
     } catch (error) {
-      if (courseId !== selectedCourseId) return;
+      if (requestId !== latestWeeksRequestRef.current) return;
       setWeeks([]);
     }
   };
 
   const loadPeriods = async (courseId: string) => {
+    const requestId = latestPeriodsRequestRef.current + 1;
+    latestPeriodsRequestRef.current = requestId;
     try {
       const periodsRef = collection(firebaseDB, 'periods');
       const q = query(
         periodsRef,
-        where('courseId', '==', courseId),
-        orderBy('order', 'asc')
+        where('courseId', '==', courseId)
       );
 
       const querySnapshot = await getDocs(q);
-      const periodsData: Period[] = querySnapshot.docs.map(doc => {
+      const periodsData: Period[] = querySnapshot.docs.map((doc) => {
         const data = doc.data();
         return {
           id: doc.id,
           ...data,
-          createdAt: data.createdAt?.toDate() || new Date()
+          createdAt: coerceToDate(data.createdAt)
         } as Period;
+      })
+      .sort((a, b) => {
+        const orderA = Number(a.order ?? 0);
+        const orderB = Number(b.order ?? 0);
+        if (orderA !== orderB) return orderA - orderB;
+        return a.createdAt.getTime() - b.createdAt.getTime();
       });
 
-      if (courseId !== selectedCourseId) return;
+      if (requestId !== latestPeriodsRequestRef.current) return;
       setPeriods(periodsData);
     } catch (error) {
-      if (courseId !== selectedCourseId) return;
+      if (requestId !== latestPeriodsRequestRef.current) return;
       setPeriods([]);
     }
   };
@@ -206,34 +276,35 @@ export default function FileManagerPage() {
   const loadFiles = async (courseId: string) => {
     if (!courseId) return;
 
+    const requestId = latestFilesRequestRef.current + 1;
+    latestFilesRequestRef.current = requestId;
     setLoading(true);
     try {
       const filesRef = collection(firebaseDB, 'course_files');
       const q = query(
         filesRef,
-        where('courseId', '==', courseId),
-        orderBy('uploadedAt', 'desc')
+        where('courseId', '==', courseId)
       );
 
       const querySnapshot = await getDocs(q);
-      const loadedFiles: CourseFile[] = querySnapshot.docs.map(doc => {
+      const loadedFiles: CourseFile[] = querySnapshot.docs.map((doc) => {
         const data = doc.data();
         return {
           id: doc.id,
           ...data,
-          uploadedAt: data.uploadedAt?.toDate() || new Date()
+          uploadedAt: coerceToDate(data.uploadedAt || data.createdAt)
         } as CourseFile;
-      });
+      })
+      .sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
 
-      if (courseId !== selectedCourseId) return;
+      if (requestId !== latestFilesRequestRef.current) return;
       setFiles(loadedFiles);
     } catch (error) {
-      if (courseId !== selectedCourseId) return;
+      if (requestId !== latestFilesRequestRef.current) return;
       setFiles([]);
     } finally {
-      if (courseId === selectedCourseId) {
-        setLoading(false);
-      }
+      if (requestId !== latestFilesRequestRef.current) return;
+      setLoading(false);
     }
   };
 
@@ -290,11 +361,13 @@ const handleCreatePeriod = async () => {
   };
 
 const handleCreateFile = async () => {
+  if (creatingFile) return;
   if (!fileForm.name.trim() || !fileForm.url.trim() || !selectedCourseId || !user?.id) {
     alert('Please provide file name and URL');
     return;
   }
 
+  setCreatingFile(true);
   try {
     const newFileData = {
       name: fileForm.name,
@@ -337,21 +410,37 @@ const handleCreateFile = async () => {
         (entry): entry is string => typeof entry === "string" && entry.length > 0,
       );
       if (recipientIds.length > 0) {
-        await Promise.all(
-          recipientIds.map((studentId) =>
-            notificationService.createNotification(studentId, {
+        const failedNotifications: Array<{ studentId: string; error: unknown }> = [];
+        for (const studentId of recipientIds) {
+          try {
+            await notificationService.createNotification(studentId, {
               title: "New material available",
               message: `"${newFileData.name}" was uploaded in ${selectedCourse.name}.`,
               type: "success",
               link: `/courses/${selectedCourse.code}/files`,
-            }),
-          ),
-        );
+            });
+          } catch (error) {
+            failedNotifications.push({ studentId, error });
+          }
+        }
+        if (failedNotifications.length > 0) {
+          console.error('Some notifications failed after file creation:', failedNotifications);
+          alert('File created successfully, but some student notifications could not be sent.');
+        }
       }
     }
     
   } catch (error) {
-    alert('Error creating file. Please try again.');
+    const errorCode = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code || '') : '';
+    const fallbackMessage = 'Please try again.';
+    if (errorCode) {
+      alert(`Error creating file (${errorCode}). ${fallbackMessage}`);
+    } else {
+      alert(`Error creating file. ${fallbackMessage}`);
+    }
+    console.error('Error creating file link:', error);
+  } finally {
+    setCreatingFile(false);
   }
 };
 
@@ -530,11 +619,11 @@ const getWeeksByPeriod = (periodId: string) => {
 };
 
   const getFilesByWeek = (weekId: string) => {
-  return filteredFiles.filter((file) => file.weekId === weekId);
+  return visibleFiles.filter((file) => file.weekId === weekId);
 };
 
 const getUnassignedFiles = () => {
-  return filteredFiles.filter(file => !file.weekId);
+  return visibleFiles.filter(file => !file.weekId);
 };
 
   const togglePeriod = (periodId: string) => {
@@ -559,6 +648,13 @@ const getUnassignedFiles = () => {
       return;
     }
 
+    if (selectedCourse) {
+      if (courseCode !== selectedCourse.code) {
+        navigate(`/courses/${selectedCourse.code}/files`, { replace: true });
+      }
+      return;
+    }
+
     const urlCourse = courseCode
       ? userCourses.find((course) => course.code === courseCode)
       : null;
@@ -567,11 +663,6 @@ const getUnassignedFiles = () => {
       if (selectedCourseId !== urlCourse.id) {
         setSelectedCourseId(urlCourse.id);
       }
-      return;
-    }
-
-    if (selectedCourse && courseCode !== selectedCourse.code) {
-      navigate(`/courses/${selectedCourse.code}/files`, { replace: true });
       return;
     }
 
@@ -587,6 +678,13 @@ const getUnassignedFiles = () => {
   useEffect(() => {
     if (selectedCourseId) {
       setSelectedFile(null);
+      setFiles([]);
+      setPeriods([]);
+      setWeeks([]);
+      setLoading(true);
+      latestFilesRequestRef.current += 1;
+      latestPeriodsRequestRef.current += 1;
+      latestWeeksRequestRef.current += 1;
       loadPeriods(selectedCourseId);
       loadWeeks(selectedCourseId);
       loadFiles(selectedCourseId);
@@ -596,6 +694,7 @@ const getUnassignedFiles = () => {
     setFiles([]);
     setPeriods([]);
     setWeeks([]);
+    setLoading(false);
   }, [selectedCourseId]);
 
   const formatFileSize = (bytes: number) => {
@@ -647,6 +746,42 @@ const getUnassignedFiles = () => {
     return formatDate(date);
   };
 
+  const normalizeResourceUrl = (value: string): string => {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return '';
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return `https://${trimmed}`;
+  };
+
+  const isValidUrl = (value: string): boolean => {
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  };
+
+  const getCompactResourceLabel = (value: string): string => {
+    const original = String(value || '').trim();
+    if (!original) return 'No link provided';
+
+    const normalized = normalizeResourceUrl(original);
+    const compact = (text: string, max = 42) =>
+      text.length <= max ? text : `${text.slice(0, max - 1)}...`;
+
+    if (!isValidUrl(normalized)) return compact(original);
+
+    try {
+      const url = new URL(normalized);
+      const host = url.hostname.replace(/^www\./, '');
+      const path = url.pathname.replace(/\/+$/, '');
+      return compact(`${host}${path}`);
+    } catch {
+      return compact(original);
+    }
+  };
+
   const closePeriodModal = () => {
     setShowPeriodModal(false);
     setPeriodForm({ number: 1, name: '' });
@@ -680,6 +815,151 @@ const getUnassignedFiles = () => {
         .some((value) => value.toLowerCase().includes(normalizedSearchTerm))
     );
   }, [files, normalizedSearchTerm]);
+
+  const periodFilterOptions = useMemo(
+    () =>
+      [...periods].sort((a, b) => {
+        const bTime = new Date(b.createdAt || 0).getTime();
+        const aTime = new Date(a.createdAt || 0).getTime();
+        if (bTime !== aTime) return bTime - aTime;
+        return (b.order ?? 0) - (a.order ?? 0);
+      }),
+    [periods],
+  );
+
+  const weekFilterOptions = useMemo(
+    () =>
+      [...weeks]
+        .filter((week) => !selectedPeriodFilter || String(week.periodId) === String(selectedPeriodFilter))
+        .sort((a, b) => {
+          const bTime = new Date(b.createdAt || 0).getTime();
+          const aTime = new Date(a.createdAt || 0).getTime();
+          if (bTime !== aTime) return bTime - aTime;
+          return (b.order ?? 0) - (a.order ?? 0);
+        }),
+    [weeks, selectedPeriodFilter],
+  );
+
+  useEffect(() => {
+    if (!selectedPeriodFilter) return;
+    const periodStillAvailable = periods.some((period) => period.id === selectedPeriodFilter);
+    if (!periodStillAvailable) {
+      setSelectedPeriodFilter('');
+      setSelectedWeekFilter('');
+    }
+  }, [periods, selectedPeriodFilter]);
+
+  useEffect(() => {
+    if (!selectedWeekFilter) return;
+    const weekStillAvailable = weekFilterOptions.some((week) => week.id === selectedWeekFilter);
+    if (!weekStillAvailable) {
+      setSelectedWeekFilter('');
+    }
+  }, [selectedWeekFilter, weekFilterOptions]);
+
+  const visibleFiles = useMemo(
+    () =>
+      filteredFiles.filter((file) => {
+        if (selectedWeekFilter) return String(file.weekId || '') === String(selectedWeekFilter);
+        if (selectedPeriodFilter) return String(file.periodId || '') === String(selectedPeriodFilter);
+        return true;
+      }),
+    [filteredFiles, selectedPeriodFilter, selectedWeekFilter],
+  );
+
+  const periodLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    periods.forEach((period) => {
+      map.set(period.id, period.name);
+    });
+    return map;
+  }, [periods]);
+
+  const weekLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    weeks.forEach((week) => {
+      map.set(week.id, `Week ${week.number}: ${week.topic}`);
+    });
+    return map;
+  }, [weeks]);
+
+  const periodRecencyRank = useMemo(() => {
+    const rank = new Map<string, number>();
+    periodFilterOptions.forEach((period, index) => {
+      rank.set(period.id, index);
+    });
+    return rank;
+  }, [periodFilterOptions]);
+
+  const filesGroupedByPeriod = useMemo(() => {
+    const grouped = new Map<string, { periodId: string; periodName: string; files: CourseFile[] }>();
+
+    visibleFiles.forEach((file) => {
+      const periodId = String(file.periodId || '').trim() || 'unassigned';
+      const periodName = file.periodId
+        ? periodLabelById.get(String(file.periodId)) || 'Unknown period'
+        : 'Without period';
+
+      if (!grouped.has(periodId)) {
+        grouped.set(periodId, { periodId, periodName, files: [] });
+      }
+      grouped.get(periodId)?.files.push(file);
+    });
+
+    const fallbackRank = periodRecencyRank.size + 1000;
+    return Array.from(grouped.values())
+      .map((group) => ({
+        ...group,
+        files: [...group.files].sort(
+          (a, b) => new Date(b.uploadedAt || 0).getTime() - new Date(a.uploadedAt || 0).getTime(),
+        ),
+      }))
+      .sort((a, b) => {
+        const rankA = periodRecencyRank.get(a.periodId) ?? fallbackRank;
+        const rankB = periodRecencyRank.get(b.periodId) ?? fallbackRank;
+        if (rankA !== rankB) return rankA - rankB;
+        return a.periodName.localeCompare(b.periodName);
+      });
+  }, [visibleFiles, periodLabelById, periodRecencyRank]);
+
+  const selectedPeriodFilterLabel = useMemo(
+    () => periodFilterOptions.find((period) => period.id === selectedPeriodFilter)?.name || '',
+    [periodFilterOptions, selectedPeriodFilter],
+  );
+
+  const selectedWeekFilterLabel = useMemo(
+    () => weekFilterOptions.find((week) => week.id === selectedWeekFilter)?.topic || '',
+    [selectedWeekFilter, weekFilterOptions],
+  );
+
+  const emptyFilesMessage = useMemo(() => {
+    if (files.length === 0) {
+      return 'No files have been added yet for this course.';
+    }
+    if (selectedWeekFilter && searchTerm) {
+      return `No files in "${selectedWeekFilterLabel || 'selected week'}" match the current search.`;
+    }
+    if (selectedWeekFilter) {
+      return `No files found in "${selectedWeekFilterLabel || 'selected week'}".`;
+    }
+    if (selectedPeriodFilter && searchTerm) {
+      return `No files in "${selectedPeriodFilterLabel || 'selected period'}" match the current search.`;
+    }
+    if (selectedPeriodFilter) {
+      return `No files found in "${selectedPeriodFilterLabel || 'selected period'}".`;
+    }
+    if (searchTerm) {
+      return 'No files match your search.';
+    }
+    return 'No files available for the active filters.';
+  }, [
+    files.length,
+    searchTerm,
+    selectedPeriodFilter,
+    selectedPeriodFilterLabel,
+    selectedWeekFilter,
+    selectedWeekFilterLabel,
+  ]);
 
   const unassignedTotal = useMemo(
     () => files.filter((file) => !file.weekId).length,
@@ -736,7 +1016,7 @@ const getUnassignedFiles = () => {
                       </p>
                     )}
                   </div>
-                  {isTeacher && selectedCourseId && (
+                  {canManageContent && selectedCourseId && (
                     <button
                       type="button"
                       onClick={() => {
@@ -794,9 +1074,9 @@ const getUnassignedFiles = () => {
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-1 flex-col gap-4 sm:flex-row">
-                  <div className="flex-1">
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="md:col-span-2 xl:col-span-1">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                       <input
@@ -816,7 +1096,40 @@ const getUnassignedFiles = () => {
                       )}
                     </div>
                   </div>
-                  <div className="relative min-w-[180px]">
+                  <div className="relative">
+                    <select
+                      value={selectedPeriodFilter}
+                      onChange={(e) => {
+                        setSelectedPeriodFilter(e.target.value);
+                        setSelectedWeekFilter('');
+                      }}
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    >
+                      <option value="">All periods</option>
+                      {periodFilterOptions.map((period) => (
+                        <option key={period.id} value={period.id}>
+                          {period.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  </div>
+                  <div className="relative">
+                    <select
+                      value={selectedWeekFilter}
+                      onChange={(e) => setSelectedWeekFilter(e.target.value)}
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    >
+                      <option value="">All weeks</option>
+                      {weekFilterOptions.map((week) => (
+                        <option key={week.id} value={week.id}>
+                          Week {week.number}: {week.topic}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  </div>
+                  <div className="relative">
                     <select
                       value={selectedCourseId}
                       onChange={(e) => handleCourseChange(e.target.value)}
@@ -840,53 +1153,68 @@ const getUnassignedFiles = () => {
                     <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   </div>
                 </div>
-                {isTeacher && selectedCourseId && (
-                  <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                  {selectedCourseId && (
                     <button
                       type="button"
-                      onClick={() => setShowPeriodModal(true)}
-                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      onClick={() => setShowCourseStructure((prev) => !prev)}
+                      className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                     >
-                      <Layers className="h-4 w-4" />
-                      New period
+                      {showCourseStructure ? 'Hide structure' : 'Show structure'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFileForm((prev) => ({ ...prev, periodId: '', weekId: '' }));
-                        setEditingFile(null);
-                        setShowFileModal(true);
-                      }}
-                      className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
-                    >
-                      <Plus className="h-4 w-4" />
-                      New file
-                    </button>
-                  </div>
-                )}
+                  )}
+                  {canManageContent && selectedCourseId && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowPeriodModal(true)}
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        <Layers className="h-4 w-4" />
+                        New period
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFileForm((prev) => ({ ...prev, periodId: '', weekId: '' }));
+                          setEditingFile(null);
+                          setShowFileModal(true);
+                        }}
+                        className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
+                      >
+                        <Plus className="h-4 w-4" />
+                        New file
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
-              {searchTerm && (
+              {(searchTerm || selectedPeriodFilter || selectedWeekFilter) && (
                 <div className="mt-4 border-t border-slate-200 pt-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-sky-600">
-                      Found {filteredFiles.length} file{filteredFiles.length !== 1 ? 's' : ''}
+                      Showing {visibleFiles.length} file{visibleFiles.length !== 1 ? 's' : ''}
                     </span>
                     <button
                       type="button"
-                      onClick={() => setSearchTerm('')}
+                      onClick={() => {
+                        setSearchTerm('');
+                        setSelectedPeriodFilter('');
+                        setSelectedWeekFilter('');
+                      }}
                       className="text-sm font-medium text-slate-600 transition hover:text-slate-800"
                     >
-                      Clear search
+                      Clear filters
                     </button>
                   </div>
                 </div>
               )}
 
-              {searchTerm && filteredFiles.length === 0 && files.length > 0 && (
+              {(searchTerm || selectedPeriodFilter || selectedWeekFilter) && visibleFiles.length === 0 && files.length > 0 && (
                 <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3">
                   <p className="text-sm font-semibold text-slate-700">No matching files</p>
-                  <p className="text-xs text-slate-500">Try another term or clear the search.</p>
+                  <p className="text-xs text-slate-500">Try another filter combination or clear filters.</p>
                 </div>
               )}
             </section>
@@ -898,25 +1226,29 @@ const getUnassignedFiles = () => {
             </div>
             <h3 className="mb-3 text-xl font-bold text-slate-900">No courses available</h3>
             <p className="mx-auto mb-6 max-w-md text-slate-500">
-              {isTeacher 
-                ? 'You have no courses assigned as a teacher. Contact the administrator.' 
-                : 'You are not enrolled in any course. Contact your teacher.'}
+              {isAdmin
+                ? 'No courses created yet. Create a course to start managing files.'
+                : isTeacher 
+                  ? 'You have no courses assigned as a teacher. Contact the administrator.' 
+                  : 'You are not enrolled in any course. Contact your teacher.'}
             </p>
-            {isTeacher && (
+            {(isTeacher || isAdmin) && (
               <button
                 type="button"
                 onClick={() => navigate('/courses/create')}
                 className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-5 py-2.5 font-medium text-white transition-all duration-300 hover:shadow-lg"
               >
                 <Plus className="h-4 w-4" />
-                Request Course Assignment
+                {isAdmin ? 'Create course' : 'Request Course Assignment'}
               </button>
             )}
           </div>
         )}
 
         {selectedCourseId && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="space-y-6">
+            {showCourseStructure && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1">
               <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-center justify-between">
@@ -937,7 +1269,7 @@ const getUnassignedFiles = () => {
                         <Layers className="h-6 w-6 text-gray-400" />
                       </div>
                       <p className="text-gray-500 text-sm font-medium mb-3">No periods created yet</p>
-                      {isTeacher && (
+                      {canManageContent && (
                         <button
                           onClick={() => setShowPeriodModal(true)}
                           className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:shadow-lg transition-all duration-300 text-sm font-medium"
@@ -976,7 +1308,7 @@ const getUnassignedFiles = () => {
     />
   </button>
   
-  {isTeacher && (
+  {canManageContent && (
     <div className="ml-2 flex gap-0.5">
       <button
         onClick={() => {
@@ -1008,7 +1340,7 @@ const getUnassignedFiles = () => {
                               <div className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white px-2.5 py-1.5">
                                 <Calendar className="h-3.5 w-3.5 text-gray-400" />
                                 <p className="text-xs text-gray-500">No weeks available</p>
-                                {isTeacher && (
+                                {canManageContent && (
                                   <button
                                     onClick={() => {
                                       setWeekForm({ 
@@ -1048,7 +1380,7 @@ const getUnassignedFiles = () => {
     </button>
   </div>
   
-  {isTeacher && (
+  {canManageContent && (
     <div className="flex gap-0.5">
       <button
         onClick={() => setShowDeleteWeekConfirm(week.id)}
@@ -1066,7 +1398,7 @@ const getUnassignedFiles = () => {
                                         <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-2.5 py-1">
                                           <FileText className="h-3.5 w-3.5 text-gray-400" />
                                           <p className="text-xs text-gray-500">No files</p>
-                                          {isTeacher && (
+                                          {canManageContent && (
                                             <button
                                               onClick={() => {
                                                 setFileForm(prev => ({
@@ -1131,7 +1463,7 @@ const getUnassignedFiles = () => {
                               </div>
                               <span className="text-xs font-medium text-gray-900 truncate">{file.name}</span>
                             </button>
-                            {isTeacher && (
+                            {canManageContent && (
                               <button
                                 onClick={() => handleEditFile(file.id)}
                                 className="rounded p-1 text-blue-600 transition-colors hover:bg-blue-50"
@@ -1194,7 +1526,7 @@ const getUnassignedFiles = () => {
                             <Maximize2 className="h-4 w-4" />
                           </button>
                         )}
-                        {isTeacher && (
+                        {canManageContent && (
                           <div className="flex gap-1">
                             <button
                               onClick={() => handleEditFile(selectedFile.id)}
@@ -1346,21 +1678,19 @@ const getUnassignedFiles = () => {
                     <FileText className="h-8 w-8 text-gray-400" />
                   </div>
                   <h3 className="font-bold text-2xl mb-3 text-gray-900">
-                    {filteredFiles.length > 0 ? 'Select a File' : 'No Files Yet'}
+                    {visibleFiles.length > 0 ? 'Select a File' : 'No Files Yet'}
                   </h3>
                   <p className="text-gray-500 max-w-md mx-auto mb-8">
-                    {filteredFiles.length > 0
+                    {visibleFiles.length > 0
                       ? 'Choose a file'
-                      : searchTerm
-                        ? 'No files match your search.'
-                        : 'No files have been added yet for this course.'}
+                      : emptyFilesMessage}
                   </p>
                   
-                  {filteredFiles.length > 0 && (
+                  {visibleFiles.length > 0 && (
                     <div className="max-w-2xl mx-auto">
                         
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {filteredFiles.slice(0, 4).map(file => (
+                        {visibleFiles.slice(0, 4).map(file => (
                           <button
                             key={file.id}
                             onClick={() => setSelectedFile(file)}
@@ -1389,6 +1719,157 @@ const getUnassignedFiles = () => {
                   )}
                 </div>
               )}
+            </div>
+          </div>
+            )}
+
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-200 bg-white px-5 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Files Library</h3>
+                    <p className="text-xs text-slate-500">Cards grouped by period with quick actions.</p>
+                  </div>
+                  <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+                    {visibleFiles.length} visible
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-4">
+                {visibleFiles.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                    <h4 className="text-base font-semibold text-slate-900">No files to display</h4>
+                    <p className="mt-1 text-sm text-slate-500">{emptyFilesMessage}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {filesGroupedByPeriod.map((group) => (
+                      <section key={group.periodId} className="space-y-3">
+                        <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-2">
+                          <h4 className="text-sm font-bold uppercase tracking-wide text-slate-700">
+                            {group.periodName}
+                          </h4>
+                          <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                            {group.files.length} file{group.files.length !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                          {group.files.map((file) => {
+                            const resourceUrl = normalizeResourceUrl(file.url || '');
+                            const hasValidResource = isValidUrl(resourceUrl);
+                            const weekLabel = file.weekId ? weekLabelById.get(String(file.weekId)) : '';
+
+                            return (
+                              <article
+                                key={file.id}
+                                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-200 hover:shadow-md"
+                              >
+                                <div className="mb-2 flex flex-wrap items-center gap-2">
+                                  <span className={cn('inline-flex h-6 w-6 items-center justify-center rounded text-white', getFileColor(file.type))}>
+                                    {getFileIcon(file.type)}
+                                  </span>
+                                  <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+                                    {file.size ? formatFileSize(file.size) : 'Link'}
+                                  </span>
+                                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                                    {formatTimeAgo(file.uploadedAt)}
+                                  </span>
+                                </div>
+
+                                <h4 className="text-base font-bold text-slate-900">{file.name}</h4>
+                                {file.description && (
+                                  <p className="mt-1 text-sm text-slate-600">{file.description}</p>
+                                )}
+
+                                <div className="mt-3 space-y-1.5 text-xs text-slate-500">
+                                  {weekLabel && (
+                                    <p>
+                                      Week:{' '}
+                                      <span className="font-medium text-slate-700">{weekLabel}</span>
+                                    </p>
+                                  )}
+                                  <p>
+                                    Author:{' '}
+                                    <span className="font-medium text-slate-700">{file.uploadedBy}</span>
+                                  </p>
+                                  <p className="truncate">
+                                    Link:{' '}
+                                    <span className="font-medium text-slate-700" title={file.url}>
+                                      {getCompactResourceLabel(file.url)}
+                                    </span>
+                                  </p>
+                                </div>
+
+                                <div className="mt-4 flex flex-wrap items-center gap-2">
+                                  {hasValidResource ? (
+                                    <a
+                                      href={resourceUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-700 transition hover:bg-sky-100"
+                                      title="Open link"
+                                      aria-label="Open link"
+                                    >
+                                      <ExternalLink className="h-3.5 w-3.5" />
+                                    </a>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
+                                      <AlertTriangle className="h-3.5 w-3.5" />
+                                      Invalid link
+                                    </span>
+                                  )}
+
+                                  {hasValidResource && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard
+                                          .writeText(resourceUrl)
+                                          .then(() => alert('Link copied to clipboard!'))
+                                          .catch(() => alert('Could not copy the link.'));
+                                      }}
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+                                      title="Copy link"
+                                      aria-label="Copy link"
+                                    >
+                                      <Copy className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+
+                                  {canManageContent && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditFile(file.id)}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+                                        title="Edit file"
+                                        aria-label="Edit file"
+                                      >
+                                        <Edit className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setShowDeleteConfirm(file.id)}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-700 transition hover:bg-red-100"
+                                        title="Delete file"
+                                        aria-label="Delete file"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1772,7 +2253,7 @@ const getUnassignedFiles = () => {
                       <button
                         type="button"
                         onClick={editingFile ? handleSaveEdit : handleCreateFile}
-                        disabled={!fileForm.name.trim() || !fileForm.url.trim()}
+                        disabled={!fileForm.name.trim() || !fileForm.url.trim() || (!editingFile && creatingFile)}
                         className={modalPrimaryButtonClass}
                       >
                         {editingFile ? (
@@ -1781,10 +2262,17 @@ const getUnassignedFiles = () => {
                             <span>Save Changes</span>
                           </>
                         ) : (
-                          <>
-                            <Plus className="h-4 w-4" />
-                            <span>Add File Link</span>
-                          </>
+                          creatingFile ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span>Adding...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="h-4 w-4" />
+                              <span>Add File Link</span>
+                            </>
+                          )
                         )}
                       </button>
                     </div>

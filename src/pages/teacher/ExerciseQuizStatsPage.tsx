@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { collection, deleteDoc, doc, getDocs, query, where } from "firebase/firestore";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAcademic } from "@/contexts/AcademicContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { getAccessibleCoursesForUser } from "@/lib/courseAccess";
 import { firebaseDB } from "@/lib/firebase";
 import {
   BarChart3,
@@ -156,7 +157,8 @@ export default function ExerciseQuizStatsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { courses, selectedCourseId, setSelectedCourseId } = useAcademic();
-  const isTeacher = user?.role === "docente";
+  const isAdmin = user?.role === "admin";
+  const isTeacher = user?.role === "docente" || isAdmin;
 
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
   const [questions, setQuestions] = useState<ExerciseQuestion[]>([]);
@@ -168,24 +170,15 @@ export default function ExerciseQuizStatsPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [studentSearchQuery, setStudentSearchQuery] = useState("");
   const [deletingAttemptId, setDeletingAttemptId] = useState<string | null>(null);
+  const latestStatsRequestRef = useRef(0);
 
   const availableCourses = useMemo(() => {
     if (!user) return [];
-    if (isTeacher) {
-      return courses.filter((course) => course.teacherId === user.id);
-    }
-    return courses.filter(
-      (course) =>
-        course.enrolledStudents?.includes(user.id) ||
-        course.enrolledStudents?.some((student: unknown) => {
-          if (typeof student === "string") return student === user.id;
-          if (student && typeof student === "object" && "id" in student) {
-            return (student as { id: string }).id === user.id;
-          }
-          return false;
-        }),
-    );
-  }, [courses, isTeacher, user]);
+    return getAccessibleCoursesForUser(courses, user, {
+      includeAllForAdmin: isAdmin,
+      includeEnrolledForTeacher: false,
+    });
+  }, [courses, isAdmin, user]);
 
   const selectedCourse = useMemo(
     () => availableCourses.find((course) => course.id === selectedCourseId),
@@ -282,6 +275,14 @@ export default function ExerciseQuizStatsPage() {
       return;
     }
 
+    const globalCourse = availableCourses.find((course) => course.id === selectedCourseId);
+    if (globalCourse) {
+      if (courseCode !== globalCourse.code) {
+        navigate(`/courses/${globalCourse.code}/exercise-bank/stats`, { replace: true });
+      }
+      return;
+    }
+
     const fromUrl = courseCode
       ? availableCourses.find((course) => course.code === courseCode)
       : null;
@@ -289,14 +290,6 @@ export default function ExerciseQuizStatsPage() {
     if (fromUrl) {
       if (fromUrl.id !== selectedCourseId) {
         setSelectedCourseId(fromUrl.id);
-      }
-      return;
-    }
-
-    const globalCourse = availableCourses.find((course) => course.id === selectedCourseId);
-    if (globalCourse) {
-      if (courseCode !== globalCourse.code) {
-        navigate(`/courses/${globalCourse.code}/exercise-bank/stats`, { replace: true });
       }
       return;
     }
@@ -309,19 +302,39 @@ export default function ExerciseQuizStatsPage() {
   }, [availableCourses, courseCode, navigate, selectedCourseId, setSelectedCourseId]);
 
   useEffect(() => {
-    const loadData = async () => {
-      if (!selectedCourseId) return;
+    latestStatsRequestRef.current += 1;
+    setExpandedAttemptId(null);
+    setSelectedTheme("all");
+    setStudentSearchQuery("");
 
-      setLoading(true);
+    if (!selectedCourseId) {
+      setAttempts([]);
+      setQuestions([]);
+      setLoading(false);
+      return;
+    }
+
+    setAttempts([]);
+    setQuestions([]);
+    setLoading(true);
+  }, [selectedCourseId]);
+
+  useEffect(() => {
+    const loadData = async () => {
+      const targetCourseId = String(selectedCourseId || "").trim();
+      if (!targetCourseId) return;
+
+      const requestId = latestStatsRequestRef.current + 1;
+      latestStatsRequestRef.current = requestId;
       try {
         const attemptsQuery = isTeacher
           ? query(
               collection(firebaseDB, "quizAttempts"),
-              where("courseId", "==", selectedCourseId),
+              where("courseId", "==", targetCourseId),
             )
           : query(
               collection(firebaseDB, "quizAttempts"),
-              where("courseId", "==", selectedCourseId),
+              where("courseId", "==", targetCourseId),
               where("studentId", "==", user?.id || ""),
             );
 
@@ -331,7 +344,7 @@ export default function ExerciseQuizStatsPage() {
           getDocs(
             query(
               collection(firebaseDB, "exerciseQuestions"),
-              where("courseId", "==", selectedCourseId),
+              where("courseId", "==", targetCourseId),
             ),
           ),
         ]);
@@ -388,16 +401,25 @@ export default function ExerciseQuizStatsPage() {
           };
         });
 
+        if (requestId !== latestStatsRequestRef.current) return;
         setAttempts(loadedAttempts);
         setQuestions(loadedQuestions);
         setStudentNames(names);
       } finally {
+        if (requestId !== latestStatsRequestRef.current) return;
         setLoading(false);
       }
     };
 
-    loadData();
+    void loadData();
   }, [isTeacher, selectedCourseId, user?.email, user?.id, user?.name]);
+
+  const handleCourseChange = (courseId: string) => {
+    const nextCourse = availableCourses.find((course) => course.id === courseId);
+    if (!nextCourse) return;
+    setSelectedCourseId(nextCourse.id);
+    navigate(`/courses/${nextCourse.code}/exercise-bank/stats`);
+  };
 
   const toggleSort = (field: "date" | "score" | "student") => {
     if (sortBy === field) {
@@ -466,7 +488,7 @@ export default function ExerciseQuizStatsPage() {
                     id="quiz-stats-course-select"
                     className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     value={selectedCourseId}
-                    onChange={(e) => setSelectedCourseId(e.target.value)}
+                    onChange={(e) => handleCourseChange(e.target.value)}
                   >
                     {availableCourses.length === 0 && (
                       <option value="">No courses available</option>
@@ -553,7 +575,53 @@ export default function ExerciseQuizStatsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="space-y-4">
+                <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Filter className="h-4 w-4 text-sky-700" />
+                    <p className="text-base font-bold text-slate-900">{isTeacher ? "Filter by Theme" : "My Themes"}</p>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                    <div>
+                      <label
+                        htmlFor="quiz-stats-theme-select"
+                        className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500"
+                      >
+                        {isTeacher ? "Theme" : "My Theme"}
+                      </label>
+                      <div className="relative">
+                        <BookMarked className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <select
+                          id="quiz-stats-theme-select"
+                          value={selectedTheme}
+                          onChange={(event) => setSelectedTheme(event.target.value)}
+                          className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                        >
+                          <option value="all">{isTeacher ? `All themes (${attempts.length})` : `All my themes (${attempts.length})`}</option>
+                          {themeStats.map((item) => (
+                            <option key={item.theme} value={item.theme}>
+                              {item.theme} ({item.attempts})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-slate-500 md:text-right">
+                      {selectedTheme === "all"
+                        ? `${attempts.length} attempts across all themes`
+                        : `${visibleAttempts.length} attempts in ${selectedTheme}`}
+                    </p>
+                  </div>
+
+                  {themeStats.length === 0 && (
+                    <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">
+                      No themes with attempts yet.
+                    </p>
+                  )}
+                </section>
+
                 <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                     <div>
@@ -775,93 +843,45 @@ export default function ExerciseQuizStatsPage() {
                   </div>
                 </section>
 
-                <aside className="space-y-4">
-                  <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="mb-3 flex items-center gap-2">
-                      <Filter className="h-4 w-4 text-sky-700" />
-                      <p className="text-base font-bold text-slate-900">{isTeacher ? "Filter by Theme" : "My Themes"}</p>
-                    </div>
+                {selectedTheme !== "all" &&
+                  themeStats
+                    .filter((themeItem) => themeItem.theme === selectedTheme)
+                    .map((stat) => (
+                      <section key={stat.theme} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="mb-3 flex items-center gap-2">
+                          <Target className="h-4 w-4 text-indigo-700" />
+                          <p className="text-base font-bold text-slate-900">Theme Overview</p>
+                        </div>
 
-                    <div className="space-y-1.5">
-                      <button
-                        onClick={() => setSelectedTheme("all")}
-                        className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${
-                          selectedTheme === "all"
-                            ? "border-sky-300 bg-sky-50 text-sky-700"
-                            : "border-slate-200 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40"
-                        }`}
-                      >
-                        <span>{isTeacher ? "All themes" : "All my themes"}</span>
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-600">
-                          {attempts.length}
-                        </span>
-                      </button>
-
-                      {themeStats.map((item) => (
-                        <button
-                          key={item.theme}
-                          onClick={() => setSelectedTheme(item.theme)}
-                          className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${
-                            selectedTheme === item.theme
-                              ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                              : "border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:bg-indigo-50/40"
-                          }`}
-                        >
-                          <span className="line-clamp-1">{item.theme}</span>
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-600">
-                            {item.attempts}
-                          </span>
-                        </button>
-                      ))}
-
-                      {themeStats.length === 0 && (
-                        <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">
-                          No themes with attempts yet.
-                        </p>
-                      )}
-                    </div>
-                  </section>
-
-                  {selectedTheme !== "all" &&
-                    themeStats
-                      .filter((themeItem) => themeItem.theme === selectedTheme)
-                      .map((stat) => (
-                        <section key={stat.theme} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                          <div className="mb-3 flex items-center gap-2">
-                            <Target className="h-4 w-4 text-indigo-700" />
-                            <p className="text-base font-bold text-slate-900">Theme Overview</p>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500">Students</span>
+                            <span className="font-semibold text-slate-900">{stat.uniqueStudents}</span>
                           </div>
-
-                          <div className="space-y-2 text-sm">
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-500">Students</span>
-                              <span className="font-semibold text-slate-900">{stat.uniqueStudents}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-500">Average score</span>
-                              <span className="font-semibold text-indigo-700">{stat.avgScore.toFixed(1)}%</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-500">Best score</span>
-                              <span className="font-semibold text-emerald-700">{stat.bestScore}%</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-500">Total questions</span>
-                              <span className="font-semibold text-slate-900">{stat.totalQuestions}</span>
-                            </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500">Average score</span>
+                            <span className="font-semibold text-indigo-700">{stat.avgScore.toFixed(1)}%</span>
                           </div>
-
-                          <div className="mt-3 border-t border-slate-200 pt-3">
-                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Average performance</p>
-                            <progress
-                              max={100}
-                              value={Math.max(0, Math.min(100, stat.avgScore))}
-                              className="h-2 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-slate-200 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-indigo-500 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-indigo-500"
-                            />
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500">Best score</span>
+                            <span className="font-semibold text-emerald-700">{stat.bestScore}%</span>
                           </div>
-                        </section>
-                      ))}
-                </aside>
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500">Total questions</span>
+                            <span className="font-semibold text-slate-900">{stat.totalQuestions}</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 border-t border-slate-200 pt-3">
+                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Average performance</p>
+                          <progress
+                            max={100}
+                            value={Math.max(0, Math.min(100, stat.avgScore))}
+                            className="h-2 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-slate-200 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-indigo-500 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-indigo-500"
+                          />
+                        </div>
+                      </section>
+                    ))}
               </div>
             </div>
           )}

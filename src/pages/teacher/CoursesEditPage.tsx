@@ -4,8 +4,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useAcademic } from '@/contexts/AcademicContext';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { courseService } from '@/lib/firestore';
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { firebaseDB } from "@/lib/firebase";
 import { transferCourseOwnership } from '@/lib/services/courseTransferService';
 import { v4 as uuidv4 } from 'uuid';
+import { TEACHER_ONBOARDING_COURSE_CODE } from '@/lib/services/teacherOnboardingService';
 import {
   ArrowLeft,
   ArrowRightLeft,
@@ -63,6 +66,11 @@ export default function CoursesEditPage() {
     classSchedule: [] as Array<CourseClassSchedule & { rowId: string }>,
   });
 
+  const isMandatoryCourse =
+    String(formData.code || course?.code || '')
+      .trim()
+      .toUpperCase() === TEACHER_ONBOARDING_COURSE_CODE;
+
   const weekDays = [
     { value: 1, label: 'Monday' },
     { value: 2, label: 'Tuesday' },
@@ -74,22 +82,18 @@ export default function CoursesEditPage() {
   ];
 
   useEffect(() => {
-    if (course && user) {
-      if (user.role !== 'docente' || course.teacherId !== user.id) {
-        navigate(`/courses/view/${course.code}`);
-        return;
-      }
-
+    const hydrateForm = (targetCourse: typeof course) => {
+      if (!targetCourse) return;
       setFormData({
-        name: course.name || '',
-        code: course.code || '',
-        description: course.description || '',
-        credits: course.credits || 3,
-        semester: course.semester || '2026-1',
-        teacherName: course.teacherName || '',
-        teacherId: course.teacherId || '',
-        classSchedule: (course.classSchedule || []).length
-          ? (course.classSchedule || []).map((row) => ({
+        name: targetCourse.name || '',
+        code: targetCourse.code || '',
+        description: targetCourse.description || '',
+        credits: targetCourse.credits || 3,
+        semester: targetCourse.semester || '2026-1',
+        teacherName: targetCourse.teacherName || '',
+        teacherId: targetCourse.teacherId || '',
+        classSchedule: (targetCourse.classSchedule || []).length
+          ? (targetCourse.classSchedule || []).map((row) => ({
               rowId: uuidv4(),
               dayOfWeek: Number(row.dayOfWeek),
               startTime: row.startTime || '',
@@ -107,10 +111,60 @@ export default function CoursesEditPage() {
             ],
       });
       setLoading(false);
-    } else if (courses.length > 0 && !course) {
-      navigate('/courses');
+    };
+
+    const loadCourseFromFirestore = async () => {
+      if (!courseCode) return;
+      setLoading(true);
+      try {
+        const snapshot = await getDocs(
+          query(collection(firebaseDB, "cursos"), where("code", "==", courseCode)),
+        );
+        if (snapshot.empty) {
+          navigate('/courses');
+          return;
+        }
+        const doc = snapshot.docs[0];
+        const data = doc.data();
+        hydrateForm({
+          id: doc.id,
+          name: data.name || '',
+          code: data.code || '',
+          description: data.description || '',
+          credits: data.credits || 3,
+          semester: data.semester || '2026-1',
+          teacherName: data.teacherName || '',
+          teacherId: data.teacherId || '',
+          classSchedule: Array.isArray(data.classSchedule) ? data.classSchedule : [],
+          enrolledStudents: data.enrolledStudents || [],
+          createdAt: data.createdAt?.toDate?.() || new Date(),
+        });
+      } catch {
+        navigate('/courses');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (!user) return;
+
+    if (course) {
+      const isAdmin = user.role === "admin";
+      if (!isAdmin) {
+        if (user.role !== 'docente' || course.teacherId !== user.id) {
+          navigate(`/courses/view/${course.code}`);
+          return;
+        }
+      }
+      hydrateForm(course);
+      return;
     }
-  }, [course, user, courses, navigate]);
+
+    if (courses.length > 0 && !course) {
+      void loadCourseFromFirestore();
+      return;
+    }
+  }, [course, user, courses, navigate, courseCode]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -187,6 +241,9 @@ export default function CoursesEditPage() {
       if (!formData.code.trim()) {
         throw new Error('Course code is required');
       }
+      if (formData.description.trim().length > 100) {
+        throw new Error('Description must be 100 characters or less');
+      }
       if (!Number.isFinite(formData.credits) || formData.credits < 0) {
         throw new Error('Credits cannot be negative');
       }
@@ -231,6 +288,11 @@ export default function CoursesEditPage() {
 
   const handleTransferCourse = async () => {
     if (!course?.id || !user?.id || transferring || saving) return;
+    if (isMandatoryCourse) {
+      setError('This mandatory course cannot be transferred.');
+      setSuccess('');
+      return;
+    }
 
     const targetEmail = transferEmail.trim().toLowerCase();
     if (!targetEmail) {
@@ -405,7 +467,11 @@ export default function CoursesEditPage() {
                     rows={4}
                     className={fieldTextAreaClass}
                     placeholder="Course description and objectives..."
+                    maxLength={100}
                   />
+                  <p className="mt-1 text-xs text-slate-500">
+                    {formData.description.length}/100 characters
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -545,6 +611,11 @@ export default function CoursesEditPage() {
                     Move this course to another approved teacher. All data is preserved: schedule,
                     students, grade sheets, assessments, notes, and materials.
                   </p>
+                  {isMandatoryCourse ? (
+                    <p className="mt-2 text-xs font-semibold text-slate-600">
+                      Mandatory courses cannot be transferred.
+                    </p>
+                  ) : null}
                   <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                     <input
                       type="email"
@@ -552,11 +623,12 @@ export default function CoursesEditPage() {
                       onChange={(event) => setTransferEmail(event.target.value)}
                       className={fieldInputClass}
                       placeholder="teacher@email.com"
+                      disabled={isMandatoryCourse}
                     />
                     <button
                       type="button"
                       onClick={handleTransferCourse}
-                      disabled={transferring || saving}
+                      disabled={transferring || saving || isMandatoryCourse}
                       className={primaryButtonClass}
                     >
                       {transferring ? (

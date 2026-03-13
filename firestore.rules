@@ -87,6 +87,134 @@ service cloud.firestore {
         );
     }
 
+    function adminAccessPath() {
+      return /databases/$(database)/documents/adminConfig/access;
+    }
+
+    function adminPermissionsPath() {
+      return /databases/$(database)/documents/adminConfig/delegatedPermissions;
+    }
+
+    function adminAccessDocExists() {
+      return exists(adminAccessPath());
+    }
+
+    function adminPermissionsDocExists() {
+      return exists(adminPermissionsPath());
+    }
+
+    function adminAccessDoc() {
+      return get(adminAccessPath());
+    }
+
+    function adminPermissionsDoc() {
+      return get(adminPermissionsPath());
+    }
+
+    function isDelegatedAdminUid() {
+      return signedIn()
+        && adminAccessDocExists()
+        && request.auth.uid in adminAccessDoc().data.delegatedAdminUserIds;
+    }
+
+    function isAdminAccessUser() {
+      return isOwnerAdminEmail() || isDelegatedAdminUid();
+    }
+
+    function canReadAdminAcademicData() {
+      return isAdminAccessUser();
+    }
+
+    function canManageTeacherApprovals() {
+      return isOwnerAdminEmail()
+        || (
+          isDelegatedAdminUid()
+          && adminPermissionsDocExists()
+          && adminPermissionsDoc().data.manageTeacherApprovals == true
+        );
+    }
+
+    function canManageTeacherOps() {
+      return isOwnerAdminEmail()
+        || (
+          isDelegatedAdminUid()
+          && adminPermissionsDocExists()
+          && adminPermissionsDoc().data.manageTeacherOps == true
+        );
+    }
+
+    function canManageDeletions() {
+      return isOwnerAdminEmail()
+        || (
+          isDelegatedAdminUid()
+          && adminPermissionsDocExists()
+          && adminPermissionsDoc().data.manageDeletions == true
+        );
+    }
+
+    function canManageInbox() {
+      return isOwnerAdminEmail()
+        || (
+          isDelegatedAdminUid()
+          && adminPermissionsDocExists()
+          && adminPermissionsDoc().data.manageInbox == true
+        );
+    }
+
+    function canManageSettings() {
+      return isOwnerAdminEmail()
+        || (
+          isDelegatedAdminUid()
+          && adminPermissionsDocExists()
+          && adminPermissionsDoc().data.manageSettings == true
+        );
+    }
+
+    function canManageBilling() {
+      return isOwnerAdminEmail()
+        || (
+          isDelegatedAdminUid()
+          && adminPermissionsDocExists()
+          && adminPermissionsDoc().data.manageBilling == true
+        );
+    }
+
+    function canManageInstitutions() {
+      return isOwnerAdminEmail()
+        || (
+          isDelegatedAdminUid()
+          && adminPermissionsDocExists()
+          && adminPermissionsDoc().data.manageInstitutions == true
+        );
+    }
+
+    function canManageUsersDirectory() {
+      return isOwnerAdminEmail()
+        || (
+          isDelegatedAdminUid()
+          && adminPermissionsDocExists()
+          && adminPermissionsDoc().data.manageUsersDirectory == true
+        );
+    }
+
+    function canExportReports() {
+      return isOwnerAdminEmail()
+        || (
+          isDelegatedAdminUid()
+          && adminPermissionsDocExists()
+          && adminPermissionsDoc().data.exportReports == true
+        );
+    }
+
+    function canManageBackups() {
+      return isOwnerAdminEmail()
+        || (
+          isDelegatedAdminUid()
+          && adminPermissionsDocExists()
+          && adminPermissionsDoc().data.manageBackups == true
+        );
+    }
+
     function hasCourseId(data) {
       return ("courseId" in data)
         && data.courseId is string
@@ -114,7 +242,7 @@ service cloud.firestore {
     function canReadCourseBound(data) {
       return signedIn()
         && (
-          isOwnerAdminEmail()
+          canReadAdminAcademicData()
           || (hasCourseId(data) && canAccessCourse(data.courseId))
         );
     }
@@ -183,7 +311,7 @@ service cloud.firestore {
     function canReadWeekBound(data) {
       return signedIn()
         && (
-          isOwnerAdminEmail()
+          canReadAdminAcademicData()
           || (
             weekCourseIdFromData(data) is string
             && weekCourseIdFromData(data).size() > 0
@@ -207,7 +335,7 @@ service cloud.firestore {
     function canReadSlideBound(data) {
       return signedIn()
         && (
-          isOwnerAdminEmail()
+          canReadAdminAcademicData()
           || (
             slideCourseIdFromData(data) is string
             && slideCourseIdFromData(data).size() > 0
@@ -231,7 +359,7 @@ service cloud.firestore {
     function canReadTeacherOrCourseBound(data) {
       return signedIn()
         && (
-          isOwnerAdminEmail()
+          canReadAdminAcademicData()
           || (hasTeacherId(data) && data.teacherId == request.auth.uid)
           || (hasCourseId(data) && canAccessCourse(data.courseId))
         );
@@ -249,7 +377,7 @@ service cloud.firestore {
     function canReadGradeLike(data) {
       return signedIn()
         && (
-          isOwnerAdminEmail()
+          canReadAdminAcademicData()
           || (hasStudentId(data) && data.studentId == request.auth.uid)
           || (hasGradedBy(data) && data.gradedBy == request.auth.uid)
           || (hasCourseId(data) && canAccessCourse(data.courseId))
@@ -265,22 +393,64 @@ service cloud.firestore {
         );
     }
 
+    match /adminConfig/{configId} {
+      allow read: if (
+          configId == "access"
+          && signedIn()
+          && (
+            isOwnerAdminEmail()
+            || (
+              resource.data.delegatedAdminUserIds is list
+              && request.auth.uid in resource.data.delegatedAdminUserIds
+            )
+          )
+        )
+        || (
+          configId == "delegatedPermissions"
+          && isAdminAccessUser()
+        );
+      allow create, update, delete: if isOwnerAdminEmail();
+    }
+
     match /usuarios/{userId} {
       allow read: if signedIn();
       allow create: if isOwner(userId)
-        && request.resource.data.role in ['docente', 'estudiante'];
-      allow update: if isOwner(userId)
-        && request.resource.data.role in ['docente', 'estudiante']
         && (
-          !('role' in resource.data)
-          || request.resource.data.role == resource.data.role
+          request.resource.data.role in ['docente', 'estudiante']
+          || (isOwnerAdminEmail() && request.resource.data.role == 'admin')
         )
         || (
-          isOwnerAdminEmail()
+          (canManageTeacherApprovals() || canManageInstitutions() || canManageUsersDirectory())
+          && request.resource.data.role in ['docente', 'estudiante', 'admin']
+        );
+      allow update: if (
+          isOwner(userId)
+          && request.resource.data.role is string
+          && (
+            (
+              "role" in resource.data
+              && request.resource.data.role == resource.data.role
+            )
+            || (
+              !("role" in resource.data)
+              && request.resource.data.role in ['docente', 'estudiante', 'teacher', 'student']
+            )
+          )
+        )
+        || (
+          (
+            canManageTeacherApprovals()
+            || canManageBilling()
+            || canManageInstitutions()
+            || canManageUsersDirectory()
+          )
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             "role",
             "requestedRole",
             "teacherApprovalStatus",
+            "teacherInstitutionName",
+            "institutionName",
+            "institution",
             "teacherApprovedAt",
             "teacherApprovedBy",
             "teacherRejectedAt",
@@ -303,9 +473,19 @@ service cloud.firestore {
             "teacherPaymentRequestedBy",
             "updatedAt"
           ])
-          && request.resource.data.role in ['docente', 'estudiante']
-          && request.resource.data.requestedRole in ['docente', 'estudiante']
-          && request.resource.data.teacherApprovalStatus in ['pending', 'approved', 'rejected']
+          && (
+            request.resource.data.role in ['docente', 'estudiante']
+            || (isOwner(userId) && request.resource.data.role == 'admin')
+          )
+          && (
+            !("requestedRole" in request.resource.data)
+            || request.resource.data.requestedRole in ['docente', 'estudiante']
+            || (isOwner(userId) && request.resource.data.requestedRole == 'admin')
+          )
+          && (
+            !("teacherApprovalStatus" in request.resource.data)
+            || request.resource.data.teacherApprovalStatus in ['pending', 'approved', 'rejected']
+          )
           && (
             !("teacherRejectionReason" in request.resource.data)
             || request.resource.data.teacherRejectionReason is string
@@ -313,7 +493,7 @@ service cloud.firestore {
           )
         );
       allow delete: if isOwner(userId)
-        || isOwnerAdminEmail()
+        || canManageDeletions()
         || (isCurrentUserTeacher() && targetUserIsStudent(userId));
     }
 
@@ -322,7 +502,7 @@ service cloud.firestore {
       allow read: if isOwner(userId);
 
       allow create: if signedIn()
-        && userDocExists(userId)
+        && (userDocExists(userId) || studentDocExists(userId))
         && request.resource.data.keys().hasOnly([
           "title", "message", "type", "link", "read", "createdAt", "expiresAt", "senderId"
         ])
@@ -348,12 +528,13 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["read"])
         && request.resource.data.read is bool;
 
-      allow delete: if isOwner(userId) || isOwnerAdminEmail();
+      allow delete: if isOwner(userId) || canManageDeletions();
     }
 
     // Course backup snapshots (teacher-owned)
     match /courseBackups/{backupId} {
-      allow read: if signedIn() && resource.data.teacherId == request.auth.uid;
+      allow read: if canReadAdminAcademicData()
+        || (signedIn() && resource.data.teacherId == request.auth.uid);
 
       allow create: if signedIn()
         && request.resource.data.teacherId == request.auth.uid
@@ -368,7 +549,8 @@ service cloud.firestore {
         && request.resource.data.exportedAt is string
         && request.resource.data.createdAt is timestamp;
 
-      allow delete: if signedIn() && resource.data.teacherId == request.auth.uid;
+      allow delete: if canManageBackups()
+        || (signedIn() && resource.data.teacherId == request.auth.uid);
       allow update: if false;
     }
 
@@ -402,16 +584,25 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if isOwner(studentId)
         && request.resource.data.role in ['docente', 'estudiante'];
+      allow create: if (
+          canManageTeacherApprovals()
+          || canManageInstitutions()
+          || canManageUsersDirectory()
+        )
+        && request.resource.data.role in ['docente', 'estudiante', 'admin'];
       // Spark-compatible mode: allow app-managed enrollment updates from teacher/student/admin.
       allow update: if signedIn() && (
         isOwner(studentId)
         || (isCurrentUserTeacher() && targetUserIsStudent(studentId))
-        || isOwnerAdminEmail()
+        || canManageTeacherApprovals()
+        || canManageBilling()
+        || canManageInstitutions()
+        || canManageUsersDirectory()
       );
       allow delete: if signedIn() && (
         request.auth.uid == studentId
         || isCurrentUserTeacher()
-        || isOwnerAdminEmail()
+        || canManageDeletions()
       );
     }
 
@@ -496,7 +687,7 @@ service cloud.firestore {
 
     match /submissions/{submissionId} {
       allow read: if signedIn() && (
-        isOwnerAdminEmail()
+        canReadAdminAcademicData()
         || (hasStudentId(resource.data) && resource.data.studentId == request.auth.uid)
         || (hasGradedBy(resource.data) && resource.data.gradedBy == request.auth.uid)
         || (hasCourseId(resource.data) && canAccessCourse(resource.data.courseId))
@@ -685,19 +876,19 @@ service cloud.firestore {
     }
 
     match /accountDeletionRequests/{requestId} {
-      allow read: if isOwner(requestId) || isOwnerAdminEmail();
-      allow create: if isOwner(requestId) || isOwnerAdminEmail();
-      allow update: if isOwner(requestId) || isOwnerAdminEmail();
-      allow delete: if isOwnerAdminEmail();
+      allow read: if isOwner(requestId) || canManageDeletions();
+      allow create: if isOwner(requestId) || canManageDeletions();
+      allow update: if isOwner(requestId) || canManageDeletions();
+      allow delete: if canManageDeletions();
     }
 
     match /deletedAccounts/{userId} {
-      allow read: if isOwner(userId) || isOwnerAdminEmail();
-      allow create, update, delete: if isOwnerAdminEmail();
+      allow read: if isOwner(userId) || canManageDeletions();
+      allow create, update, delete: if canManageDeletions();
     }
 
     match /pricingContactRequests/{requestId} {
-      allow read: if isOwnerAdminEmail();
+      allow read: if canManageInbox() || canManageBilling();
 
       allow create: if request.resource.data.keys().hasOnly([
           "name",
@@ -744,11 +935,11 @@ service cloud.firestore {
         && request.resource.data.updatedAt is timestamp
         && request.resource.data.updatedAt == request.time;
 
-      allow update, delete: if isOwnerAdminEmail();
+      allow update, delete: if canManageInbox() || canManageBilling();
     }
 
     match /contactMessages/{requestId} {
-      allow read: if isOwnerAdminEmail();
+      allow read: if canManageInbox();
 
       allow create: if request.resource.data.keys().hasOnly([
           "name",
@@ -791,6 +982,12 @@ service cloud.firestore {
         && request.resource.data.updatedAt is timestamp
         && request.resource.data.updatedAt == request.time;
 
+      allow update, delete: if canManageInbox();
+    }
+
+    match /adminAuditLog/{entryId} {
+      allow read: if canExportReports();
+      allow create: if isAdminAccessUser();
       allow update, delete: if isOwnerAdminEmail();
     }
 

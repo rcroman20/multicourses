@@ -18,6 +18,7 @@ import {
   getTeacherPlanPath,
   resolveTeacherPlanId,
 } from "@/lib/services/teacherPlanService";
+import { SeoHead } from "@/components/common/SeoHead";
 
 const formatCop = (value: number) => `$${value.toLocaleString("es-CO")} COP`;
 const dashboardShellClassName =
@@ -36,11 +37,17 @@ export default function TeacherPlanDetailPage() {
 
   if (!selectedPlan) {
     return (
-      <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-5 sm:px-6 lg:px-8">
+        <SeoHead
+          title="Teacher plan not found"
+          description="The requested MultiCourses teacher plan could not be found. Review the available annual plans."
+          canonicalPath="/plans/starter-annual"
+          robots="noindex, follow"
+        />
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <section className="relative mx-auto w-full max-w-[1100px] mb-10 ">
+        <section className="relative mx-auto mb-8 w-full max-w-[1200px]">
           <div className={dashboardShellClassName}>
             <div className={cardClassName}>
               <p className="text-sm font-semibold text-slate-900">Plan not found</p>
@@ -73,7 +80,32 @@ export default function TeacherPlanDetailPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-2 sm:px-6 lg:px-2">
+    <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-5 sm:px-6 lg:px-8">
+      <SeoHead
+        title={selectedPlan.label}
+        description={`${selectedPlan.label} for MultiCourses: ${selectedPlan.summary} Supports up to ${selectedPlan.courseLimit} active courses and ${selectedPlan.studentLimit} students.`}
+        canonicalPath={getTeacherPlanPath(selectedPlan.id)}
+        keywords={`${selectedPlan.label.toLowerCase()}, academic plans, teacher annual plan, LMS pricing, MultiCourses`}
+        structuredData={{
+          "@context": "https://schema.org",
+          "@type": "Product",
+          name: selectedPlan.label,
+          description: selectedPlan.summary,
+          brand: {
+            "@type": "Brand",
+            name: "MultiCourses",
+          },
+          category: "Educational software subscription",
+          url: `https://multicourses.web.app${getTeacherPlanPath(selectedPlan.id)}`,
+          offers: {
+            "@type": "Offer",
+            price: String(selectedPlan.priceCop),
+            priceCurrency: "COP",
+            availability: "https://schema.org/InStock",
+            url: `https://multicourses.web.app${getTeacherPlanPath(selectedPlan.id)}`,
+          },
+        }}
+      />
       <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
       <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
  
@@ -81,7 +113,7 @@ export default function TeacherPlanDetailPage() {
         
         <div className={dashboardShellClassName}>
           
-           <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-2.5 shadow-sm mb-4">
+           <section className="mb-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1">
                   <Sparkles className="h-3.5 w-3.5 text-sky-700" />
@@ -123,7 +155,7 @@ export default function TeacherPlanDetailPage() {
                         Plan Workspace
                       </span>
                     </div>
-                    <h1 className="mt-2 text-2xl font-bold text-slate-900">{selectedPlan.label}</h1>
+                    <h1 className="mt-2 text-xl font-bold text-slate-900 sm:text-2xl">{selectedPlan.label}</h1>
                     <p className="mt-1 max-w-3xl text-sm text-slate-600">{selectedPlan.summary}</p>
                     <p className="mt-2 text-xs text-slate-500">
                       Annual pricing is designed for stable academic operations and scalable growth.
@@ -132,21 +164,21 @@ export default function TeacherPlanDetailPage() {
 
                   <div className="w-full lg:w-auto lg:min-w-[330px]">
                     <div className="grid grid-cols-2 gap-2">
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                         <p className="text-[11px] uppercase tracking-wide text-slate-500">Annual price</p>
                         <p className="text-lg font-bold text-slate-900">{formatCop(selectedPlan.priceCop)}</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                         <p className="text-[11px] uppercase tracking-wide text-slate-500">Monthly equivalent</p>
                         <p className="text-lg font-bold text-slate-900">
                           {formatCop(selectedPlan.monthlyEquivalentCop)}
                         </p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                         <p className="text-[11px] uppercase tracking-wide text-slate-500">Courses</p>
                         <p className="text-lg font-bold text-slate-900">{selectedPlan.courseLimit}</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                         <p className="text-[11px] uppercase tracking-wide text-slate-500">Students</p>
                         <p className="text-lg font-bold text-slate-900">{selectedPlan.studentLimit}</p>
                       </div>
@@ -294,7 +326,7 @@ export default function TeacherPlanDetailPage() {
                       <button
                         type="button"
                         onClick={() => navigate(getTeacherPlanPath(plan.id))}
-                        className="mt-3 inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                        className="mt-3 inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
                       >
                         View
                       </button>

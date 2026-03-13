@@ -3,6 +3,7 @@ import { Link } from"react-router-dom";
 import { useAuth } from"@/contexts/AuthContext";
 import { useAcademic } from"@/contexts/AcademicContext";
 import { DashboardLayout } from"@/components/layout/DashboardLayout";
+import { getAccessibleCoursesForUser } from"@/lib/courseAccess";
 import {
   GraduationCap,
   ChevronDown,
@@ -113,8 +114,104 @@ const toFiniteNumber = (value: unknown): number | null => {
   return null;
 };
 
+const parseLooseNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const normalized = trimmed
+    .replace(/\s+/g, "")
+    .replace(/,/g, ".")
+    .replace(/[^0-9.\-]/g, "");
+  if (!normalized) return null;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
+
+const normalizeText = (value: unknown): string =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+const normalizeIdentityValue = (value: unknown): string =>
+  String(value || "").trim().toLowerCase();
+
+const parseGradeValueFromUnknown = (entry: unknown): number | null => {
+  if (entry && typeof entry === "object") {
+    const payload = entry as Record<string, unknown>;
+    return (
+      parseLooseNumber(payload.value) ??
+      parseLooseNumber(payload.grade) ??
+      parseLooseNumber(payload.score) ??
+      parseLooseNumber(payload.nota) ??
+      parseLooseNumber(payload.total) ??
+      parseLooseNumber(payload.average)
+    );
+  }
+  return parseLooseNumber(entry);
+};
+
+const getActivityGradeValue = (
+  grades: Record<string, { value?: number; comment?: string; submittedAt?: any }> = {},
+  activity: GradeSheetActivity,
+): number | null => {
+  const directCandidates = [activity.id, activity.name]
+    .map((key) => String(key || "").trim())
+    .filter(Boolean);
+
+  for (const key of directCandidates) {
+    if (key in grades) {
+      const parsed = parseGradeValueFromUnknown(grades[key]);
+      if (parsed !== null) return parsed;
+    }
+  }
+
+  const normalizedEntries = new Map<string, unknown>();
+  Object.entries(grades).forEach(([key, value]) => {
+    const normalizedKey = normalizeText(key).replace(/\s+/g, " ");
+    if (normalizedKey) normalizedEntries.set(normalizedKey, value);
+  });
+
+  for (const candidate of directCandidates) {
+    const normalizedCandidate = normalizeText(candidate).replace(/\s+/g, " ");
+    if (!normalizedCandidate) continue;
+    const matched = normalizedEntries.get(normalizedCandidate);
+    if (matched !== undefined) {
+      const parsed = parseGradeValueFromUnknown(matched);
+      if (parsed !== null) return parsed;
+    }
+  }
+
+  return null;
+};
+
+const isSheetPublished = (payload: Record<string, unknown>): boolean => {
+  const publishedRaw =
+    payload.isPublished ?? payload.published ?? payload.status ?? payload.estado;
+  const normalizedText = normalizeIdentityValue(publishedRaw);
+
+  if (typeof publishedRaw === "boolean") return publishedRaw;
+  if (typeof publishedRaw === "number") return publishedRaw === 1;
+
+  return (
+    normalizedText === "true" ||
+    normalizedText === "1" ||
+    normalizedText === "published" ||
+    normalizedText === "publicado" ||
+    normalizedText === "active" ||
+    normalizedText === "activo" ||
+    normalizedText === "yes" ||
+    normalizedText === "si"
+  );
+};
 
 const normalizeGradingPeriod = (period: string): string => {
   const normalized = (period ||"").trim().toLowerCase();
@@ -227,7 +324,7 @@ const calculateNormalizedSheetAverage = (
   let gradedActivities = 0;
 
   for (const activity of activities) {
-    const rawValue = toFiniteNumber(grades?.[activity.id]?.value);
+    const rawValue = getActivityGradeValue(grades, activity);
     if (rawValue === null) continue;
 
     const safeMax = Math.max(1, Number(activity.maxScore) || DISPLAY_MAX_SCORE);
@@ -310,10 +407,11 @@ export default function GradesPage() {
 
   const userCourses = useMemo(() => {
     if (!user) return [];
-    return isTeacher
-      ? courses.filter((c) => c.teacherId === user.id)
-      : courses.filter((c) => c.enrolledStudents.includes(user.id));
-  }, [courses, user, isTeacher]);
+    return getAccessibleCoursesForUser(courses, user, {
+      includeAllForAdmin: user.role === "admin",
+      includeEnrolledForTeacher: false,
+    });
+  }, [courses, user]);
 
   const selectedCourse = useMemo(
     () => userCourses.find((c) => c.id === selectedCourseId),
@@ -381,75 +479,294 @@ export default function GradesPage() {
 
       try {
         const gradeSheetsRef = collection(firebaseDB,"gradeSheets");
-        const querySnapshot = await getDocs(
-          query(gradeSheetsRef, where("courseId","==", selectedCourseId)),
+        const selectedCourseCodeKey = normalizeText(selectedCourse?.code || "");
+        const selectedCourseNameKey = normalizeText(selectedCourse?.name || "");
+        const selectedCourseIdKey = String(selectedCourseId || "").trim();
+
+        const [userDocSnapshot, studentDocSnapshot] = !isTeacher
+          ? await Promise.all([
+              getDoc(doc(firebaseDB, "usuarios", user.id)),
+              getDoc(doc(firebaseDB, "estudiantes", user.id)),
+            ])
+          : [null, null];
+
+        const userDocData = userDocSnapshot?.exists() ? userDocSnapshot.data() : {};
+        const studentDocData = studentDocSnapshot?.exists()
+          ? studentDocSnapshot.data()
+          : {};
+        const studentIdentityAliases = new Set<string>(
+          [
+            user.id,
+            user.email,
+            user.name,
+            (userDocData as Record<string, unknown>).idNumber,
+            (userDocData as Record<string, unknown>).identification,
+            (userDocData as Record<string, unknown>).document,
+            (userDocData as Record<string, unknown>).cedula,
+            (studentDocData as Record<string, unknown>).idNumber,
+            (studentDocData as Record<string, unknown>).identification,
+            (studentDocData as Record<string, unknown>).document,
+            (studentDocData as Record<string, unknown>).cedula,
+            (studentDocData as Record<string, unknown>).email,
+          ]
+            .map(normalizeIdentityValue)
+            .filter(Boolean),
         );
+        const currentUserNameKey = normalizeText(user.name).replace(/\s+/g, " ");
+
+        const matchesCurrentStudent = (payload: Record<string, unknown>): boolean => {
+          if (isTeacher) return true;
+
+          const nestedStudent =
+            payload.student && typeof payload.student === "object"
+              ? (payload.student as Record<string, unknown>)
+              : null;
+          const directIdentifiers = [
+            payload.studentId,
+            payload.studentID,
+            payload.student_id,
+            payload.userId,
+            payload.userID,
+            payload.user_id,
+            payload.uid,
+            payload.id,
+            payload.email,
+            payload.studentEmail,
+            payload.correo,
+            payload.mail,
+            payload.idNumber,
+            payload.identification,
+            payload.document,
+            payload.cedula,
+            nestedStudent?.id,
+            nestedStudent?.uid,
+            nestedStudent?.userId,
+            nestedStudent?.email,
+            nestedStudent?.idNumber,
+            nestedStudent?.identification,
+            nestedStudent?.document,
+            nestedStudent?.cedula,
+          ]
+            .map(normalizeIdentityValue)
+            .filter(Boolean);
+
+          if (directIdentifiers.some((key) => studentIdentityAliases.has(key))) return true;
+
+          const payloadName = normalizeText(payload.name).replace(/\s+/g, " ");
+          return Boolean(payloadName) && payloadName === currentUserNameKey;
+        };
+
+        const matchesSelectedCourse = (payload: Record<string, unknown>): boolean => {
+          const sheetCourseId = String(
+            payload.courseId ?? payload.course_id ?? payload.cursoId ?? "",
+          ).trim();
+          if (sheetCourseId && selectedCourseIdKey && sheetCourseId === selectedCourseIdKey) {
+            return true;
+          }
+
+          const sheetCourseCode = normalizeText(
+            payload.courseCode ?? payload.course_code ?? payload.codigoCurso ?? "",
+          );
+          if (sheetCourseCode && selectedCourseCodeKey && sheetCourseCode === selectedCourseCodeKey) {
+            return true;
+          }
+
+          const sheetCourseName = normalizeText(
+            payload.courseName ?? payload.course_name ?? payload.nombreCurso ?? "",
+          );
+          if (sheetCourseName && selectedCourseNameKey && sheetCourseName === selectedCourseNameKey) {
+            return true;
+          }
+
+          return false;
+        };
+
+        const querySnapshot = isTeacher
+          ? await getDocs(query(gradeSheetsRef, where("courseId","==", selectedCourseId)))
+          : await getDocs(gradeSheetsRef);
 
         const sheets: GradeSheet[] = [];
         const studentIdsToFetch = new Set<string>();
 
         querySnapshot.forEach((doc) => {
-          const data = doc.data();
+          const data = doc.data() as Record<string, unknown>;
 
-          if (!isTeacher && !data.isPublished) return;
+          if (!isTeacher && !isSheetPublished(data)) return;
+          if (!isTeacher && !matchesSelectedCourse(data)) return;
 
-          const activities: GradeSheetActivity[] = (
-            data.activities || []
-          ).map((act: any, index: number) => ({
-            id: act.id || `activity_${doc.id}_${index}`,
-            name: act.name ||"Activity",
-            maxScore: Math.max(1, Number(act.maxScore) || 5.0),
-            type: act.type ||"quiz",
-          }));
+          const rawActivities = Array.isArray(data.activities)
+            ? data.activities
+            : data.activities && typeof data.activities === "object"
+              ? Object.entries(data.activities as Record<string, unknown>).map(
+                  ([activityKey, activityPayload]) => {
+                    if (activityPayload && typeof activityPayload === "object") {
+                      return {
+                        __activityKey: activityKey,
+                        ...(activityPayload as Record<string, unknown>),
+                      };
+                    }
+                    return {
+                      __activityKey: activityKey,
+                      name: String(activityPayload || activityKey || "Activity"),
+                    };
+                  },
+                )
+              : [];
+
+          const activities: GradeSheetActivity[] = rawActivities
+            .map((entry: unknown, index: number) => {
+              if (!entry || typeof entry !== "object") return null;
+              const payload = entry as Record<string, unknown>;
+              const activityId = String(
+                payload.id ??
+                  payload.activityId ??
+                  payload.assessmentId ??
+                  payload.__activityKey ??
+                  payload.name ??
+                  `activity_${doc.id}_${index + 1}`,
+              ).trim();
+              const activityName = String(
+                (payload.name ?? payload.title ?? payload.activityName ?? activityId) || "Activity",
+              ).trim();
+              if (!activityId && !activityName) return null;
+              const maxScore =
+                parseLooseNumber(payload.maxScore ?? payload.maxPoints ?? payload.puntajeMaximo) ??
+                5;
+
+              return {
+                id: activityId || activityName,
+                name: activityName || activityId,
+                maxScore: Math.max(1, maxScore),
+                type: String(payload.type || "quiz"),
+              };
+            })
+            .filter((activity): activity is GradeSheetActivity => activity !== null);
 
           const students: StudentGrade[] = [];
-          const rawStudents = data.students || [];
+          const rawStudents = Array.isArray(data.students)
+            ? data.students
+            : data.students && typeof data.students === "object"
+              ? Object.entries(data.students as Record<string, unknown>).map(
+                  ([studentKey, studentPayload]) => {
+                    if (studentPayload && typeof studentPayload === "object") {
+                      return {
+                        __studentKey: studentKey,
+                        ...(studentPayload as Record<string, unknown>),
+                      };
+                    }
+                    return {
+                      __studentKey: studentKey,
+                      total: studentPayload,
+                    };
+                  },
+                )
+              : [];
 
-          rawStudents.forEach((student: any) => {
-            if (!isTeacher && student.studentId !== user.id) return;
+          rawStudents.forEach((studentPayload) => {
+            if (!studentPayload || typeof studentPayload !== "object") return;
+            const student = studentPayload as Record<string, unknown>;
+            if (!isTeacher && !matchesCurrentStudent(student)) return;
 
-            if (isTeacher) studentIdsToFetch.add(student.studentId);
+            const studentId = String(
+              student.studentId ??
+                student.studentID ??
+                student.student_id ??
+                student.userId ??
+                student.userID ??
+                student.user_id ??
+                student.uid ??
+                student.id ??
+                student.__studentKey ??
+                "",
+            ).trim();
+            const studentName = String(
+              student.name ??
+                student.studentName ??
+                student.fullName ??
+                `Student ${studentId ? studentId.slice(-1) : "Unknown"}`,
+            ).trim();
 
-            const grades: Record<string, any> = {};
-            if (student.grades) {
-              Object.entries(student.grades).forEach(
-                ([key, gradeData]: [string, any]) => {
-                  grades[key] = {
-                    value: gradeData.value,
-                    comment: gradeData.comment,
-                    submittedAt: gradeData.submittedAt || null,
+            if (isTeacher && studentId) studentIdsToFetch.add(studentId);
+
+            const grades: Record<
+              string,
+              { value?: number; comment?: string; submittedAt?: any }
+            > = {};
+
+            if (Array.isArray(student.grades)) {
+              (student.grades as unknown[]).forEach((gradeData, index) => {
+                const parsedValue = parseGradeValueFromUnknown(gradeData);
+                if (parsedValue === null) return;
+
+                const activityId = activities[index]?.id || `activity_${index + 1}`;
+                grades[activityId] = { value: parsedValue };
+              });
+            } else if (student.grades && typeof student.grades === "object") {
+              Object.entries(student.grades as Record<string, unknown>).forEach(
+                ([key, gradeData]) => {
+                  const parsedValue = parseGradeValueFromUnknown(gradeData);
+                  const normalizedGrade = {
+                    value: parsedValue === null ? undefined : parsedValue,
+                    comment:
+                      gradeData && typeof gradeData === "object" && typeof (gradeData as Record<string, unknown>).comment === "string"
+                        ? ((gradeData as Record<string, unknown>).comment as string)
+                        : undefined,
+                    submittedAt:
+                      gradeData && typeof gradeData === "object"
+                        ? (gradeData as Record<string, unknown>).submittedAt || null
+                        : null,
                   };
+
+                  if (normalizedGrade.value !== undefined || normalizedGrade.comment || normalizedGrade.submittedAt) {
+                    grades[key] = normalizedGrade;
+                  }
                 },
               );
             }
 
+            const parsedTotal =
+              parseLooseNumber(
+                student.total ??
+                  student.grade ??
+                  student.finalGrade ??
+                  student.average ??
+                  student.promedio ??
+                  student.notaFinal ??
+                  student.nota ??
+                  student.score,
+              ) ?? 0;
+
             students.push({
-              studentId: student.studentId ||"",
-              name:
-                student.name ||
-                `Student ${student.studentId?.slice(-1) ||"Unknown"}`,
+              studentId: !isTeacher
+                ? user.id
+                : studentId || `unknown_${doc.id}_${students.length + 1}`,
+              name: studentName,
               grades,
-              total: Math.max(0, Math.min(5.0, student.total || 0)),
-              status: student.status ||"pending",
+              total: Math.max(0, Math.min(5.0, parsedTotal)),
+              status: String(student.status || student.estado || "pending"),
             });
           });
 
           if (students.length > 0) {
             sheets.push({
               id: doc.id,
-              title: data.title ||"Grade sheet",
-              courseId: data.courseId,
-              courseCode: data.courseCode || selectedCourse?.code ||"",
-              courseName: data.courseName ||"Course",
-              teacherId: data.teacherId ||"",
-              teacherName: data.teacherName ||"",
-              gradingPeriod: normalizeGradingPeriod(data.gradingPeriod ||"1st Term"),
+              title: String(data.title || "Grade sheet"),
+              courseId: String(data.courseId || data.course_id || data.cursoId || ""),
+              courseCode:
+                String(data.courseCode || data.course_code || data.codigoCurso || selectedCourse?.code || ""),
+              courseName: String(data.courseName || data.course_name || data.nombreCurso || "Course"),
+              teacherId: String(data.teacherId || ""),
+              teacherName: String(data.teacherName || ""),
+              gradingPeriod: normalizeGradingPeriod(String(data.gradingPeriod || "1st Term")),
               activities,
               students,
               createdAt: data.createdAt,
               updatedAt: data.updatedAt,
-              isPublished: data.isPublished || false,
-              weightPercentage: data.weightPercentage || 0,
+              isPublished: isSheetPublished(data),
+              weightPercentage:
+                parseLooseNumber(
+                  data.weightPercentage ?? data.weight ?? data.percentage ?? data.porcentaje,
+                ) ?? 0,
             });
           }
         });
@@ -484,7 +801,7 @@ export default function GradesPage() {
     };
 
     fetchGradeSheets();
-  }, [selectedCourseId, user, isTeacher]);
+  }, [selectedCourse, selectedCourseId, user, isTeacher]);
 
   const formatGradingPeriod = (period: string): string => {
     return normalizeGradingPeriod(period);
@@ -521,7 +838,7 @@ export default function GradesPage() {
           if (!studentInSheet) return null;
 
           const gradedActivities = sheet.activities.filter(
-            (activity) => toFiniteNumber(studentInSheet.grades?.[activity.id]?.value) !== null
+            (activity) => getActivityGradeValue(studentInSheet.grades || {}, activity) !== null
           ).length;
 
           return {
@@ -1470,8 +1787,10 @@ export default function GradesPage() {
                       const studentSheetData = sheet.students[0];
                       const gradedActivities = sheet.activities.filter(
                         (activity) =>
-                          toFiniteNumber(studentSheetData?.grades?.[activity.id]?.value) !==
-                          null,
+                          getActivityGradeValue(
+                            studentSheetData?.grades || {},
+                            activity,
+                          ) !== null,
                       ).length;
                       const periodAverage =
                         studentSheetData && gradedActivities > 0
@@ -1563,9 +1882,10 @@ export default function GradesPage() {
 
                           <div className="space-y-2">
                             {sheet.activities.map((activity) => {
-                              const grade =
-                                studentSheetData?.grades[activity.id];
-                              const gradeValue = toFiniteNumber(grade?.value);
+                              const gradeValue = getActivityGradeValue(
+                                studentSheetData?.grades || {},
+                                activity,
+                              );
                               const safeGradeValue = gradeValue ?? 0;
                               const isExcellent = safeGradeValue >= 4.0;
                               const isPassing =

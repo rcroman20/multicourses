@@ -194,6 +194,85 @@ const collectCourseContentBackfillUpdates = async (
   courseId: string,
 ): Promise<Array<{ ref: ReturnType<typeof doc>; payload: Record<string, unknown> }>> => {
   const updates: Array<{ ref: ReturnType<typeof doc>; payload: Record<string, unknown> }> = [];
+  const touchedFileIds = new Set<string>();
+  const touchedLegacyWeekIds = new Set<string>();
+
+  const periodsSnap = await getDocs(
+    query(collection(firebaseDB, "periods"), where("courseId", "==", courseId)),
+  );
+
+  for (const periodDocSnap of periodsSnap.docs) {
+    updates.push({
+      ref: doc(firebaseDB, "periods", periodDocSnap.id),
+      payload: {
+        courseId,
+        updatedAt: serverTimestamp(),
+      },
+    });
+
+    const filesByPeriodSnap = await getDocs(
+      query(collection(firebaseDB, "course_files"), where("periodId", "==", periodDocSnap.id)),
+    );
+
+    filesByPeriodSnap.docs.forEach((fileDocSnap) => {
+      if (touchedFileIds.has(fileDocSnap.id)) return;
+      touchedFileIds.add(fileDocSnap.id);
+      updates.push({
+        ref: doc(firebaseDB, "course_files", fileDocSnap.id),
+        payload: {
+          courseId,
+          updatedAt: serverTimestamp(),
+        },
+      });
+    });
+  }
+
+  const structuredWeeksSnap = await getDocs(
+    query(collection(firebaseDB, "weeks"), where("courseId", "==", courseId)),
+  );
+
+  for (const weekDocSnap of structuredWeeksSnap.docs) {
+    updates.push({
+      ref: doc(firebaseDB, "weeks", weekDocSnap.id),
+      payload: {
+        courseId,
+        updatedAt: serverTimestamp(),
+      },
+    });
+
+    const filesByWeekSnap = await getDocs(
+      query(collection(firebaseDB, "course_files"), where("weekId", "==", weekDocSnap.id)),
+    );
+
+    filesByWeekSnap.docs.forEach((fileDocSnap) => {
+      if (touchedFileIds.has(fileDocSnap.id)) return;
+      touchedFileIds.add(fileDocSnap.id);
+      updates.push({
+        ref: doc(firebaseDB, "course_files", fileDocSnap.id),
+        payload: {
+          courseId,
+          updatedAt: serverTimestamp(),
+        },
+      });
+    });
+  }
+
+  const directFilesSnap = await getDocs(
+    query(collection(firebaseDB, "course_files"), where("courseId", "==", courseId)),
+  );
+
+  directFilesSnap.docs.forEach((fileDocSnap) => {
+    if (touchedFileIds.has(fileDocSnap.id)) return;
+    touchedFileIds.add(fileDocSnap.id);
+    updates.push({
+      ref: doc(firebaseDB, "course_files", fileDocSnap.id),
+      payload: {
+        courseId,
+        updatedAt: serverTimestamp(),
+      },
+    });
+  });
+
   const unitsSnap = await getDocs(
     query(collection(firebaseDB, "unidades"), where("courseId", "==", courseId)),
   );
@@ -204,6 +283,7 @@ const collectCourseContentBackfillUpdates = async (
     );
 
     for (const weekDocSnap of weeksSnap.docs) {
+      touchedLegacyWeekIds.add(weekDocSnap.id);
       updates.push({
         ref: doc(firebaseDB, "semanas", weekDocSnap.id),
         payload: {
@@ -228,8 +308,35 @@ const collectCourseContentBackfillUpdates = async (
     }
   }
 
+  for (const legacyWeekId of touchedLegacyWeekIds) {
+    const filesByLegacyWeekSnap = await getDocs(
+      query(collection(firebaseDB, "course_files"), where("weekId", "==", legacyWeekId)),
+    );
+
+    filesByLegacyWeekSnap.docs.forEach((fileDocSnap) => {
+      if (touchedFileIds.has(fileDocSnap.id)) return;
+      touchedFileIds.add(fileDocSnap.id);
+      updates.push({
+        ref: doc(firebaseDB, "course_files", fileDocSnap.id),
+        payload: {
+          courseId,
+          updatedAt: serverTimestamp(),
+        },
+      });
+    });
+  }
+
   return updates;
 };
+
+export async function backfillTransferredCourseContent(courseId: string): Promise<number> {
+  const normalizedCourseId = normalizeText(courseId);
+  if (!normalizedCourseId) return 0;
+
+  const contentBackfillUpdates = await collectCourseContentBackfillUpdates(normalizedCourseId);
+  await appendUpdate(contentBackfillUpdates);
+  return contentBackfillUpdates.length;
+}
 
 export async function transferCourseOwnership(
   input: TransferCourseOwnershipInput,

@@ -18,6 +18,8 @@ import {
 } from "@/lib/services/notificationPreferences";
 import { doc, getDoc } from "firebase/firestore";
 import { firebaseDB } from "@/lib/firebase";
+import { getTeacherOwnedCourses } from "@/lib/courseAccess";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -268,8 +270,9 @@ export default function NotificationsPage() {
     : "notifications:hubprefs";
 
   const teacherCourses = useMemo(() => {
-    if (!user?.id) return [];
-    return courses.filter((course) => course.teacherId === user.id);
+    return getTeacherOwnedCourses(courses, user?.id).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
   }, [courses, user?.id]);
 
   const selectedCourse = useMemo(
@@ -577,6 +580,30 @@ export default function NotificationsPage() {
       case "info":
       default:
         return "inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700";
+    }
+  };
+
+  const getTypeSurfaceClass = (type: NotificationType) => {
+    switch (type) {
+      case "success":
+        return "border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/70";
+      case "warning":
+        return "border-amber-200 bg-amber-50/70 hover:bg-amber-100/70";
+      case "info":
+      default:
+        return "border-sky-200 bg-sky-50/70 hover:bg-sky-100/70";
+    }
+  };
+
+  const getTypeRowClass = (type: NotificationType) => {
+    switch (type) {
+      case "success":
+        return "bg-emerald-50/35 hover:bg-emerald-50/60";
+      case "warning":
+        return "bg-amber-50/35 hover:bg-amber-50/60";
+      case "info":
+      default:
+        return "bg-sky-50/30 hover:bg-sky-50/55";
     }
   };
 
@@ -1305,16 +1332,19 @@ export default function NotificationsPage() {
               {previewItems.map((item, idx) => (
                 <div
                   key={item.id}
-                  className="px-4 py-3 border-b border-slate-100 last:border-b-0 hover:bg-slate-50 transition-colors"
+                  className={cn(
+                    "px-4 py-3 border-b border-slate-100 last:border-b-0 transition-colors",
+                    getTypeRowClass(item.type),
+                  )}
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex-shrink-0 mt-1">
                       {item.type === "success" ? (
-                        <CheckCircle className="h-4 w-4 text-sky-500" />
+                        <CheckCircle className="h-4 w-4 text-emerald-600" />
                       ) : item.type === "warning" ? (
-                        <AlertTriangle className="h-4 w-4 text-sky-500" />
+                        <AlertTriangle className="h-4 w-4 text-amber-600" />
                       ) : (
-                        <Info className="h-4 w-4 text-sky-500" />
+                        <Info className="h-4 w-4 text-sky-600" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -1868,7 +1898,10 @@ export default function NotificationsPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {filteredHistory.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                    <tr
+                      key={item.id}
+                      className={cn("transition-colors", getTypeRowClass(item.type))}
+                    >
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                         {formatDateTime(item.sentAt || item.createdAt)}
                       </td>
@@ -1983,7 +2016,10 @@ export default function NotificationsPage() {
                   .map((item) => (
                     <div
                       key={item.id}
-                      className="p-4 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white transition-all"
+                      className={cn(
+                        "p-4 rounded-xl border transition-all",
+                        getTypeSurfaceClass(item.type),
+                      )}
                     >
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="flex-1">

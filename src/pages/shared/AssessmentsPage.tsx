@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAcademic } from "@/contexts/AcademicContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { getAccessibleCoursesForUser } from "@/lib/courseAccess";
 import { assessmentService } from "@/lib/services/assessmentService";
 import { notificationService } from "@/lib/services/notificationService";
 import { isNotificationAutomationEnabled } from "@/lib/services/notificationAutomation";
@@ -47,9 +48,10 @@ import {
   ListOrdered,
   Link2,
   Code2,
-  Braces
+  Braces,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TEACHER_ONBOARDING_COURSE_CODE } from "@/lib/services/teacherOnboardingService";
 
 type ForumPresetKey = "basic" | "intermediate" | "advanced" | "custom";
 
@@ -217,6 +219,10 @@ export default function AssessmentsPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingAssessment, setEditingAssessment] = useState<any>(null);
   const [showCompletedAssessments, setShowCompletedAssessments] = useState(false);
+  const latestAssessmentsRequestRef = useRef(0);
+  const isTeacher = user?.role === "docente";
+  const isAdmin = user?.role === "admin";
+  const isTeacherView = isTeacher || isAdmin;
 
   const getEnrolledStudentIds = useCallback((course: any): string[] => {
     if (!course?.enrolledStudents || !Array.isArray(course.enrolledStudents)) return [];
@@ -253,25 +259,52 @@ export default function AssessmentsPage() {
   
   const availableCourses = useMemo(() => {
     if (!user) return [];
-    
-    if (user.role === "docente") {
-      return courses.filter(course => course.teacherId === user.id);
-    } else {
-      return courses.filter(course => 
-        course.enrolledStudents?.includes(user.id) || 
-        course.enrolledStudents?.some((student: any) => typeof student === 'string' ? student === user.id : student.id === user.id)
-      );
-    }
-  }, [courses, user]);
+    return getAccessibleCoursesForUser(courses, user, {
+      includeAllForAdmin: isAdmin,
+      includeEnrolledForTeacher: isTeacher,
+    });
+  }, [courses, isAdmin, isTeacher, user]);
 
   const selectedCourse = useMemo(
     () => availableCourses.find((course) => course.id === selectedCourseId) || null,
     [availableCourses, selectedCourseId],
   );
+  const selectedCourseRecord = selectedCourse as (Record<string, unknown> & { teacherId?: string }) | null;
+  const isOnboardingCourse =
+    String(selectedCourse?.code || "")
+      .trim()
+      .toUpperCase() === TEACHER_ONBOARDING_COURSE_CODE;
+  const isMandatoryCourse =
+    isOnboardingCourse ||
+    Boolean(
+      selectedCourseRecord?.isMandatory ||
+        selectedCourseRecord?.mandatory ||
+        selectedCourseRecord?.required ||
+        selectedCourseRecord?.isRequired ||
+        selectedCourseRecord?.isMandatoryForTeachers ||
+        selectedCourseRecord?.mandatoryForTeachers ||
+        selectedCourseRecord?.mandatoryTeacherCourse ||
+        selectedCourseRecord?.requiredForTeachers ||
+        selectedCourseRecord?.requiredForDocentes ||
+        selectedCourseRecord?.obligatorio ||
+        selectedCourseRecord?.obligatorioDocentes ||
+        selectedCourseRecord?.obligatorioParaDocentes ||
+        selectedCourseRecord?.onboarding ||
+        selectedCourseRecord?.isOnboarding,
+    );
+  const canManageAssessments =
+    isAdmin || (isTeacher && selectedCourseRecord?.teacherId === user?.id && !isMandatoryCourse);
 
   useEffect(() => {
     if (availableCourses.length === 0) {
       if (selectedCourseId) setSelectedCourseId("");
+      return;
+    }
+
+    if (selectedCourse) {
+      if (courseCode !== selectedCourse.code) {
+        navigate(`/courses/${selectedCourse.code}/assessments`, { replace: true });
+      }
       return;
     }
 
@@ -286,13 +319,6 @@ export default function AssessmentsPage() {
       }
     }
 
-    if (selectedCourse) {
-      if (courseCode !== selectedCourse.code) {
-        navigate(`/courses/${selectedCourse.code}/assessments`, { replace: true });
-      }
-      return;
-    }
-
     const firstCourse = availableCourses[0];
     setSelectedCourseId(firstCourse.id);
     if (courseCode !== firstCourse.code) {
@@ -300,13 +326,58 @@ export default function AssessmentsPage() {
     }
   }, [availableCourses, courseCode, navigate, selectedCourse, selectedCourseId, setSelectedCourseId]);
 
+  const loadAssessments = useCallback(async (courseIdOverride?: string) => {
+    const targetCourseId = String(courseIdOverride || selectedCourseId || "").trim();
+    if (!targetCourseId) {
+      setAssessments([]);
+      return;
+    }
+
+    const requestId = ++latestAssessmentsRequestRef.current;
+    const targetCourse = availableCourses.find((course) => course.id === targetCourseId) || null;
+
+    setLoading(true);
+    try {
+      const data = await assessmentService.getCourseAssessments(targetCourseId, {
+        courseCode: targetCourse?.code,
+        courseName: targetCourse?.name,
+      });
+
+      if (latestAssessmentsRequestRef.current !== requestId) return;
+
+      setAssessments(
+        data.map((assessment: any) => ({
+          ...assessment,
+          forumRequirements: resolveForumRequirementsFromAssessment(assessment),
+        })),
+      );
+    } catch (error) {
+      if (latestAssessmentsRequestRef.current !== requestId) return;
+      setAssessments([]);
+    } finally {
+      if (latestAssessmentsRequestRef.current === requestId) {
+        setLoading(false);
+      }
+    }
+  }, [availableCourses, selectedCourseId]);
+
   useEffect(() => {
-    if (!selectedCourseId) return;
-    
-    loadAssessments();
-  }, [selectedCourseId]);
+    latestAssessmentsRequestRef.current += 1;
+    if (!selectedCourseId) {
+      setAssessments([]);
+      setLoading(false);
+      return;
+    }
+
+    setAssessments([]);
+    void loadAssessments(selectedCourseId);
+  }, [loadAssessments, selectedCourseId]);
 
   const handleCourseChange = (course: any) => {
+    latestAssessmentsRequestRef.current += 1;
+    setAssessments([]);
+    setLoading(true);
+    setShowCompletedAssessments(false);
     setSelectedCourseId(course.id);
     navigate(`/courses/${course.code}/assessments`);
     setSearchTerm('');
@@ -390,24 +461,6 @@ const categorizedAssessments = useMemo(() => {
     
     return { todayCount, upcomingCount, pastCount, noDueDateCount, totalPercentage };
   }, [categorizedAssessments, assessments]);
-
-  const loadAssessments = async () => {
-    if (!selectedCourseId) return;
-    
-    setLoading(true);
-    try {
-      const data = await assessmentService.getCourseAssessments(selectedCourseId);
-      setAssessments(
-        data.map((assessment: any) => ({
-          ...assessment,
-          forumRequirements: resolveForumRequirementsFromAssessment(assessment),
-        })),
-      );
-    } catch (error) {
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const buildForumRequirements = (data: any) => {
     if (!(data.assessmentType === "assessment" && data.type === "forum")) return null;
@@ -936,19 +989,19 @@ const categorizedAssessments = useMemo(() => {
               <div className="space-y-3">
                 <Book className="mx-auto h-10 w-10 text-slate-400" />
                 <p className="text-xl font-bold text-slate-900">
-                  {user.role === "docente" ? "No courses assigned" : "No enrolled courses"}
+                  {isTeacherView ? "No courses assigned" : "No enrolled courses"}
                 </p>
                 <p className="text-sm text-slate-600">
-                  {user.role === "docente"
+                  {isTeacherView
                     ? "You are not teaching any courses yet."
                     : "You are not enrolled in any courses yet."}
                 </p>
                 <Link
-                  to={user.role === "docente" ? "/courses" : "/dashboard"}
+                  to={isTeacherView ? "/courses" : "/dashboard"}
                   className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  <span>Back to {user.role === "docente" ? "Courses" : "Dashboard"}</span>
+                  <span>Back to {isTeacherView ? "Courses" : "Dashboard"}</span>
                 </Link>
               </div>
             </div>
@@ -1005,7 +1058,7 @@ const categorizedAssessments = useMemo(() => {
                       Track due items, organize evaluation types, and open grading quickly.
                     </p>
                   </div>
-                  {user.role === "docente" && (
+                  {canManageAssessments && (
                     <button
                       type="button"
                       onClick={() => setShowCreateModal(true)}
@@ -1123,11 +1176,11 @@ const categorizedAssessments = useMemo(() => {
                 <FileText className="mx-auto h-10 w-10 text-slate-400" />
                 <p className="mt-3 text-lg font-bold text-slate-900">No assessments available</p>
                 <p className="mt-1 text-sm text-slate-600">
-                  {user.role === "docente"
+                  {canManageAssessments
                     ? "Create your first assessment to get started."
                     : "There are no assessments scheduled yet."}
                 </p>
-                {user.role === "docente" && (
+                {canManageAssessments && (
                   <button
                     onClick={() => setShowCreateModal(true)}
                     className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
@@ -1161,7 +1214,7 @@ const categorizedAssessments = useMemo(() => {
                           key={assessment.id}
                           assessment={assessment}
                           courseCode={selectedCourse?.code || ""}
-                          isTeacher={user.role === "docente"}
+                          isTeacher={canManageAssessments}
                           onEdit={() => {
                             setEditingAssessment(assessment);
                             setShowEditModal(true);
@@ -1206,7 +1259,7 @@ const categorizedAssessments = useMemo(() => {
                               key={assessment.id}
                               assessment={assessment}
                               courseCode={selectedCourse?.code || ""}
-                              isTeacher={user.role === "docente"}
+                              isTeacher={canManageAssessments}
                               onEdit={() => {
                                 setEditingAssessment(assessment);
                                 setShowEditModal(true);
@@ -1255,7 +1308,7 @@ const categorizedAssessments = useMemo(() => {
                                 key={assessment.id}
                                 assessment={assessment}
                                 courseCode={selectedCourse?.code || ""}
-                                isTeacher={user.role === "docente"}
+                                isTeacher={canManageAssessments}
                                 onEdit={() => {
                                   setEditingAssessment(assessment);
                                   setShowEditModal(true);
@@ -1296,7 +1349,7 @@ const categorizedAssessments = useMemo(() => {
                           key={assessment.id}
                           assessment={assessment}
                           courseCode={selectedCourse?.code || ""}
-                          isTeacher={user.role === "docente"}
+                          isTeacher={canManageAssessments}
                           onEdit={() => {
                             setEditingAssessment(assessment);
                             setShowEditModal(true);
@@ -1410,10 +1463,17 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
     }
   };
 
+  const getAssessmentTypePillClass = () => {
+    if (assessment.type === "forum") {
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    }
+    return "border-slate-200 bg-white text-slate-700";
+  };
+
   const cardToneClass = isToday
     ? "border-amber-200 bg-amber-50/40"
     : isUpcoming
-      ? "border-sky-200 bg-sky-50/30"
+      ? "border-sky-200 bg-white"
       : isPast
         ? "border-slate-200 bg-slate-50/70"
         : noDueDate
@@ -1431,7 +1491,12 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="truncate text-sm font-bold text-slate-900">{assessment.name}</h3>
-                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                    getAssessmentTypePillClass(),
+                  )}
+                >
                   {getAssessmentTypeLabel()}
                 </span>
               </div>
@@ -1444,13 +1509,13 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
                   </div>
                 )}
                 {dueDate && (
-                  <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600">
+                  <p className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600">
                     <Calendar className="h-3 w-3" />
                     <span>
                       {assessment.assessmentType === "delivery" ? "Deadline:" : "Due:"}{" "}
                       {format(parseISO(assessment.dueDate), "MMM dd, yyyy", { locale: enUS })}
                     </span>
-                  </div>
+                  </p>
                 )}
                 {assessment.percentage > 0 && (
                   <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600">
@@ -1459,7 +1524,6 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
                   </div>
                 )}
               </div>
-
               {descriptionPreview && <p className="mt-2 line-clamp-2 text-xs text-slate-600">{descriptionPreview}</p>}
             </div>
           </div>
@@ -1656,9 +1720,34 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
   const [gradeSheets, setGradeSheets] = useState<GradeSheet[]>([]);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [errorSheets, setErrorSheets] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
   const selectedTargetCourseIds = formData.targetCourseIds || [];
   const hasMultipleCoursesSelected = selectedTargetCourseIds.length > 1;
   const primaryCourseId = selectedTargetCourseIds[0] || courseId;
+  const gradeSheetsGroupedByUnit = useMemo(() => {
+    const grouped = new Map<string, GradeSheet[]>();
+
+    gradeSheets.forEach((sheet) => {
+      const rawUnit = String(
+        (sheet as Record<string, unknown>)?.unitName ||
+          (sheet as Record<string, unknown>)?.unit ||
+          sheet.gradingPeriod ||
+          "Without unit",
+      )
+        .trim();
+      const unitLabel = rawUnit || "Without unit";
+
+      if (!grouped.has(unitLabel)) grouped.set(unitLabel, []);
+      grouped.get(unitLabel)?.push(sheet);
+    });
+
+    return Array.from(grouped.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([unitLabel, sheets]) => ({
+        unitLabel,
+        sheets: [...sheets].sort((a, b) => a.title.localeCompare(b.title)),
+      }));
+  }, [gradeSheets]);
 
   useEffect(() => {
     setFormData((prev) => ({
@@ -1696,8 +1785,10 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
     loadGradeSheets();
   }, [primaryCourseId]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isCreating) return;
+
     if (selectedTargetCourseIds.length === 0) {
       alert("Please select at least one course");
       return;
@@ -1723,7 +1814,12 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
       return;
     }
 
-    onSubmit(formData);
+    setIsCreating(true);
+    try {
+      await onSubmit(formData);
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -1872,7 +1968,7 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
             </div>
 
             {formData.assessmentType === 'assessment' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div>
                 <div>
                   <label className={modalLabelClass}>Type *</label>
                   <select
@@ -1889,22 +1985,6 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
                     <option value="participation">Participation</option>
                     <option value="forum">Forum</option>
                   </select>
-                </div>
-
-                <div>
-                  <label className={modalLabelClass}>Percentage *</label>
-                  <input
-                    type="number"
-                    name="percentage"
-                    required
-                    min="0"
-                    max="100"
-                    step="0.1"
-                    className={modalInputClass}
-                    placeholder="5%"
-                    value={formData.percentage}
-                    onChange={handleChange}
-                  />
                 </div>
               </div>
             )}
@@ -2036,10 +2116,14 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
                             ? "Select reference grade sheet"
                             : "Select grade sheet"}
                     </option>
-                    {gradeSheets.map((sheet) => (
-                      <option key={sheet.id} value={sheet.id}>
-                        {sheet.title}
-                      </option>
+                    {gradeSheetsGroupedByUnit.map((group) => (
+                      <optgroup key={group.unitLabel} label={group.unitLabel}>
+                        {group.sheets.map((sheet) => (
+                          <option key={sheet.id} value={sheet.id}>
+                            {sheet.title}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                   {loadingSheets && (
@@ -2048,6 +2132,11 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
                 </div>
                 {errorSheets && (
                   <p className="text-sm text-slate-500 mt-2">{errorSheets}</p>
+                )}
+                {!loadingSheets && gradeSheets.length > 0 && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    Sheets are grouped by unit/period to make selection easier.
+                  </p>
                 )}
                 {hasMultipleCoursesSelected && (
                   <div className="mt-3 space-y-2">
@@ -2181,16 +2270,30 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
             <button
               type="button"
               onClick={onClose}
+              disabled={isCreating}
               className={cn(modalSecondaryButtonClass, "flex-1")}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className={cn(modalPrimaryButtonClass, "flex-1")}
+              disabled={isCreating}
+              className={cn(
+                modalPrimaryButtonClass,
+                "flex-1 disabled:cursor-not-allowed disabled:opacity-70",
+              )}
             >
-              <Plus className="h-4 w-4" />
-              Create
+              {isCreating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4" />
+                  Create
+                </>
+              )}
             </button>
           </div>
         </form>
@@ -2206,7 +2309,6 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
     name: assessment?.name || "",
     description: assessment?.description || "",
     type: assessment?.type || "exam",
-    percentage: assessment?.percentage?.toString() || "",
     maxPoints: assessment?.maxPoints?.toString() || "",
     passingScore: assessment?.passingScore?.toString() || "",
     dueDate: assessment?.dueDate ? new Date(assessment.dueDate).toISOString().split('T')[0] : "",
@@ -2226,6 +2328,31 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 
   const [gradeSheets, setGradeSheets] = useState<GradeSheet[]>([]);
   const [loadingSheets, setLoadingSheets] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const gradeSheetsGroupedByUnit = useMemo(() => {
+    const grouped = new Map<string, GradeSheet[]>();
+
+    gradeSheets.forEach((sheet) => {
+      const rawUnit = String(
+        (sheet as Record<string, unknown>)?.unitName ||
+          (sheet as Record<string, unknown>)?.unit ||
+          sheet.gradingPeriod ||
+          "Without unit",
+      )
+        .trim();
+      const unitLabel = rawUnit || "Without unit";
+
+      if (!grouped.has(unitLabel)) grouped.set(unitLabel, []);
+      grouped.get(unitLabel)?.push(sheet);
+    });
+
+    return Array.from(grouped.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([unitLabel, sheets]) => ({
+        unitLabel,
+        sheets: [...sheets].sort((a, b) => a.title.localeCompare(b.title)),
+      }));
+  }, [gradeSheets]);
 
   useEffect(() => {
     const loadGradeSheets = async () => {
@@ -2242,9 +2369,16 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
     loadGradeSheets();
   }, [courseId]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(formData);
+    if (isSaving) return;
+
+    setIsSaving(true);
+    try {
+      await onSubmit(formData);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -2303,6 +2437,7 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
             </div>
             <button
               onClick={onClose}
+              disabled={isSaving}
               className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/80 hover:text-slate-700"
             >
               <X className="h-5 w-5" />
@@ -2349,7 +2484,7 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
             </div>
 
             {formData.assessmentType === 'assessment' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div>
                 <div>
                   <label className={modalLabelClass}>Type *</label>
                   <select
@@ -2367,21 +2502,6 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
                     <option value="forum">Forum</option>
                     <option value="self_evaluation">Self Evaluation</option>
                   </select>
-                </div>
-
-                <div>
-                  <label className={modalLabelClass}>Percentage *</label>
-                  <input
-                    type="number"
-                    name="percentage"
-                    required
-                    min="0"
-                    max="100"
-                    step="0.1"
-                    className={modalInputClass}
-                    value={formData.percentage}
-                    onChange={handleChange}
-                  />
                 </div>
               </div>
             )}
@@ -2497,13 +2617,22 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
                     onChange={handleChange}
                   >
                     <option value="">No grade sheet</option>
-                    {gradeSheets.map((sheet) => (
-                      <option key={sheet.id} value={sheet.id}>
-                        {sheet.title}
-                      </option>
+                    {gradeSheetsGroupedByUnit.map((group) => (
+                      <optgroup key={group.unitLabel} label={group.unitLabel}>
+                        {group.sheets.map((sheet) => (
+                          <option key={sheet.id} value={sheet.id}>
+                            {sheet.title}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 </div>
+                {!loadingSheets && gradeSheets.length > 0 && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    Sheets are grouped by unit/period to make selection easier.
+                  </p>
+                )}
               </div>
             )}
 
@@ -2610,16 +2739,30 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
             <button
               type="button"
               onClick={onClose}
+              disabled={isSaving}
               className={cn(modalSecondaryButtonClass, "flex-1")}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className={cn(modalPrimaryButtonClass, "flex-1")}
+              disabled={isSaving}
+              className={cn(
+                modalPrimaryButtonClass,
+                "flex-1 disabled:cursor-not-allowed disabled:opacity-70",
+              )}
             >
-              <Edit className="h-4 w-4" />
-              Save Changes
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Edit className="h-4 w-4" />
+                  Save Changes
+                </>
+              )}
             </button>
           </div>
         </form>
