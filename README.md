@@ -1,73 +1,136 @@
-# Welcome to your Lovable project
+# Multicourses
 
-## Project info
+Multicourses is an academic operations platform built for institutions, teachers, students, and admins. It centralizes course management, assessments, grading flows, approvals, institutional assignment, and public-facing onboarding in a single workspace.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+Current version: `1.0.0`
 
-## How can I edit this code?
+## What the project includes
 
-There are several ways of editing your application.
+- Public workspace with landing, about, contact, auth, legal, and plan-related pages.
+- Teacher workspace for courses, students, assessments, grades, materials, slides, and analytics.
+- Student workspace for enrolled courses, grades, assessments, and academic tracking.
+- Institution workspace for linking users, approving teachers, assigning teachers to institution-owned courses, and monitoring institutional state.
+- Admin workspace for users, permissions, reports, billing, backups, audit logs, institution operations, and support flows.
 
-**Use Lovable**
+## Tech stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+- React 18
+- TypeScript
+- Vite
+- Tailwind CSS
+- shadcn/ui and Radix UI
+- Firebase Authentication
+- Cloud Firestore
+- Firebase Hosting
+- Vitest
 
-Changes made via Lovable will be committed automatically to this repo.
+## Local development
 
-**Use your preferred IDE**
+### Requirements
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+- Node.js 20+
+- npm
+- A Firebase project configured for this app
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+### Install
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+npm install
+```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+### Start the app
 
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```sh
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+### Production build
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```sh
+npm run build
+```
 
-**Use GitHub Codespaces**
+### Preview the production build
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```sh
+npm run preview
+```
 
-## What technologies are used for this project?
+## Main scripts
 
-This project is built with:
+- `npm run dev`: start the Vite development server.
+- `npm run build`: create a production build in `dist/`.
+- `npm run build:dev`: build using development mode.
+- `npm run lint`: run ESLint.
+- `npm run test`: run Vitest once.
+- `npm run test:watch`: run Vitest in watch mode.
+- `npm run sync:active-users`: sync the public active users counter shown in the public workspace.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Firebase setup
 
-## How can I deploy this project?
+This project uses Firebase for authentication, Firestore data, and hosting.
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+Relevant project files:
 
-## Can I connect a custom domain to my Lovable project?
+- [firebase.json](/Users/robertoroman/Downloads/multicourses/firebase.json)
+- [firestore.rules](/Users/robertoroman/Downloads/multicourses/firestore.rules)
+- [src/lib/firebase.ts](/Users/robertoroman/Downloads/multicourses/src/lib/firebase.ts)
 
-Yes, you can!
+Notes:
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+- The current app is designed to work in environments that may still use the Spark plan.
+- Several flows already include local fallbacks so the app does not depend on Cloud Functions for core academic actions.
+- Hosting is configured to serve the built app from `dist/` and rewrite all routes to `index.html`.
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+## Project structure
+
+- [src/pages/shared](/Users/robertoroman/Downloads/multicourses/src/pages/shared): shared pages such as landing, auth, calendar, courses, assessments, grades, and legal pages.
+- [src/pages/teacher](/Users/robertoroman/Downloads/multicourses/src/pages/teacher): teacher-facing pages and workflows.
+- [src/pages/students](/Users/robertoroman/Downloads/multicourses/src/pages/students): student-facing dashboard views.
+- [src/pages/institution](/Users/robertoroman/Downloads/multicourses/src/pages/institution): institution dashboard and institution-specific operations.
+- [src/pages/admin](/Users/robertoroman/Downloads/multicourses/src/pages/admin): admin control center pages.
+- [src/contexts](/Users/robertoroman/Downloads/multicourses/src/contexts): auth, academic, and notification state.
+- [src/lib/services](/Users/robertoroman/Downloads/multicourses/src/lib/services): business logic, Firebase operations, and operational services.
+- [src/components](/Users/robertoroman/Downloads/multicourses/src/components): shared UI, layout, and route protection components.
+- [src/scripts](/Users/robertoroman/Downloads/multicourses/src/scripts): maintenance and repair scripts for data operations.
+
+## Core product flows
+
+### Teachers
+
+- View assigned courses
+- Create and manage assessments
+- Grade activities
+- Manage classroom students
+- Organize course materials, units, and slides
+
+### Students
+
+- Join available courses
+- Review assessments and due dates
+- Track grades and academic progress
+- Access course materials
+
+### Institutions
+
+- Link teachers and students to the institution
+- Approve teacher requests
+- Assign teachers to institution-managed courses
+- Monitor institution-owned course operations
+
+### Admins
+
+- Manage users and permissions
+- Review reports and billing
+- Audit platform activity
+- Oversee support, institutions, and operational maintenance
+
+## Release tracking
+
+- Current release: `v1.0.0`
+- Changelog: [CHANGELOG.md](/Users/robertoroman/Downloads/multicourses/CHANGELOG.md)
+
+## Repository
+
+- GitHub: `https://github.com/rcroman20/multicourses`
+
