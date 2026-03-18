@@ -1,5 +1,5 @@
 // src/types/academic.ts
-export type UserRole = 'docente' | 'estudiante' | 'admin';
+export type UserRole = 'docente' | 'estudiante' | 'admin' | 'institucion';
 
 export interface User {
   id: string;
@@ -26,6 +26,10 @@ export interface Course {
   credits: number;
   teacherId: string;
   teacherName: string;
+  institutionId?: string;
+  institutionName?: string;
+  createdByInstitutionId?: string;
+  createdByInstitutionName?: string;
   description?: string;
   coverUrl?: string;
   classSchedule?: CourseClassSchedule[];
@@ -42,6 +46,8 @@ export interface Assessment {
   description?: string;
   id: string;
   courseId: string;
+  courseCode?: string;
+  courseName?: string;
   name: string;
   percentage: number;
   dueDate: Date;

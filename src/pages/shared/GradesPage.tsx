@@ -4,6 +4,7 @@ import { useAuth } from"@/contexts/AuthContext";
 import { useAcademic } from"@/contexts/AcademicContext";
 import { DashboardLayout } from"@/components/layout/DashboardLayout";
 import { getAccessibleCoursesForUser } from"@/lib/courseAccess";
+import { calculateStudentProgress } from"@/utils/gradeCalculations";
 import {
   GraduationCap,
   ChevronDown,
@@ -35,6 +36,7 @@ import { collection, getDocs, doc, getDoc, query, where } from"firebase/firestor
 import { firebaseDB } from"@/lib/firebase";
 import { Button } from"@/components/ui/button";
 import { Badge } from"@/components/ui/badge";
+import type { Assessment, Grade } from"@/types/academic";
 import * as XLSX from"xlsx";
 
 interface GradeSheetActivity {
@@ -46,6 +48,7 @@ interface GradeSheetActivity {
 
 interface StudentGrade {
   studentId: string;
+  userId?: string;
   name: string;
   grades: Record<
     string,
@@ -57,6 +60,7 @@ interface StudentGrade {
   >;
   total?: number;
   status: string;
+  matchesCurrentUser?: boolean;
 }
 
 interface GradeSheet {
@@ -89,6 +93,17 @@ interface StudentWithGrades {
   secondTermAverage: number;
   firstTermEquivalence: number;
   secondTermEquivalence: number;
+}
+
+interface AssessmentGradeItem {
+  id: string;
+  name: string;
+  type: string;
+  percentage: number;
+  maxScore: number;
+  value: number;
+  comment?: string;
+  submittedAt?: any;
 }
 
 const firestoreTimestampToDate = (timestamp: any): Date => {
@@ -201,7 +216,7 @@ const isSheetPublished = (payload: Record<string, unknown>): boolean => {
   if (typeof publishedRaw === "boolean") return publishedRaw;
   if (typeof publishedRaw === "number") return publishedRaw === 1;
 
-  return (
+  const hasExplicitPublishedState =
     normalizedText === "true" ||
     normalizedText === "1" ||
     normalizedText === "published" ||
@@ -209,8 +224,46 @@ const isSheetPublished = (payload: Record<string, unknown>): boolean => {
     normalizedText === "active" ||
     normalizedText === "activo" ||
     normalizedText === "yes" ||
-    normalizedText === "si"
-  );
+    normalizedText === "si";
+
+  if (hasExplicitPublishedState) return true;
+  if (normalizedText.length > 0) return false;
+
+  const rawStudents = Array.isArray(payload.students)
+    ? payload.students
+    : payload.students && typeof payload.students === "object"
+      ? Object.values(payload.students as Record<string, unknown>)
+      : [];
+
+  return rawStudents.some((studentEntry) => {
+    if (!studentEntry || typeof studentEntry !== "object") return false;
+    const student = studentEntry as Record<string, unknown>;
+    const directTotal =
+      parseLooseNumber(
+        student.total ??
+          student.grade ??
+          student.finalGrade ??
+          student.average ??
+          student.promedio ??
+          student.notaFinal ??
+          student.nota ??
+          student.score,
+      ) ?? null;
+    if (directTotal !== null) return true;
+
+    const rawGrades = student.grades;
+    if (Array.isArray(rawGrades)) {
+      return rawGrades.some((gradeEntry) => parseGradeValueFromUnknown(gradeEntry) !== null);
+    }
+
+    if (rawGrades && typeof rawGrades === "object") {
+      return Object.values(rawGrades as Record<string, unknown>).some(
+        (gradeEntry) => parseGradeValueFromUnknown(gradeEntry) !== null,
+      );
+    }
+
+    return false;
+  });
 };
 
 const normalizeGradingPeriod = (period: string): string => {
@@ -337,6 +390,73 @@ const calculateNormalizedSheetAverage = (
   return gradedActivities > 0 ? normalizedSum / gradedActivities : 0;
 };
 
+const buildStudentSheetSnapshot = (
+  student: StudentGrade | null | undefined,
+  sheet: Pick<GradeSheet, "activities">,
+): {
+  average: number;
+  gradedActivities: number;
+  totalActivities: number;
+  hasGrade: boolean;
+  totalValue: number | null;
+  usesTotalFallback: boolean;
+} => {
+  if (!student) {
+    return {
+      average: 0,
+      gradedActivities: 0,
+      totalActivities: Array.isArray(sheet.activities) ? sheet.activities.length : 0,
+      hasGrade: false,
+      totalValue: null,
+      usesTotalFallback: false,
+    };
+  }
+
+  const gradeEntries = Object.values(student.grades || {})
+    .map((entry) => parseLooseNumber(entry?.value))
+    .filter((value): value is number => value !== null);
+  const hasGradeEntries = gradeEntries.length > 0;
+  const totalValue = parseLooseNumber(student.total);
+  const statusText = normalizeIdentityValue(student.status);
+  const pendingWithoutGrades =
+    !hasGradeEntries &&
+    totalValue === null &&
+    (statusText === "" ||
+      statusText === "pending" ||
+      statusText === "not_graded" ||
+      statusText === "sin calificar");
+
+  const gradedActivities =
+    Array.isArray(sheet.activities) && sheet.activities.length > 0
+      ? sheet.activities.filter(
+          (activity) => getActivityGradeValue(student.grades || {}, activity) !== null
+        ).length
+      : gradeEntries.length;
+  const totalActivities =
+    Array.isArray(sheet.activities) && sheet.activities.length > 0
+      ? sheet.activities.length
+      : Math.max(gradeEntries.length, totalValue !== null ? 1 : 0);
+
+  let average: number | null = null;
+  if (gradedActivities > 0) {
+    average =
+      Array.isArray(sheet.activities) && sheet.activities.length > 0
+        ? calculateNormalizedSheetAverage(student.grades || {}, sheet.activities)
+        : gradeEntries.reduce((sum, value) => sum + value, 0) / gradeEntries.length;
+  } else if (totalValue !== null) {
+    average = clamp(totalValue, 0, DISPLAY_MAX_SCORE);
+  }
+
+  return {
+    average: average ?? 0,
+    gradedActivities,
+    totalActivities,
+    hasGrade: !pendingWithoutGrades && average !== null,
+    totalValue,
+    usesTotalFallback: gradedActivities === 0 && totalValue !== null,
+  };
+};
+
 interface StudentCourseMetrics {
   currentGrade: number;
   evaluatedPercentage: number;
@@ -388,7 +508,7 @@ const groupGradeSheetsByTerm = (
 
 export default function GradesPage() {
   const { user } = useAuth();
-  const { courses, selectedCourseId, setSelectedCourseId } = useAcademic();
+  const { courses, selectedCourseId, setSelectedCourseId, assessments, grades } = useAcademic();
   const [gradeSheets, setGradeSheets] = useState<GradeSheet[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [courseStudents, setCourseStudents] = useState<Record<string, string>>(
@@ -522,6 +642,7 @@ export default function GradesPage() {
               ? (payload.student as Record<string, unknown>)
               : null;
           const directIdentifiers = [
+            payload.__studentKey,
             payload.studentId,
             payload.studentID,
             payload.student_id,
@@ -557,22 +678,41 @@ export default function GradesPage() {
         };
 
         const matchesSelectedCourse = (payload: Record<string, unknown>): boolean => {
+          const nestedCourse =
+            payload.course && typeof payload.course === "object"
+              ? (payload.course as Record<string, unknown>)
+              : null;
           const sheetCourseId = String(
-            payload.courseId ?? payload.course_id ?? payload.cursoId ?? "",
+            payload.courseId ??
+              payload.course_id ??
+              payload.cursoId ??
+              nestedCourse?.id ??
+              nestedCourse?.courseId ??
+              "",
           ).trim();
           if (sheetCourseId && selectedCourseIdKey && sheetCourseId === selectedCourseIdKey) {
             return true;
           }
 
           const sheetCourseCode = normalizeText(
-            payload.courseCode ?? payload.course_code ?? payload.codigoCurso ?? "",
+            payload.courseCode ??
+              payload.course_code ??
+              payload.codigoCurso ??
+              nestedCourse?.code ??
+              nestedCourse?.courseCode ??
+              "",
           );
           if (sheetCourseCode && selectedCourseCodeKey && sheetCourseCode === selectedCourseCodeKey) {
             return true;
           }
 
           const sheetCourseName = normalizeText(
-            payload.courseName ?? payload.course_name ?? payload.nombreCurso ?? "",
+            payload.courseName ??
+              payload.course_name ??
+              payload.nombreCurso ??
+              nestedCourse?.name ??
+              nestedCourse?.courseName ??
+              "",
           );
           if (sheetCourseName && selectedCourseNameKey && sheetCourseName === selectedCourseNameKey) {
             return true;
@@ -581,9 +721,11 @@ export default function GradesPage() {
           return false;
         };
 
-        const querySnapshot = isTeacher
-          ? await getDocs(query(gradeSheetsRef, where("courseId","==", selectedCourseId)))
-          : await getDocs(gradeSheetsRef);
+        // For students, avoid unrestricted collection reads because Firestore rules
+        // can reject the whole query when unrelated sheets are not readable.
+        const querySnapshot = await getDocs(
+          query(gradeSheetsRef, where("courseId","==", selectedCourseId)),
+        );
 
         const sheets: GradeSheet[] = [];
         const studentIdsToFetch = new Set<string>();
@@ -740,10 +882,19 @@ export default function GradesPage() {
               studentId: !isTeacher
                 ? user.id
                 : studentId || `unknown_${doc.id}_${students.length + 1}`,
+              userId:
+                String(
+                  student.userId ??
+                    student.userID ??
+                    student.user_id ??
+                    student.uid ??
+                    "",
+                ).trim() || undefined,
               name: studentName,
               grades,
               total: Math.max(0, Math.min(5.0, parsedTotal)),
               status: String(student.status || student.estado || "pending"),
+              matchesCurrentUser: !isTeacher ? true : undefined,
             });
           });
 
@@ -834,20 +985,31 @@ export default function GradesPage() {
     (studentId: string, sheets: GradeSheet[]): StudentCourseMetrics | null => {
       const sheetMetrics = sheets
         .map((sheet) => {
-          const studentInSheet = sheet.students.find((s) => s.studentId === studentId);
+          const normalizedStudentId = normalizeIdentityValue(studentId);
+          const studentInSheet = sheet.students.find(
+            (s) =>
+              s.matchesCurrentUser ||
+              normalizeIdentityValue(s.studentId) === normalizedStudentId ||
+              normalizeIdentityValue(s.userId) === normalizedStudentId,
+          );
           if (!studentInSheet) return null;
 
-          const gradedActivities = sheet.activities.filter(
-            (activity) => getActivityGradeValue(studentInSheet.grades || {}, activity) !== null
-          ).length;
+          const studentSnapshot = buildStudentSheetSnapshot(studentInSheet, sheet);
+          const completedActivities =
+            studentSnapshot.gradedActivities > 0
+              ? studentSnapshot.gradedActivities
+              : studentSnapshot.hasGrade && studentSnapshot.totalActivities > 0
+                ? studentSnapshot.totalActivities
+                : 0;
 
           return {
             term: getSupportedTerm(sheet.gradingPeriod),
             weight: Math.max(0, Number(sheet.weightPercentage) || 0),
-            hasGrades: gradedActivities > 0,
-            gradedActivities,
-            totalActivities: sheet.activities.length,
-            average: calculateNormalizedSheetAverage(studentInSheet.grades || {}, sheet.activities),
+            hasGrades: studentSnapshot.hasGrade,
+            gradedActivities: completedActivities,
+            totalActivities: studentSnapshot.totalActivities,
+            average: studentSnapshot.average,
+            aggregationUnits: completedActivities > 0 ? completedActivities : 1,
           };
         })
         .filter(
@@ -860,6 +1022,7 @@ export default function GradesPage() {
             gradedActivities: number;
             totalActivities: number;
             average: number;
+            aggregationUnits: number;
           } => metric !== null
         );
 
@@ -913,6 +1076,19 @@ export default function GradesPage() {
         if (termMetrics.length === 0) return null;
 
         if (!hasConfiguredWeights) {
+          const termUnits = termMetrics.reduce(
+            (sum, metric) => sum + Math.max(1, metric.aggregationUnits),
+            0
+          );
+
+          if (termUnits > 0) {
+            return termMetrics.reduce(
+              (sum, metric) =>
+                sum + metric.average * Math.max(1, metric.aggregationUnits),
+              0
+            ) / termUnits;
+          }
+
           return (
             termMetrics.reduce((sum, metric) => sum + metric.average, 0) /
             termMetrics.length
@@ -931,6 +1107,19 @@ export default function GradesPage() {
 
         if (termWeight > 0) {
           return weightedTermSum / (termWeight / 100);
+        }
+
+        const termUnits = termMetrics.reduce(
+          (sum, metric) => sum + Math.max(1, metric.aggregationUnits),
+          0
+        );
+
+        if (termUnits > 0) {
+          return termMetrics.reduce(
+            (sum, metric) =>
+              sum + metric.average * Math.max(1, metric.aggregationUnits),
+            0
+          ) / termUnits;
         }
 
         return (
@@ -970,15 +1159,143 @@ export default function GradesPage() {
     []
   );
 
+  const studentAssessmentItems = useMemo((): AssessmentGradeItem[] => {
+    if (!user || isTeacher || !selectedCourseId) return [];
+
+    const courseAssessmentMap = new Map<string, Assessment>(
+      assessments
+        .filter((assessment) => assessment.courseId === selectedCourseId)
+        .map((assessment) => [String(assessment.id || "").trim(), assessment]),
+    );
+
+    return grades
+      .filter((grade) => grade.studentId === user.id && grade.courseId === selectedCourseId)
+      .map<AssessmentGradeItem | null>((grade) => {
+        const assessment = courseAssessmentMap.get(String(grade.assessmentId || "").trim());
+        if (!assessment) return null;
+
+        const value = parseLooseNumber(grade.value);
+        if (value === null) return null;
+
+        const assessmentItem: AssessmentGradeItem = {
+          id: grade.id,
+          name: assessment.name || "Assessment",
+          type: String(assessment.type || assessment.assessmentType || "assessment"),
+          percentage: Math.max(0, Number(assessment.percentage) || 0),
+          maxScore:
+            Math.max(
+              1,
+              parseLooseNumber(assessment.maxScore ?? assessment.maxPoints) ?? DISPLAY_MAX_SCORE,
+            ),
+          value,
+          comment:
+            typeof grade.comment === "string"
+              ? grade.comment
+              : typeof grade.feedback === "string"
+                ? grade.feedback
+                : typeof grade.comments === "string"
+                  ? grade.comments
+                  : undefined,
+          submittedAt: grade.submittedAt || grade.gradedAt,
+        };
+
+        return assessmentItem;
+      })
+      .filter((item): item is AssessmentGradeItem => item !== null)
+      .sort((a, b) => b.percentage - a.percentage);
+  }, [assessments, grades, isTeacher, selectedCourseId, user]);
+
+  const filteredStudentAssessmentItems = useMemo(() => {
+    if (isTeacher) return [];
+
+    const normalizedQuery = normalizeText(searchTerm).replace(/\s+/g, " ");
+    if (!normalizedQuery) return studentAssessmentItems;
+
+    return studentAssessmentItems.filter((item) => {
+      const searchableValues = [item.name, item.type, `${item.percentage}%`]
+        .map((value) => normalizeText(value).replace(/\s+/g, " "))
+        .filter(Boolean);
+
+      return searchableValues.some((value) => value.includes(normalizedQuery));
+    });
+  }, [isTeacher, searchTerm, studentAssessmentItems]);
+
+  const assessmentFallbackData = useMemo(() => {
+    if (!user || isTeacher || !selectedCourseId) return null;
+
+    const courseAssessments = assessments.filter((assessment) => assessment.courseId === selectedCourseId);
+    if (courseAssessments.length === 0) return null;
+
+    const fallbackCalculatedProgress = calculateStudentProgress(
+      user.id,
+      selectedCourseId,
+      grades as Grade[],
+      courseAssessments,
+    );
+    if (fallbackCalculatedProgress.evaluatedPercentage <= 0) return null;
+
+    const normalizedCurrentGrade =
+      fallbackCalculatedProgress.evaluatedPercentage > 0
+        ? fallbackCalculatedProgress.currentGrade /
+          (fallbackCalculatedProgress.evaluatedPercentage / 100)
+        : fallbackCalculatedProgress.currentGrade;
+    const safeCurrentGrade = clamp(
+      Number.isFinite(normalizedCurrentGrade) ? normalizedCurrentGrade : 0,
+      0,
+      DISPLAY_MAX_SCORE,
+    );
+
+    let status:"passing" |"at-risk" |"failing";
+    if (safeCurrentGrade >= 3.6) {
+      status ="passing";
+    } else if (safeCurrentGrade >= 3.0) {
+      status ="at-risk";
+    } else {
+      status ="failing";
+    }
+
+    return {
+      studentId: user.id,
+      courseId: selectedCourseId,
+      currentGrade: Number(safeCurrentGrade.toFixed(1)),
+      evaluatedPercentage: Number(
+        clamp(fallbackCalculatedProgress.evaluatedPercentage, 0, 100).toFixed(1),
+      ),
+      remainingPercentage: Number(
+        clamp(fallbackCalculatedProgress.remainingPercentage, 0, 100).toFixed(1),
+      ),
+      minGradeToPass: Number(
+        clamp(
+          Number.isFinite(fallbackCalculatedProgress.minGradeToPass)
+            ? fallbackCalculatedProgress.minGradeToPass
+            : DISPLAY_MAX_SCORE,
+          0,
+          DISPLAY_MAX_SCORE,
+        ).toFixed(1),
+      ),
+      status,
+      totalWeightPercentage: Number(
+        courseAssessments.reduce(
+          (sum, assessment) => sum + Math.max(0, Number(assessment.percentage) || 0),
+          0,
+        ).toFixed(1),
+      ),
+      firstTermAverage: 0,
+      secondTermAverage: 0,
+      firstTermEquivalence: 0,
+      secondTermEquivalence: 0,
+    };
+  }, [assessments, grades, isTeacher, selectedCourseId, user]);
+
   const studentData = useMemo(() => {
     if (!user || isTeacher || !selectedCourseId || gradeSheets.length === 0)
-      return null;
+      return assessmentFallbackData;
 
     const publishedSheets = gradeSheets.filter((sheet) => sheet.isPublished);
-    if (publishedSheets.length === 0) return null;
+    if (publishedSheets.length === 0) return assessmentFallbackData;
 
     const metrics = calculateStudentCourseMetrics(user.id, publishedSheets);
-    if (!metrics) return null;
+    if (!metrics) return assessmentFallbackData;
 
     let status:"passing" |"at-risk" |"failing";
     if (metrics.currentGrade >= 3.6) {
@@ -1003,7 +1320,7 @@ export default function GradesPage() {
       firstTermEquivalence: metrics.firstTermEquivalence,
       secondTermEquivalence: metrics.secondTermEquivalence,
     };
-  }, [user, isTeacher, selectedCourseId, gradeSheets, calculateStudentCourseMetrics]);
+  }, [assessmentFallbackData, user, isTeacher, selectedCourseId, gradeSheets, calculateStudentCourseMetrics]);
 
   const studentsWithGrades = useMemo((): StudentWithGrades[] => {
     if (!isTeacher || !selectedCourse) return [];
@@ -1072,6 +1389,28 @@ export default function GradesPage() {
       })
       .filter(Boolean) as StudentWithGrades[];
   }, [isTeacher, selectedCourse, courseStudents, gradeSheets, calculateStudentCourseMetrics]);
+
+  const filteredStudentSheets = useMemo(() => {
+    if (isTeacher) return [];
+
+    const normalizedQuery = normalizeText(searchTerm).replace(/\s+/g, " ");
+    if (!normalizedQuery) return gradeSheets;
+
+    return gradeSheets.filter((sheet) => {
+      const searchableValues = [
+        sheet.title,
+        sheet.courseName,
+        sheet.teacherName,
+        sheet.gradingPeriod,
+        ...sheet.activities.map((activity) => activity.name),
+        ...sheet.activities.map((activity) => activity.type),
+      ]
+        .map((value) => normalizeText(value).replace(/\s+/g, " "))
+        .filter(Boolean);
+
+      return searchableValues.some((value) => value.includes(normalizedQuery));
+    });
+  }, [gradeSheets, isTeacher, searchTerm]);
 
   const getCourseCode = (): string => {
     if (!selectedCourse) return"";
@@ -1250,7 +1589,7 @@ export default function GradesPage() {
       case "failing":
         return "bg-rose-100 text-rose-700 border border-rose-200";
       default:
-        return "bg-slate-100 text-slate-700 border border-slate-300";
+        return "bg-slate-100 text-slate-700 border border-slate-300/60";
     }
   };
 
@@ -1290,7 +1629,7 @@ export default function GradesPage() {
         <div className="relative overflow-x-clip">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="space-y-2 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
@@ -1309,10 +1648,10 @@ export default function GradesPage() {
       <div className="relative overflow-x-clip">
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-3">
-              <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+              <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
                 <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
                 <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
                 <div className="relative z-10">
@@ -1350,7 +1689,7 @@ export default function GradesPage() {
                   <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {isTeacher ? (
                       <>
-                        <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                        <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                               <Users className="h-4 w-4" />
@@ -1359,7 +1698,7 @@ export default function GradesPage() {
                           </div>
                           <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Students</p>
                         </div>
-                        <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                        <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                               <BarChart3 className="h-4 w-4" />
@@ -1368,7 +1707,7 @@ export default function GradesPage() {
                           </div>
                           <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Average</p>
                         </div>
-                        <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                        <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                               <CheckCircle2 className="h-4 w-4" />
@@ -1377,7 +1716,7 @@ export default function GradesPage() {
                           </div>
                           <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Published</p>
                         </div>
-                        <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                        <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                               <FileSpreadsheet className="h-4 w-4" />
@@ -1389,7 +1728,7 @@ export default function GradesPage() {
                       </>
                     ) : (
                       <>
-                        <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                        <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                               <BarChart3 className="h-4 w-4" />
@@ -1400,7 +1739,7 @@ export default function GradesPage() {
                           </div>
                           <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Average</p>
                         </div>
-                        <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                        <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                               <Percent className="h-4 w-4" />
@@ -1411,7 +1750,7 @@ export default function GradesPage() {
                           </div>
                           <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Evaluated</p>
                         </div>
-                        <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                        <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                               <Clock className="h-4 w-4" />
@@ -1422,13 +1761,17 @@ export default function GradesPage() {
                           </div>
                           <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Remaining</p>
                         </div>
-                        <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                        <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                               <Trophy className="h-4 w-4" />
                             </div>
                             <p className="truncate text-sm font-bold leading-5 text-slate-900">
-                              {studentData ? getStatusText(studentData.status) :"No data"}
+                              {studentData
+                                ? getStatusText(studentData.status)
+                                : gradeSheets.length > 0
+                                  ? "In progress"
+                                  : "Awaiting grades"}
                             </p>
                           </div>
                           <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Status</p>
@@ -1440,7 +1783,7 @@ export default function GradesPage() {
               </section>
 
         {isTeacher && selectedCourse && (
-          <section className="order-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <section className="order-2 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-800">Student status distribution</h3>
               <p className="text-xs text-slate-500">Based on current course average</p>
@@ -1503,7 +1846,7 @@ export default function GradesPage() {
           </section>
         )}
 
-        <section className="order-1 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="order-1 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-1 flex-col gap-4 sm:flex-row">
               <div className="flex-1">
@@ -1512,7 +1855,7 @@ export default function GradesPage() {
                   <input
                     type="text"
                     placeholder={isTeacher ?"Search students..." :"Search grades..."}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium text-slate-700 transition-all focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                    className="w-full rounded-xl border border-slate-200/60 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium text-slate-700 transition-all focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
@@ -1522,7 +1865,7 @@ export default function GradesPage() {
                 <select
                   value={selectedCourseId}
                   onChange={(e) => handleCourseChange(e.target.value)}
-                  className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 >
                   {userCourses.length === 0 ? (
                     <option value="">No courses available</option>
@@ -1547,7 +1890,7 @@ export default function GradesPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <Link
                   to={`/courses/${getCourseCode()}/grade-sheets`}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <FileSpreadsheet className="h-4 w-4" />
                   <span>Manage</span>
@@ -1555,14 +1898,14 @@ export default function GradesPage() {
                 <button
                   onClick={exportToExcel}
                   disabled={filteredStudents.length === 0}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-200 disabled:hover:bg-white disabled:hover:text-slate-700"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-200/60 disabled:hover:bg-white disabled:hover:text-slate-700"
                 >
                   <Download className="h-4 w-4" />
                   <span>Export</span>
                 </button>
                 <button
                   onClick={() => setShowFilter(true)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <Filter className="h-4 w-4" />
                   <span>Filters</span>
@@ -1574,7 +1917,7 @@ export default function GradesPage() {
 
         
         {!selectedCourseId && userCourses.length === 0 && (
-          <div className="order-3 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+          <div className="order-3 rounded-2xl border border-slate-200/60 bg-white p-6 text-center shadow-sm">
             <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
               <GraduationCap className="h-4 w-4 text-blue-500" />
             </div>
@@ -1594,7 +1937,7 @@ export default function GradesPage() {
           selectedCourseId &&
           filteredStudents.length === 0 &&
           studentsWithGrades.length > 0 && (
-            <div className="order-3 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+            <div className="order-3 rounded-2xl border border-slate-200/60 bg-white p-6 text-center shadow-sm">
               <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
                 <Search className="h-4 w-4 text-gray-500" />
               </div>
@@ -1612,7 +1955,7 @@ export default function GradesPage() {
                     setSearchTerm("");
                     setFilterByStatus("all");
                   }}
-                  className="mt-3 inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  className="mt-3 inline-flex items-center rounded-lg border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
                   Clear filters
                 </button>
@@ -1621,125 +1964,140 @@ export default function GradesPage() {
           )}
 
         
-        {!isLoading && !isTeacher && studentData && selectedCourse && (
+        {!isLoading && !isTeacher && selectedCourse && (
           <div className="order-3 grid gap-3">
-            
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">
-                    Your Progress
-                  </h3>
-                  <p className="text-sm text-gray-500">{selectedCourse.name}</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Badge
-                    className={`${getStatusBadgeClass(studentData.status, studentData.currentGrade)} hidden sm:block`}
-                  >
-                    {getStatusText(studentData.status)}
-                  </Badge>
-                  {studentData.status ==="passing" &&
-                    studentData.currentGrade >= 4.0 && (
-                      <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200">
-                        <Trophy className="h-3 w-3 mr-1" />
-                        Excellent
-                      </Badge>
-                    )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-                <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
-                  <p className="text-xs font-semibold text-blue-600  tracking-wide mb-2">
-                    Current Average
-                  </p>
-                  <div className="flex items-end gap-2">
-                    <p
-                      className={cn(
-                        "text-lg font-bold text-center md:text-left",
-                        getGradePalette(studentData.currentGrade).gradeText,
-                      )}
-                    >
-                      {formatGrade(studentData.currentGrade)}
-                    </p>
-                    <span className="text-sm text-gray-500 mb-1 hidden md:block">
-                      /5.0
-                    </span>
-                  </div>
-                  {studentData.currentGrade >= 4.0 && (
-                    <div className="flex items-center gap-1 mt-2">
-                      <Star className="h-3 w-3 text-gray-700" />
-                      <span className="text-xs text-gray-700 font-medium">
-                        Top Performance
-                      </span>
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
+              {studentData ? (
+                <>
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">
+                        Your Progress
+                      </h3>
+                      <p className="text-sm text-gray-500">{selectedCourse.name}</p>
                     </div>
-                  )}
-                </div>
+                    <div className="flex items-center gap-3">
+                      <Badge
+                        className={`${getStatusBadgeClass(studentData.status, studentData.currentGrade)} hidden sm:block`}
+                      >
+                        {getStatusText(studentData.status)}
+                      </Badge>
+                      {studentData.status ==="passing" &&
+                        studentData.currentGrade >= 4.0 && (
+                          <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200">
+                            <Trophy className="h-3 w-3 mr-1" />
+                            Excellent
+                          </Badge>
+                        )}
+                    </div>
+                  </div>
 
-                <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
-                  <p className="text-xs font-semibold text-blue-600  tracking-wide mb-2">
-                    Evaluated
-                  </p>
-                  <p className="text-lg font-bold text-gray-900 text-center md:text-left">
-                    {studentData.evaluatedPercentage.toFixed(0)}%
-                  </p>
-                </div>
+                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+                    <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+                      <p className="text-xs font-semibold text-blue-600  tracking-wide mb-2">
+                        Current Average
+                      </p>
+                      <div className="flex items-end gap-2">
+                        <p
+                          className={cn(
+                            "text-lg font-bold text-center md:text-left",
+                            getGradePalette(studentData.currentGrade).gradeText,
+                          )}
+                        >
+                          {formatGrade(studentData.currentGrade)}
+                        </p>
+                        <span className="text-sm text-gray-500 mb-1 hidden md:block">
+                          /5.0
+                        </span>
+                      </div>
+                      {studentData.currentGrade >= 4.0 && (
+                        <div className="flex items-center gap-1 mt-2">
+                          <Star className="h-3 w-3 text-gray-700" />
+                          <span className="text-xs text-gray-700 font-medium">
+                            Top Performance
+                          </span>
+                        </div>
+                      )}
+                    </div>
 
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold text-gray-700  tracking-wide mb-2">
-                    Remaining
-                  </p>
-                  <p className="text-lg font-bold text-gray-900 text-center md:text-left">
-                    {studentData.remainingPercentage.toFixed(0)}%
-                  </p>
-                </div>
+                    <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+                      <p className="text-xs font-semibold text-blue-600  tracking-wide mb-2">
+                        Evaluated
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 text-center md:text-left">
+                        {studentData.evaluatedPercentage.toFixed(0)}%
+                      </p>
+                    </div>
 
-                <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
-                  <p className="text-xs font-semibold text-blue-600  tracking-wide mb-2">
-                    To Pass
-                  </p>
-                  <p className="text-lg font-bold text-gray-900 text-center md:text-left">
-                    {studentData.minGradeToPass > 0
-                      ? studentData.minGradeToPass.toFixed(1)
-                      :"3.6"}
-                  </p>
-                </div>
+                    <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
+                      <p className="text-xs font-semibold text-gray-700  tracking-wide mb-2">
+                        Remaining
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 text-center md:text-left">
+                        {studentData.remainingPercentage.toFixed(0)}%
+                      </p>
+                    </div>
 
-                <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
-                  <p className="text-xs font-semibold text-blue-600 tracking-wide mb-2">
-                    1st Term Avg
-                  </p>
-                  <p className="text-lg font-bold text-gray-900 text-center md:text-left">
-                    {studentData.firstTermAverage > 0
-                      ? formatGrade(studentData.firstTermAverage)
-                      :"--"}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {studentData.firstTermEquivalence.toFixed(0)}% equivalent
-                  </p>
-                </div>
+                    <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+                      <p className="text-xs font-semibold text-blue-600  tracking-wide mb-2">
+                        To Pass
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 text-center md:text-left">
+                        {studentData.minGradeToPass > 0
+                          ? studentData.minGradeToPass.toFixed(1)
+                          :"3.6"}
+                      </p>
+                    </div>
 
-                <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
-                  <p className="text-xs font-semibold text-blue-600 tracking-wide mb-2">
-                    2nd Term Avg
-                  </p>
-                  <p className="text-lg font-bold text-gray-900 text-center md:text-left">
-                    {studentData.secondTermAverage > 0
-                      ? formatGrade(studentData.secondTermAverage)
-                      :"--"}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {studentData.secondTermEquivalence.toFixed(0)}% equivalent
+                    <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+                      <p className="text-xs font-semibold text-blue-600 tracking-wide mb-2">
+                        1st Term Avg
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 text-center md:text-left">
+                        {studentData.firstTermAverage > 0
+                          ? formatGrade(studentData.firstTermAverage)
+                          :"--"}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {studentData.firstTermEquivalence.toFixed(0)}% equivalent
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+                      <p className="text-xs font-semibold text-blue-600 tracking-wide mb-2">
+                        2nd Term Avg
+                      </p>
+                      <p className="text-lg font-bold text-gray-900 text-center md:text-left">
+                        {studentData.secondTermAverage > 0
+                          ? formatGrade(studentData.secondTermAverage)
+                          :"--"}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {studentData.secondTermEquivalence.toFixed(0)}% equivalent
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
+                  <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                    <Clock className="h-4 w-4" />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Grades are not available yet
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-600">
+                    We will show your progress summary here as soon as your teacher publishes grades for this course.
                   </p>
                 </div>
-              </div>
+              )}
             </div>
 
             
           
 
             
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-4 border-b border-slate-100 pb-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
@@ -1765,8 +2123,8 @@ export default function GradesPage() {
               </div>
 
               <div className="space-y-3">
-                {gradeSheets.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                {gradeSheets.length === 0 && studentAssessmentItems.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                     <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
                       <AlertCircle className="h-4 w-4 text-gray-400" />
                     </div>
@@ -1778,32 +2136,90 @@ export default function GradesPage() {
                       evaluations for this course.
                     </p>
                   </div>
+                ) : gradeSheets.length === 0 ? (
+                  filteredStudentAssessmentItems.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
+                      <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+                        <Search className="h-4 w-4 text-gray-400" />
+                      </div>
+                      <p className="text-gray-900 font-semibold text-lg mb-2">
+                        No matching grades
+                      </p>
+                      <p className="text-sm text-gray-600 max-w-md mx-auto">
+                        Try another search term to find an assessment or grade entry.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {filteredStudentAssessmentItems.map((item) => {
+                        const normalizedValue = clamp(
+                          (item.value / Math.max(1, item.maxScore)) * DISPLAY_MAX_SCORE,
+                          0,
+                          DISPLAY_MAX_SCORE,
+                        );
+                        const palette = getGradePalette(normalizedValue);
+
+                        return (
+                          <div
+                            key={item.id}
+                            className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200/60 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_140px_120px]"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-900">{item.name}</p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                {item.type} · {item.percentage.toFixed(0)}% of course
+                              </p>
+                              {item.comment && (
+                                <p className="mt-2 text-xs text-slate-600">{item.comment}</p>
+                              )}
+                            </div>
+                            <div className="rounded-lg border border-slate-200/60 bg-white px-3 py-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Recorded</p>
+                              <p className="mt-1 text-sm font-bold text-slate-900">
+                                {formatGrade(item.value)} / {formatGrade(item.maxScore)}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-slate-200/60 bg-white px-3 py-2 text-right">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Normalized</p>
+                              <p className={cn("mt-1 text-lg font-bold", palette.gradeText)}>
+                                {formatGrade(normalizedValue)}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : filteredStudentSheets.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
+                    <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+                      <Search className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <p className="text-gray-900 font-semibold text-lg mb-2">
+                      No matching grades
+                    </p>
+                    <p className="text-sm text-gray-600 max-w-md mx-auto">
+                      Try another search term to find a grading period, activity, or teacher.
+                    </p>
+                  </div>
                 ) : (
                   <div className="space-y-3">
-                    {gradeSheets.map((sheet) => {
+                    {filteredStudentSheets.map((sheet) => {
                       const updatedAt = firestoreTimestampToDate(
                         sheet.updatedAt,
                       );
                       const studentSheetData = sheet.students[0];
-                      const gradedActivities = sheet.activities.filter(
-                        (activity) =>
-                          getActivityGradeValue(
-                            studentSheetData?.grades || {},
-                            activity,
-                          ) !== null,
-                      ).length;
-                      const periodAverage =
-                        studentSheetData && gradedActivities > 0
-                          ? calculateNormalizedSheetAverage(
-                              studentSheetData.grades || {},
-                              sheet.activities
-                            )
-                          : 0;
+                      const studentSheetSnapshot = buildStudentSheetSnapshot(
+                        studentSheetData,
+                        sheet,
+                      );
+                      const gradedActivities = studentSheetSnapshot.gradedActivities;
+                      const periodAverage = studentSheetSnapshot.average;
 
                       return (
                         <div
                           key={sheet.id}
-                          className="rounded-xl border border-slate-200 bg-white p-3 transition hover:shadow-sm"
+                          className="rounded-xl border border-slate-200/60 bg-white p-3 transition hover:shadow-sm"
                         >
                           <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-3 gap-3">
                             <div className="flex-1">
@@ -1846,7 +2262,7 @@ export default function GradesPage() {
                           </div>
 
                           <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                            <div className="rounded-lg border border-slate-200/60 bg-slate-50 p-2">
                               <p className="text-xs text-blue-600 font-semibold">Period Average</p>
                               <p
                                 className={cn("text-lg font-bold",
@@ -1857,16 +2273,16 @@ export default function GradesPage() {
                                       :"text-rose-600",
                                 )}
                               >
-                                {gradedActivities > 0 ? formatGrade(periodAverage) :"--"}
+                                {studentSheetSnapshot.hasGrade ? formatGrade(periodAverage) :"--"}
                               </p>
                             </div>
                             <div className="rounded-lg border border-sky-100 bg-sky-50 p-2">
                               <p className="text-xs text-blue-600 font-semibold">Graded Activities</p>
                               <p className="text-lg font-bold text-gray-900">
-                                {gradedActivities}/{sheet.activities.length}
+                                {gradedActivities}/{studentSheetSnapshot.totalActivities}
                               </p>
                             </div>
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                            <div className="rounded-lg border border-slate-200/60 bg-slate-50 p-2">
                               <p className="text-xs text-blue-600 font-semibold">Weight</p>
                               <p className="text-lg font-bold text-gray-900">
                                 {sheet.weightPercentage || 0}%
@@ -1881,6 +2297,37 @@ export default function GradesPage() {
                           </div>
 
                           <div className="space-y-2">
+                            {sheet.activities.length === 0 && studentSheetSnapshot.usesTotalFallback && (
+                              <div className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200/60 bg-slate-50 p-2 sm:grid-cols-12 sm:items-center">
+                                <div className="sm:col-span-6 min-w-0">
+                                  <p className="font-semibold text-gray-900 text-xs sm:text-sm">
+                                    Overall grade
+                                  </p>
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    Imported from the recorded course score.
+                                  </p>
+                                </div>
+                                <div className="sm:col-span-3">
+                                  <Badge className="w-fit border border-slate-200/60 bg-white text-slate-700 sm:mx-auto">
+                                    Final
+                                  </Badge>
+                                </div>
+                                <div className="sm:col-span-3 text-right sm:ml-4">
+                                  <span
+                                    className={cn(
+                                      "text-lg font-bold",
+                                      periodAverage >= 3.6
+                                        ? "text-emerald-600"
+                                        : periodAverage >= 3.0
+                                          ? "text-amber-600"
+                                          : "text-rose-600",
+                                    )}
+                                  >
+                                    {formatGrade(periodAverage)}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
                             {sheet.activities.map((activity) => {
                               const gradeValue = getActivityGradeValue(
                                 studentSheetData?.grades || {},
@@ -1896,7 +2343,7 @@ export default function GradesPage() {
                               return (
                                 <div
                                   key={activity.id}
-                                  className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 sm:grid-cols-12 sm:items-center"
+                                  className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200/60 bg-slate-50 p-2 sm:grid-cols-12 sm:items-center"
                                 >
                                   <div className="sm:col-span-6 min-w-0">
                                     <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-1">
@@ -1910,14 +2357,14 @@ export default function GradesPage() {
                                     <Badge
                                       className={`text-xs w-fit sm:mx-auto ${
                                         activity.type ==="exam"
-                                          ?"bg-gray-200 text-gray-800 border border-gray-300"
+                                          ?"bg-gray-200 text-gray-800 border border-gray-300/60"
                                           : activity.type ==="quiz"
                                             ?"bg-blue-100 text-blue-700 border border-blue-200"
                                             : activity.type ==="homework"
                                               ?"bg-blue-100 text-blue-700 border border-blue-200"
                                               : activity.type ==="project"
                                                 ?"bg-blue-100 text-blue-700 border border-blue-200"
-                                                :"bg-gray-100 text-gray-700 border border-gray-200"
+                                                :"bg-gray-100 text-gray-700 border border-gray-200/60"
                                       }`}
                                     >
                                       {activity.type ==="exam"
@@ -1971,8 +2418,8 @@ export default function GradesPage() {
               </div>
             </div>
 
-            {studentWeightTermGroups.length > 0 && (
-              <div className="sticky top-24 self-start rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            {studentData && studentWeightTermGroups.length > 0 && (
+              <div className="sticky top-24 self-start rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
                   <div className="mb-2 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-slate-500">
@@ -1988,7 +2435,7 @@ export default function GradesPage() {
                     </div>
                   </div>
                   {studentData.totalWeightPercentage !== 100 && (
-                    <Badge className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0 text-[11px] font-medium text-slate-600">
+                    <Badge className="rounded-full border border-slate-200/60 bg-slate-100 px-2 py-0 text-[11px] font-medium text-slate-600">
                       {studentData.totalWeightPercentage < 100
                         ?"Incomplete"
                         :"Over 100%"}
@@ -2002,7 +2449,7 @@ export default function GradesPage() {
                     return (
                       <div
                         key={`student-${group.term}`}
-                        className="rounded-lg border border-slate-200 bg-slate-50 p-2"
+                        className="rounded-lg border border-slate-200/60 bg-slate-50 p-2"
                       >
                         <button
                           type="button"
@@ -2033,7 +2480,7 @@ export default function GradesPage() {
                             {group.sheets.map((sheet) => (
                               <div
                                 key={sheet.id}
-                                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2.5"
+                                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-white p-2.5"
                               >
                                 <div className="flex items-center gap-2">
                                   <div className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-slate-500">
@@ -2054,7 +2501,7 @@ export default function GradesPage() {
                     );
                   })}
 
-                  <div className="pt-4 mt-4 border-t border-gray-200">
+                  <div className="pt-4 mt-4 border-t border-gray-200/60">
                     <div className="flex items-center justify-between">
                       <div>
                         <span className="font-bold text-gray-900">
@@ -2080,7 +2527,7 @@ export default function GradesPage() {
                       <div
                         className={`mt-2 p-3 rounded-xl ${
                           studentData.totalWeightPercentage > 100
-                            ?"bg-gray-50 border border-gray-200"
+                            ?"bg-gray-50 border border-gray-200/60"
                             :"bg-blue-50 border border-blue-200"
                         }`}
                       >
@@ -2162,7 +2609,7 @@ export default function GradesPage() {
             {gradeSheets.length > 0 && (
               <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_330px]">
               {filteredStudents.length > 0 && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-4 border-b border-slate-100 pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
@@ -2185,7 +2632,7 @@ export default function GradesPage() {
                   </div>
                 </div>
 
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <div className="overflow-x-auto rounded-xl border border-slate-200/60">
                   <table className="min-w-full text-sm">
                     <thead className="sticky top-0 z-10">
                       <tr className="bg-slate-50">
@@ -2260,7 +2707,7 @@ export default function GradesPage() {
                         return (
                         <tr
                           key={student.id}
-                          className={cn("border-t border-slate-200",
+                          className={cn("border-t border-slate-200/60",
                             index % 2 === 0 ?"bg-white" :"bg-slate-50/40",
                           )}
                         >
@@ -2375,7 +2822,7 @@ export default function GradesPage() {
 
               <div
                 className={cn(
-                  "sticky top-24 self-start h-fit rounded-2xl border border-slate-200 bg-white p-3 shadow-sm",
+                  "sticky top-24 self-start h-fit rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm",
                   filteredStudents.length === 0 &&"lg:col-span-2",
                 )}
               >
@@ -2397,7 +2844,7 @@ export default function GradesPage() {
                   <Badge
                     className={`rounded-full border px-2 py-0 text-[11px] font-medium ${
                       weightValidation.isValid
-                        ?"border-slate-200 bg-slate-100 text-slate-600"
+                        ?"border-slate-200/60 bg-slate-100 text-slate-600"
                         :"border-amber-200 bg-amber-50 text-amber-700"
                     }`}
                   >
@@ -2411,7 +2858,7 @@ export default function GradesPage() {
                     return (
                       <div
                         key={`teacher-${group.term}`}
-                        className="rounded-lg border border-slate-200 bg-slate-50 p-2"
+                        className="rounded-lg border border-slate-200/60 bg-slate-50 p-2"
                       >
                         <button
                           type="button"
@@ -2442,7 +2889,7 @@ export default function GradesPage() {
                             {group.sheets.map((sheet) => (
                               <div
                                 key={sheet.id}
-                                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2.5"
+                                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-white p-2.5"
                               >
                                 <div className="flex items-center gap-2">
                                   <div
@@ -2462,7 +2909,7 @@ export default function GradesPage() {
                                     </p>
                                     {!sheet.isPublished && (
                                       <div className="mt-0.5">
-                                        <Badge className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0 text-[11px] font-medium text-slate-600">
+                                        <Badge className="rounded-full border border-slate-200/60 bg-slate-100 px-2 py-0 text-[11px] font-medium text-slate-600">
                                           Draft
                                         </Badge>
                                       </div>
@@ -2498,7 +2945,7 @@ export default function GradesPage() {
                     );
                   })}
 
-                  <div className="pt-4 mt-4 border-t border-gray-200">
+                  <div className="pt-4 mt-4 border-t border-gray-200/60">
                     <div className="flex items-center justify-between">
                       <div>
                         <span className="font-bold text-gray-900">
@@ -2524,7 +2971,7 @@ export default function GradesPage() {
                       <div
                         className={`mt-3 p-3 rounded-xl ${
                           weightValidation.total > 100
-                            ?"bg-gray-50 border border-gray-200"
+                            ?"bg-gray-50 border border-gray-200/60"
                             :"bg-blue-50 border border-blue-200"
                         }`}
                       >
@@ -2557,7 +3004,7 @@ export default function GradesPage() {
 
             
             {gradeSheets.length === 0 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-6 text-center shadow-sm">
                 <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
                   <FileSpreadsheet className="h-4 w-4 text-blue-400" />
                 </div>
@@ -2569,8 +3016,8 @@ export default function GradesPage() {
                   by creating your first grade sheet to manage grades.
                 </p>
                 <Link to={`/courses/${getCourseCode()}/grade-sheets`}>
-                  <Button className="td-backups-button inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700">
-                    <FileSpreadsheet className="td-btn-icon" />
+                  <Button className="inline-flex h-10 items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700">
+                    <FileSpreadsheet className="h-4 w-4" />
                     <span>Create Grade Sheet</span>
                   </Button>
                 </Link>
@@ -2580,7 +3027,7 @@ export default function GradesPage() {
             {selectedCourse.enrolledStudents.length > 0 &&
               filteredStudents.length === 0 &&
               gradeSheets.length > 0 && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+                <div className="rounded-2xl border border-slate-200/60 bg-white p-6 text-center shadow-sm">
                   <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
                     <AlertCircle className="h-4 w-4 text-gray-500" />
                   </div>
@@ -2594,7 +3041,7 @@ export default function GradesPage() {
               )}
 
             {selectedCourse.enrolledStudents.length === 0 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-6 text-center shadow-sm">
                 <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
                   <Users className="h-4 w-4 text-blue-400" />
                 </div>
@@ -2619,10 +3066,10 @@ export default function GradesPage() {
           onClick={() => setShowFilter(false)}
         >
           <div
-            className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)]"
+            className="w-full max-w-2xl rounded-2xl border border-slate-200/60 bg-white shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200/60 px-4 py-3">
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Grade filters</h3>
                 <p className="mt-0.5 text-xs text-slate-500">
@@ -2632,7 +3079,7 @@ export default function GradesPage() {
               <button
                 type="button"
                 onClick={() => setShowFilter(false)}
-                className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                className="rounded-lg border border-slate-200/60 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 aria-label="Close filters"
               >
                 <X className="h-4 w-4" />
@@ -2647,7 +3094,7 @@ export default function GradesPage() {
                 <select
                   value={filterByStatus}
                   onChange={(e) => setFilterByStatus(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  className="h-10 w-full rounded-xl border border-slate-300/60 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 >
                   <option value="all">All Statuses</option>
                   <option value="passing">Passing</option>
@@ -2663,7 +3110,7 @@ export default function GradesPage() {
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as any)}
-                  className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  className="h-10 w-full rounded-xl border border-slate-300/60 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 >
                   <option value="name">Name</option>
                   <option value="grade">Grade</option>
@@ -2678,7 +3125,7 @@ export default function GradesPage() {
                 <select
                   value={sortOrder}
                   onChange={(e) => setSortOrder(e.target.value as any)}
-                  className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  className="h-10 w-full rounded-xl border border-slate-300/60 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 >
                   <option value="asc">Ascending</option>
                   <option value="desc">Descending</option>
@@ -2686,7 +3133,7 @@ export default function GradesPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200/60 px-4 py-3">
               <button
                 type="button"
                 onClick={() => {
@@ -2694,7 +3141,7 @@ export default function GradesPage() {
                   setSortBy("name");
                   setSortOrder("asc");
                 }}
-                className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                className="inline-flex items-center rounded-lg border border-slate-200/60 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
               >
                 Reset
               </button>

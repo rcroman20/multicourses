@@ -9,6 +9,8 @@ import {
   where,
 } from "firebase/firestore";
 import { firebaseDB } from "@/lib/firebase";
+import { syncPublicInstitutionDirectoryRecord } from "@/lib/services/institutionProfileService";
+import { getInstitutionPlanQuote } from "@/lib/services/institutionPlanService";
 import {
   getTeacherPlanDefinition,
   getTeacherPlanExpiryDate,
@@ -23,6 +25,7 @@ export type TeacherApprovalStatus = "pending" | "approved" | "rejected";
 
 export interface TeacherApprovalRequestRecord {
   userId: string;
+  requestType?: "teacher" | "institution";
   email: string;
   name: string;
   idNumber: string;
@@ -45,6 +48,20 @@ export interface TeacherApprovalRequestRecord {
   paymentInstructions?: string;
   paymentRequestedAt?: Date | null;
   paymentRequestedBy?: string;
+  institutionId?: string;
+  institutionPlanStatus?: string;
+  institutionApprovalStatus?: string;
+  institutionRequestedPlanId?: string;
+  institutionRequestedCourseLimit?: number;
+  institutionRequestedStudentLimit?: number;
+  institutionRequestedTeacherLimit?: number;
+  institutionRequestedPriceCop?: number;
+  institutionRequestedMonthlyEquivalentCop?: number;
+  institutionPaymentMethod?: string;
+  institutionPlanNotes?: string;
+  institutionPaymentInstructions?: string;
+  institutionPaymentRequestedAt?: Date | null;
+  institutionPaymentRequestedBy?: string;
 }
 
 const USERS_COLLECTION = "usuarios";
@@ -62,6 +79,11 @@ const toNumber = (value: unknown): number => {
     return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
   }
   return 0;
+};
+
+const toPositiveNumberOrZero = (value: unknown): number => {
+  const parsed = toNumber(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const isPermissionDeniedError = (error: unknown): boolean =>
@@ -113,7 +135,8 @@ export async function getPendingTeacherApprovalRequests(): Promise<TeacherApprov
     .filter(({ data }) => {
       const requestedRole = toText(data.requestedRole).toLowerCase();
       const status = toText(data.teacherApprovalStatus).toLowerCase();
-      return requestedRole === "docente" && status === "pending";
+      const institutionId = toText(data.institutionId);
+      return requestedRole === "docente" && status === "pending" && !institutionId;
     })
     .map(({ id, data }) => ({
       userId: id,
@@ -156,8 +179,10 @@ export async function getTeacherApprovalRequests(): Promise<TeacherApprovalReque
       const requestedRole = toText(data.requestedRole).toLowerCase();
       const status = toText(data.teacherApprovalStatus).toLowerCase();
       const planStatus = toText(data.teacherPlanStatus).toLowerCase();
+      const institutionId = toText(data.institutionId);
       return (
         requestedRole === "docente" &&
+        !institutionId &&
         (
           status === "pending" ||
           status === "rejected" ||
@@ -217,6 +242,464 @@ export async function getTeacherApprovalRequests(): Promise<TeacherApprovalReque
     const right = b.requestedAt?.getTime() || 0;
     return right - left;
   });
+}
+
+const isInstitutionRequestData = (data: Record<string, unknown>, docId: string): boolean => {
+  const role = toText(data.role).toLowerCase();
+  const requestedRole = toText(data.requestedRole).toLowerCase();
+  const institutionRole = toText(data.institutionRole).toLowerCase();
+  const institutionPlanStatus = toText(data.institutionPlanStatus).toLowerCase();
+  const institutionId = toText(data.institutionId) || docId;
+
+  const hasInstitutionRole =
+    role === "institucion" ||
+    requestedRole === "institucion" ||
+    institutionRole === "owner" ||
+    institutionRole === "coordinator";
+
+  return hasInstitutionRole && institutionPlanStatus === "pending_payment" && institutionId === docId;
+};
+
+export async function getAdminApprovalRequests(): Promise<TeacherApprovalRequestRecord[]> {
+  const teacherRequests = await getTeacherApprovalRequests();
+
+  let docsData: Array<{ id: string; data: Record<string, unknown> }> = [];
+  try {
+    const pendingInstitutionSnap = await getDocs(
+      query(collection(firebaseDB, USERS_COLLECTION), where("institutionPlanStatus", "==", "pending_payment")),
+    );
+    docsData = pendingInstitutionSnap.docs.map((snap) => ({
+      id: snap.id,
+      data: (snap.data() || {}) as Record<string, unknown>,
+    }));
+  } catch {
+    const fallbackSnap = await getDocs(collection(firebaseDB, USERS_COLLECTION));
+    docsData = fallbackSnap.docs.map((snap) => ({
+      id: snap.id,
+      data: (snap.data() || {}) as Record<string, unknown>,
+    }));
+  }
+
+  const institutionRequests = docsData
+    .filter(({ id, data }) => isInstitutionRequestData(data, id))
+    .map(({ id, data }) => {
+      const institutionName =
+        toText(data.institutionName) ||
+        toText(data.institution) ||
+        toText(data.name) ||
+        "Institution";
+      const approvalStatus = toText(data.institutionApprovalStatus).toLowerCase();
+      const requestStatus: TeacherApprovalStatus =
+        approvalStatus === "rejected"
+          ? "rejected"
+          : approvalStatus === "approved" ||
+              Boolean(data.institutionPaymentRequestedAt) ||
+              toText(data.institutionPaymentInstructions).length > 0
+            ? "approved"
+            : "pending";
+
+      return {
+        userId: id,
+        requestType: "institution" as const,
+        email: toText(data.email),
+        name: toText(data.name) || institutionName,
+        idNumber: toText(data.idNumber),
+        whatsApp:
+          toText(data.whatsApp) ||
+          toText(data.whatsapp) ||
+          toText(data.phone),
+        requestedAt: toDate(data.createdAt),
+        status: requestStatus,
+        requestCount: 1,
+        interestedPlan: toText(data.institutionPlanName) || "Institution Plan",
+        institutionName,
+        institutionId: toText(data.institutionId) || id,
+        institutionPlanStatus: toText(data.institutionPlanStatus) || "pending_payment",
+        institutionApprovalStatus: approvalStatus || "pending",
+        institutionRequestedPlanId: toText(data.institutionRequestedPlanId),
+        institutionRequestedCourseLimit: toPositiveNumberOrZero(
+          data.institutionRequestedCourseLimit ?? data.institutionCourseLimit,
+        ),
+        institutionRequestedStudentLimit: toPositiveNumberOrZero(
+          data.institutionRequestedStudentLimit ?? data.institutionStudentLimit,
+        ),
+        institutionRequestedTeacherLimit: toPositiveNumberOrZero(
+          data.institutionRequestedTeacherLimit ?? data.institutionTeacherLimit,
+        ),
+        institutionRequestedPriceCop: toPositiveNumberOrZero(
+          data.institutionRequestedPriceCop ?? data.institutionPlanPriceCop,
+        ),
+        institutionRequestedMonthlyEquivalentCop: toPositiveNumberOrZero(
+          data.institutionRequestedMonthlyEquivalentCop ?? data.institutionPlanMonthlyEquivalentCop,
+        ),
+        institutionPaymentMethod: toText(data.institutionPaymentMethod),
+        institutionPlanNotes: toText(data.institutionPlanNotes),
+        institutionPaymentInstructions: toText(data.institutionPaymentInstructions),
+        institutionPaymentRequestedAt: toDate(data.institutionPaymentRequestedAt),
+        institutionPaymentRequestedBy: toText(data.institutionPaymentRequestedBy),
+      } satisfies TeacherApprovalRequestRecord;
+    });
+
+  const merged = [...institutionRequests, ...teacherRequests];
+  return merged.sort((a, b) => {
+    if (a.status !== b.status) {
+      const order: Record<TeacherApprovalStatus, number> = {
+        pending: 0,
+        approved: 1,
+        rejected: 2,
+      };
+      return order[a.status] - order[b.status];
+    }
+    const left = a.requestedAt?.getTime() || 0;
+    const right = b.requestedAt?.getTime() || 0;
+    return right - left;
+  });
+}
+
+export async function approveInstitutionApprovalRequest(
+  userId: string,
+  adminEmail: string,
+): Promise<void> {
+  const normalizedAdmin = (adminEmail || "admin").trim().toLowerCase();
+  const userRef = doc(firebaseDB, USERS_COLLECTION, userId);
+  const studentRef = doc(firebaseDB, STUDENTS_COLLECTION, userId);
+  const institutionRef = doc(firebaseDB, "instituciones", userId);
+
+  const [userSnap, studentSnap, institutionSnap] = await Promise.all([
+    getDoc(userRef),
+    getDoc(studentRef),
+    getDoc(institutionRef),
+  ]);
+
+  const userData = (userSnap.data() || {}) as Record<string, unknown>;
+  const studentData = (studentSnap.data() || {}) as Record<string, unknown>;
+  const institutionData = (institutionSnap.data() || {}) as Record<string, unknown>;
+
+  const institutionName =
+    toText(institutionData.name) ||
+    toText(userData.institutionName) ||
+    toText(userData.institution) ||
+    toText(studentData.institutionName) ||
+    toText(studentData.institution) ||
+    toText(userData.name) ||
+    toText(studentData.name) ||
+    "Institution";
+  const planName =
+    toText(institutionData.planName) ||
+    toText(userData.institutionPlanName) ||
+    "Institution Plan";
+  const courseLimit =
+    institutionData.courseLimit ?? userData.institutionCourseLimit ?? studentData.institutionCourseLimit ?? 25;
+  const studentLimit =
+    institutionData.studentLimit ?? userData.institutionStudentLimit ?? studentData.institutionStudentLimit ?? 500;
+  const ownerName =
+    toText(institutionData.ownerName) ||
+    toText(userData.name) ||
+    toText(studentData.name) ||
+    institutionName;
+  const ownerEmail =
+    toText(institutionData.ownerEmail) ||
+    toText(userData.email) ||
+    toText(studentData.email);
+  const institutionQuote = getInstitutionPlanQuote({
+    planId:
+      toText(userData.institutionRequestedPlanId) ||
+      toText(studentData.institutionRequestedPlanId) ||
+      toText(institutionData.planId),
+    courseLimit,
+    studentLimit,
+  });
+  const planPriceCop =
+    toPositiveNumberOrZero(
+      userData.institutionRequestedPriceCop ??
+        studentData.institutionRequestedPriceCop ??
+        institutionData.priceCop,
+    ) || institutionQuote?.priceCop || 0;
+  const monthlyEquivalentCop =
+    toPositiveNumberOrZero(
+      userData.institutionRequestedMonthlyEquivalentCop ??
+        studentData.institutionRequestedMonthlyEquivalentCop ??
+        institutionData.monthlyEquivalentCop,
+    ) || institutionQuote?.monthlyEquivalentCop || 0;
+
+  await Promise.all([
+    setDoc(
+      userRef,
+      {
+        role: "institucion",
+        institutionId: userId,
+        institutionName,
+        institution: institutionName,
+        institutionRole: "owner",
+        institutionPlanStatus: "active",
+        institutionPlanName: planName,
+        institutionPlanPriceCop: planPriceCop || null,
+        institutionPlanMonthlyEquivalentCop: monthlyEquivalentCop || null,
+        institutionCourseLimit: courseLimit,
+        institutionStudentLimit: studentLimit,
+        institutionTeacherLimit: null,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    ),
+    setDoc(
+      studentRef,
+      {
+        role: "institucion",
+        institutionId: userId,
+        institutionName,
+        institution: institutionName,
+        institutionRole: "owner",
+        institutionPlanStatus: "active",
+        institutionPlanName: planName,
+        institutionPlanPriceCop: planPriceCop || null,
+        institutionPlanMonthlyEquivalentCop: monthlyEquivalentCop || null,
+        institutionCourseLimit: courseLimit,
+        institutionStudentLimit: studentLimit,
+        institutionTeacherLimit: null,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    ),
+    setDoc(
+      institutionRef,
+      {
+        name: institutionName,
+        ownerUserId: userId,
+        ownerName,
+        ownerEmail,
+        planStatus: "active",
+        planName,
+        priceCop: planPriceCop || null,
+        monthlyEquivalentCop: monthlyEquivalentCop || null,
+        courseLimit,
+        studentLimit,
+        teacherLimit: null,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    ),
+  ]);
+
+  await syncPublicInstitutionDirectoryRecord({
+    id: userId,
+    name: institutionName,
+    planStatus: "active",
+  }).catch(() => undefined);
+}
+
+export async function setInstitutionPaymentPendingRequest(
+  userId: string,
+  adminEmail: string,
+  paymentInstructions: string,
+): Promise<void> {
+  const normalizedAdmin = (adminEmail || "admin").trim().toLowerCase();
+  const normalizedInstructions = (paymentInstructions || "").trim();
+  if (normalizedInstructions.length < 12) {
+    throw new Error("Payment instructions must contain at least 12 characters.");
+  }
+
+  const userRef = doc(firebaseDB, USERS_COLLECTION, userId);
+  const studentRef = doc(firebaseDB, STUDENTS_COLLECTION, userId);
+  const institutionRef = doc(firebaseDB, "instituciones", userId);
+
+  const [userSnap, studentSnap, institutionSnap] = await Promise.all([
+    getDoc(userRef),
+    getDoc(studentRef),
+    getDoc(institutionRef),
+  ]);
+
+  const userData = (userSnap.data() || {}) as Record<string, unknown>;
+  const studentData = (studentSnap.data() || {}) as Record<string, unknown>;
+  const institutionData = (institutionSnap.data() || {}) as Record<string, unknown>;
+
+  const institutionName =
+    toText(institutionData.name) ||
+    toText(userData.institutionName) ||
+    toText(userData.institution) ||
+    toText(studentData.institutionName) ||
+    toText(studentData.institution) ||
+    toText(userData.name) ||
+    "Institution";
+  const planName =
+    toText(userData.institutionPlanName) ||
+    toText(studentData.institutionPlanName) ||
+    toText(institutionData.planName) ||
+    "Institution Plan";
+  const courseLimit =
+    toPositiveNumberOrZero(
+      userData.institutionRequestedCourseLimit ??
+        studentData.institutionRequestedCourseLimit ??
+        institutionData.courseLimit ??
+        userData.institutionCourseLimit,
+    ) || 25;
+  const studentLimit =
+    toPositiveNumberOrZero(
+      userData.institutionRequestedStudentLimit ??
+        studentData.institutionRequestedStudentLimit ??
+        institutionData.studentLimit ??
+        userData.institutionStudentLimit,
+    ) || 500;
+  const requestedPlanId =
+    toText(userData.institutionRequestedPlanId) ||
+    toText(studentData.institutionRequestedPlanId);
+  const paymentMethod =
+    toText(userData.institutionPaymentMethod) ||
+    toText(studentData.institutionPaymentMethod);
+  const planNotes =
+    toText(userData.institutionPlanNotes) ||
+    toText(studentData.institutionPlanNotes);
+  const institutionQuote = getInstitutionPlanQuote({
+    planId: requestedPlanId,
+    courseLimit,
+    studentLimit,
+  });
+  const requestedPriceCop =
+    toPositiveNumberOrZero(
+      userData.institutionRequestedPriceCop ??
+        studentData.institutionRequestedPriceCop ??
+        institutionData.priceCop,
+    ) || institutionQuote?.priceCop || 0;
+  const requestedMonthlyEquivalentCop =
+    toPositiveNumberOrZero(
+      userData.institutionRequestedMonthlyEquivalentCop ??
+        studentData.institutionRequestedMonthlyEquivalentCop ??
+        institutionData.monthlyEquivalentCop,
+    ) || institutionQuote?.monthlyEquivalentCop || 0;
+
+  const approvalPayload = {
+    role: "institucion",
+    institutionId: userId,
+    institutionName,
+    institution: institutionName,
+    institutionRole: "owner",
+    institutionApprovalStatus: "approved",
+    institutionPlanStatus: "pending_payment",
+    institutionPlanName: planName,
+    institutionRequestedPlanId: requestedPlanId || null,
+    institutionRequestedCourseLimit: courseLimit,
+    institutionRequestedStudentLimit: studentLimit,
+    institutionRequestedTeacherLimit: null,
+    institutionRequestedPriceCop: requestedPriceCop || null,
+    institutionRequestedMonthlyEquivalentCop: requestedMonthlyEquivalentCop || null,
+    institutionPlanPriceCop: requestedPriceCop || null,
+    institutionPlanMonthlyEquivalentCop: requestedMonthlyEquivalentCop || null,
+    institutionCourseLimit: courseLimit,
+    institutionStudentLimit: studentLimit,
+    institutionTeacherLimit: null,
+    institutionPaymentMethod: paymentMethod || null,
+    institutionPlanNotes: planNotes || null,
+    institutionPaymentInstructions: normalizedInstructions,
+    institutionPaymentRequestedAt: serverTimestamp(),
+    institutionPaymentRequestedBy: normalizedAdmin,
+    updatedAt: serverTimestamp(),
+  };
+
+  await Promise.all([
+    setDoc(userRef, approvalPayload, { merge: true }),
+    setDoc(studentRef, approvalPayload, { merge: true }),
+    setDoc(
+      institutionRef,
+      {
+        name: institutionName,
+        ownerUserId: userId,
+        planStatus: "pending_payment",
+        planName,
+        priceCop: requestedPriceCop || null,
+        monthlyEquivalentCop: requestedMonthlyEquivalentCop || null,
+        courseLimit,
+        studentLimit,
+        teacherLimit: null,
+        institutionPaymentInstructions: normalizedInstructions,
+        institutionPaymentRequestedAt: serverTimestamp(),
+        institutionPaymentRequestedBy: normalizedAdmin,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    ),
+  ]);
+
+  await syncPublicInstitutionDirectoryRecord({
+    id: userId,
+    name: institutionName,
+    planStatus: "pending_payment",
+  }).catch(() => undefined);
+}
+
+export async function rejectInstitutionApprovalRequest(
+  userId: string,
+  adminEmail: string,
+  rejectionReason: string,
+): Promise<void> {
+  const normalizedAdmin = (adminEmail || "admin").trim().toLowerCase();
+  const normalizedReason = (rejectionReason || "").trim();
+  if (normalizedReason.length < 8) {
+    throw new Error("Rejection reason must contain at least 8 characters.");
+  }
+
+  const userRef = doc(firebaseDB, USERS_COLLECTION, userId);
+  const studentRef = doc(firebaseDB, STUDENTS_COLLECTION, userId);
+  const institutionRef = doc(firebaseDB, "instituciones", userId);
+
+  const [userSnap, studentSnap, institutionSnap] = await Promise.all([
+    getDoc(userRef),
+    getDoc(studentRef),
+    getDoc(institutionRef),
+  ]);
+
+  const userData = (userSnap.data() || {}) as Record<string, unknown>;
+  const studentData = (studentSnap.data() || {}) as Record<string, unknown>;
+  const institutionData = (institutionSnap.data() || {}) as Record<string, unknown>;
+  const institutionName =
+    toText(institutionData.name) ||
+    toText(userData.institutionName) ||
+    toText(studentData.institutionName) ||
+    toText(userData.name) ||
+    "Institution";
+
+  const rejectionPayload = {
+    role: "institucion",
+    institutionId: userId,
+    institutionName,
+    institution: institutionName,
+    institutionRole: "owner",
+    institutionApprovalStatus: "rejected",
+    institutionPlanStatus: "inactive",
+    teacherRejectionReason: normalizedReason,
+    teacherRejectedAt: serverTimestamp(),
+    teacherRejectedBy: normalizedAdmin,
+    institutionPaymentInstructions: null,
+    institutionPaymentRequestedAt: null,
+    institutionPaymentRequestedBy: null,
+    updatedAt: serverTimestamp(),
+  };
+
+  await Promise.all([
+    setDoc(userRef, rejectionPayload, { merge: true }),
+    setDoc(studentRef, rejectionPayload, { merge: true }),
+    setDoc(
+      institutionRef,
+      {
+        name: institutionName,
+        ownerUserId: userId,
+        planStatus: "inactive",
+        teacherRejectionReason: normalizedReason,
+        teacherRejectedAt: serverTimestamp(),
+        teacherRejectedBy: normalizedAdmin,
+        institutionPaymentInstructions: null,
+        institutionPaymentRequestedAt: null,
+        institutionPaymentRequestedBy: null,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    ),
+  ]);
+
+  await syncPublicInstitutionDirectoryRecord({
+    id: userId,
+    name: institutionName,
+    planStatus: "inactive",
+  }).catch(() => undefined);
 }
 
 export async function approveTeacherApprovalRequest(

@@ -24,13 +24,14 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const BATCH_LIMIT = 300;
 
 export type AccountDeletionStatus = "pending" | "completed" | "cancelled";
+export type AccountDeletionRole = "docente" | "estudiante" | "institucion";
 
 export interface AccountDeletionRequestRecord {
   id: string;
   userId: string;
   email: string;
   name: string;
-  role: "docente" | "estudiante";
+  role: AccountDeletionRole;
   status: AccountDeletionStatus;
   requestedAt: Date | null;
   scheduledDeletionAt: Date | null;
@@ -42,7 +43,11 @@ interface RequestAccountDeletionInput {
   userId: string;
   email: string;
   name: string;
-  role: "docente" | "estudiante";
+  role: AccountDeletionRole;
+}
+
+function toText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function getErrorCode(error: unknown): string {
@@ -113,7 +118,7 @@ function mapRequestDoc(snapshot: any): AccountDeletionRequestRecord {
     userId: data.userId || snapshot.id,
     email: data.email || "",
     name: data.name || "User",
-    role: (data.role || "estudiante") as "docente" | "estudiante",
+    role: (data.role || "estudiante") as AccountDeletionRole,
     status: (data.status || "pending") as AccountDeletionStatus,
     requestedAt: toDate(data.requestedAt),
     scheduledDeletionAt: toDate(data.scheduledDeletionAt),
@@ -144,7 +149,7 @@ function mapLegacyRequest(
     userId: String(nested.userId || fallbackUserId),
     email: String(nested.email || ""),
     name: String(nested.name || "User"),
-    role: (nested.role || "estudiante") as "docente" | "estudiante",
+    role: (nested.role || "estudiante") as AccountDeletionRole,
     status: (nested.status || "pending") as AccountDeletionStatus,
     requestedAt: toDate(nested.requestedAt),
     scheduledDeletionAt: toDate(nested.scheduledDeletionAt),
@@ -179,7 +184,11 @@ async function setLegacyRequest(
 ): Promise<void> {
   const legacyRef = legacyRequestDocRef(userId);
   const existingSnap = await getDoc(legacyRef).catch(() => null);
-  const legacyRole = request.role === "docente" ? "docente" : "estudiante";
+  const legacyRole = request.role === "docente"
+    ? "docente"
+    : request.role === "institucion"
+      ? "institucion"
+      : "estudiante";
 
   await setDoc(
     legacyRef,
@@ -272,9 +281,18 @@ async function deleteCourseScopedData(courseId: string): Promise<void> {
     "assessmentForumComments",
     "slides",
     "units",
+    "courseBackups",
   ];
 
   await Promise.all(courseScopedCollections.map((name) => deleteByField(name, "courseId", courseId)));
+}
+
+function getInstitutionOwnerId(courseData: Record<string, unknown>): string {
+  return toText(courseData.createdByInstitutionId) || toText(courseData.institutionId);
+}
+
+function isInstitutionOwnedCourse(courseData: Record<string, unknown>): boolean {
+  return Boolean(getInstitutionOwnerId(courseData));
 }
 
 async function deleteTeacherOwnedCourses(collectionName: string, teacherId: string): Promise<void> {
@@ -283,6 +301,38 @@ async function deleteTeacherOwnedCourses(collectionName: string, teacherId: stri
     const snap = await getDocs(q);
 
     for (const courseDoc of snap.docs) {
+      const courseData = (courseDoc.data() || {}) as Record<string, unknown>;
+      if (isInstitutionOwnedCourse(courseData)) {
+        continue;
+      }
+      await deleteCourseScopedData(courseDoc.id);
+      await deleteDoc(courseDoc.ref).catch(() => undefined);
+    }
+  } catch {
+    // ignore cleanup failures in optional collections
+  }
+}
+
+async function deleteInstitutionOwnedCourses(
+  collectionName: string,
+  institutionId: string,
+): Promise<void> {
+  if (!institutionId) return;
+
+  try {
+    const [byInstitutionSnap, byCreatorSnap] = await Promise.all([
+      getDocs(query(collection(firebaseDB, collectionName), where("institutionId", "==", institutionId))),
+      getDocs(
+        query(collection(firebaseDB, collectionName), where("createdByInstitutionId", "==", institutionId)),
+      ),
+    ]);
+
+    const dedupedCourses = new Map<string, any>();
+    [...byInstitutionSnap.docs, ...byCreatorSnap.docs].forEach((courseDoc) => {
+      dedupedCourses.set(courseDoc.id, courseDoc);
+    });
+
+    for (const courseDoc of dedupedCourses.values()) {
       await deleteCourseScopedData(courseDoc.id);
       await deleteDoc(courseDoc.ref).catch(() => undefined);
     }
@@ -308,6 +358,7 @@ async function purgeUserData(userId: string, email: string): Promise<void> {
   await Promise.all([
     deleteDoc(doc(firebaseDB, "usuarios", userId)).catch(() => undefined),
     deleteDoc(doc(firebaseDB, "estudiantes", userId)).catch(() => undefined),
+    deleteDoc(doc(firebaseDB, "instituciones", userId)).catch(() => undefined),
   ]);
 
   if (normalizedEmail) {
@@ -325,6 +376,8 @@ async function purgeUserData(userId: string, email: string): Promise<void> {
   await Promise.all([
     deleteTeacherOwnedCourses("cursos", userId),
     deleteTeacherOwnedCourses("courses", userId),
+    deleteInstitutionOwnedCourses("cursos", userId),
+    deleteInstitutionOwnedCourses("courses", userId),
   ]);
 
   const userScopedCleanup = [
@@ -350,6 +403,20 @@ async function purgeUserData(userId: string, email: string): Promise<void> {
       deleteByField(collectionName, field, userId),
     ),
   );
+}
+
+export async function purgeUserDataInSparkMode(
+  userId: string,
+  email: string,
+): Promise<void> {
+  const normalizedUserId = String(userId || "").trim();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+
+  if (!normalizedUserId) {
+    throw new Error("User id is required.");
+  }
+
+  await purgeUserData(normalizedUserId, normalizedEmail);
 }
 
 export async function requestAccountDeletion(
@@ -512,6 +579,7 @@ export async function processAccountDeletionRequest(
   try {
     // Preferred path: Cloud Function removes Firestore + Firebase Auth.
     await deleteUserByAdmin(request.userId, { allowTeacherDeletion: true });
+    await purgeUserData(request.userId, request.email);
   } catch (error) {
     // Spark fallback: if callable backend is unavailable, purge Firestore data now
     // and mark account as deleted so login flow blocks stale auth sessions.

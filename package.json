@@ -9,6 +9,7 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint . --no-cache",
     "preview": "vite preview",
+    "sync:active-users": "node src/scripts/syncPublicActiveUsersCount.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

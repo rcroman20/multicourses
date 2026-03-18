@@ -18,14 +18,19 @@ import {
   getTeacherPlanPath,
   resolveTeacherPlanId,
 } from "@/lib/services/teacherPlanService";
+import { useAdminPlatformSettings } from "@/lib/services/adminSettingsService";
 import { SeoHead } from "@/components/common/SeoHead";
+import { PublicTopNav } from "@/components/common/PublicTopNav";
+import { PublicFooter } from "@/components/common/PublicFooter";
 
 const formatCop = (value: number) => `$${value.toLocaleString("es-CO")} COP`;
 const dashboardShellClassName =
-  "relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6";
-const cardClassName = "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm";
+  "relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6";
+const cardClassName = "rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm";
 
 export default function TeacherPlanDetailPage() {
+  const { settings } = useAdminPlatformSettings();
+  const platformName = String(settings.platformName || "").trim() || "Socrattica";
   const navigate = useNavigate();
   const { planId } = useParams<{ planId: string }>();
   const resolvedPlanId = useMemo(() => resolveTeacherPlanId(planId), [planId]);
@@ -40,7 +45,7 @@ export default function TeacherPlanDetailPage() {
       <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-5 sm:px-6 lg:px-8">
         <SeoHead
           title="Teacher plan not found"
-          description="The requested MultiCourses teacher plan could not be found. Review the available annual plans."
+          description={`The requested ${platformName} teacher plan could not be found. Review the available annual plans.`}
           canonicalPath="/plans/starter-annual"
           robots="noindex, follow"
         />
@@ -58,7 +63,7 @@ export default function TeacherPlanDetailPage() {
                 <button
                   type="button"
                   onClick={() => navigate("/")}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-300/60 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                 >
                   <Home className="h-4 w-4" />
                  Home
@@ -83,9 +88,9 @@ export default function TeacherPlanDetailPage() {
     <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-5 sm:px-6 lg:px-8">
       <SeoHead
         title={selectedPlan.label}
-        description={`${selectedPlan.label} for MultiCourses: ${selectedPlan.summary} Supports up to ${selectedPlan.courseLimit} active courses and ${selectedPlan.studentLimit} students.`}
+        description={`${selectedPlan.label} for ${platformName}: ${selectedPlan.summary} Supports up to ${selectedPlan.courseLimit} active courses and ${selectedPlan.studentLimit} students.`}
         canonicalPath={getTeacherPlanPath(selectedPlan.id)}
-        keywords={`${selectedPlan.label.toLowerCase()}, academic plans, teacher annual plan, LMS pricing, MultiCourses`}
+        keywords={`${selectedPlan.label.toLowerCase()}, academic plans, teacher annual plan, LMS pricing, ${platformName}`}
         structuredData={{
           "@context": "https://schema.org",
           "@type": "Product",
@@ -93,56 +98,27 @@ export default function TeacherPlanDetailPage() {
           description: selectedPlan.summary,
           brand: {
             "@type": "Brand",
-            name: "MultiCourses",
+            name: platformName,
           },
           category: "Educational software subscription",
-          url: `https://multicourses.web.app${getTeacherPlanPath(selectedPlan.id)}`,
+          url: `https://socrattica.web.app${getTeacherPlanPath(selectedPlan.id)}`,
           offers: {
             "@type": "Offer",
             price: String(selectedPlan.priceCop),
             priceCurrency: "COP",
             availability: "https://schema.org/InStock",
-            url: `https://multicourses.web.app${getTeacherPlanPath(selectedPlan.id)}`,
+            url: `https://socrattica.web.app${getTeacherPlanPath(selectedPlan.id)}`,
           },
         }}
       />
       <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
       <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
- 
-      <div className="relative mx-auto w-full max-w-[1200px]">
-        
-        <div className={dashboardShellClassName}>
-          
-           <section className="mb-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1">
-                  <Sparkles className="h-3.5 w-3.5 text-sky-700" />
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-                    MultiCourses
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => navigate("/")}
-                  className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
-                >
-                  Home
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate("/auth")}
-                  className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
-                >
-                  Sign In
-                </button>
 
-                
-                </div>
-              </div>
-            </section> 
+      <div className="relative mx-auto w-full max-w-[1200px]">
+        <PublicTopNav />
+        <div className={dashboardShellClassName}>
           <div className="space-y-4 pb-1">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-16 -top-20 h-40 w-40 rounded-full bg-sky-200/20" />
               <div className="pointer-events-none absolute -bottom-24 -right-20 h-48 w-48 rounded-full bg-indigo-200/20" />
 
@@ -155,7 +131,7 @@ export default function TeacherPlanDetailPage() {
                         Plan Workspace
                       </span>
                     </div>
-                    <h1 className="mt-2 text-xl font-bold text-slate-900 sm:text-2xl">{selectedPlan.label}</h1>
+                    <h1 className="mt-2 text-xl font-extrabold text-slate-900 sm:text-2xl">{selectedPlan.label}</h1>
                     <p className="mt-1 max-w-3xl text-sm text-slate-600">{selectedPlan.summary}</p>
                     <p className="mt-2 text-xs text-slate-500">
                       Annual pricing is designed for stable academic operations and scalable growth.
@@ -164,29 +140,29 @@ export default function TeacherPlanDetailPage() {
 
                   <div className="w-full lg:w-auto lg:min-w-[330px]">
                     <div className="grid grid-cols-2 gap-2">
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
                         <p className="text-[11px] uppercase tracking-wide text-slate-500">Annual price</p>
-                        <p className="text-lg font-bold text-slate-900">{formatCop(selectedPlan.priceCop)}</p>
+                        <p className="text-lg font-extrabold text-slate-900">{formatCop(selectedPlan.priceCop)}</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
                         <p className="text-[11px] uppercase tracking-wide text-slate-500">Monthly equivalent</p>
-                        <p className="text-lg font-bold text-slate-900">
+                        <p className="text-lg font-extrabold text-slate-900">
                           {formatCop(selectedPlan.monthlyEquivalentCop)}
                         </p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
                         <p className="text-[11px] uppercase tracking-wide text-slate-500">Courses</p>
-                        <p className="text-lg font-bold text-slate-900">{selectedPlan.courseLimit}</p>
+                        <p className="text-lg font-extrabold text-slate-900">{selectedPlan.courseLimit}</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
                         <p className="text-[11px] uppercase tracking-wide text-slate-500">Students</p>
-                        <p className="text-lg font-bold text-slate-900">{selectedPlan.studentLimit}</p>
+                        <p className="text-lg font-extrabold text-slate-900">{selectedPlan.studentLimit}</p>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-xs text-slate-600">
                   Estimated average: ~{MAX_STUDENTS_PER_COURSE} students per course (real usage can be higher).
                 </div>
               </div>
@@ -201,7 +177,7 @@ export default function TeacherPlanDetailPage() {
                   {selectedPlan.benefits.join(". ")}.
                 </p>
                 <p className="mt-2 text-sm leading-relaxed text-slate-700">
-                  In practical terms, this plan gives your institution enough capacity to manage up to{" "}
+                  In practical terms, this plan gives your teaching operation enough capacity to manage up to{" "}
                   <span className="font-semibold text-slate-900">{selectedPlan.courseLimit} active courses</span>{" "}
                   and up to{" "}
                   <span className="font-semibold text-slate-900">{selectedPlan.studentLimit} students</span> in one
@@ -220,7 +196,7 @@ export default function TeacherPlanDetailPage() {
                   <span className="font-semibold text-slate-900">
                     {formatCop(selectedPlan.monthlyEquivalentCop)}
                   </span>
-                  . As your institution grows, you can move to the next tier without rebuilding your processes.
+                  . As your operation grows, you can move to the next tier without rebuilding your processes.
                 </p>
               </article>
 
@@ -251,7 +227,7 @@ export default function TeacherPlanDetailPage() {
                     </p>
                   </div>
                   <p className="mt-2 text-xs text-slate-500">
-                    You can upgrade to a higher annual plan at any time as your institution grows.
+                    You can upgrade to a higher annual plan at any time as your teaching operation grows.
                   </p>
                 </article>
 
@@ -278,7 +254,7 @@ export default function TeacherPlanDetailPage() {
                     Choose the tier that matches your expected operational load.
                   </p>
                 </div>
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                   3 annual offers
                 </span>
               </div>
@@ -290,7 +266,7 @@ export default function TeacherPlanDetailPage() {
                     className={`rounded-xl border p-3 transition-colors ${
                       plan.id === selectedPlan.id
                         ? "border-sky-300 bg-sky-50"
-                        : "border-slate-200 bg-white hover:border-slate-300"
+                        : "border-slate-200/60 bg-white hover:border-slate-300/60"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -326,7 +302,7 @@ export default function TeacherPlanDetailPage() {
                       <button
                         type="button"
                         onClick={() => navigate(getTeacherPlanPath(plan.id))}
-                        className="mt-3 inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                        className="mt-3 inline-flex h-8 items-center rounded-lg border border-slate-300/60 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
                       >
                         View
                       </button>
@@ -338,6 +314,7 @@ export default function TeacherPlanDetailPage() {
 
           </div>
         </div>
+        <PublicFooter summary={`Review annual plans with the same operational structure used across the ${platformName} workspace.`} />
       </div>
     </div>
   );

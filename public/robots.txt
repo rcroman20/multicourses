@@ -34,4 +34,4 @@ Disallow: /notas
 Disallow: /inscribir-estudiante
 Disallow: /diapositivas
 
-Sitemap: https://multicourses.web.app/sitemap.xml
+Sitemap: https://socrattica.web.app/sitemap.xml

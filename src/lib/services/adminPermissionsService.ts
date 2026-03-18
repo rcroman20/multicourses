@@ -15,7 +15,7 @@ export type DelegatedAdminPermissions = {
   manageBackups: boolean;
 };
 
-const STORAGE_KEY = "multicourses:admin-delegated-permissions:v1";
+const STORAGE_KEY = "socrattica:admin-delegated-permissions:v1";
 export const ADMIN_PERMISSIONS_CHANGED_EVENT = "admin-permissions-changed";
 const ADMIN_PERMISSIONS_DOC_PATH = ["adminConfig", "delegatedPermissions"] as const;
 

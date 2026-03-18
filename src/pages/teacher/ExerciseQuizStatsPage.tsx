@@ -269,6 +269,50 @@ export default function ExerciseQuizStatsPage() {
     return (passed / attempts.length) * 100;
   }, [attempts]);
 
+  const uniqueStudentCount = useMemo(
+    () => new Set(attempts.map((attempt) => attempt.studentId)).size,
+    [attempts],
+  );
+
+  const strongestTheme = useMemo(
+    () =>
+      [...themeStats]
+        .sort((left, right) => {
+          if (right.avgScore !== left.avgScore) {
+            return right.avgScore - left.avgScore;
+          }
+          return right.attempts - left.attempts;
+        })
+        .find((item) => item.attempts > 0) || null,
+    [themeStats],
+  );
+
+  const weakestTheme = useMemo(
+    () =>
+      [...themeStats]
+        .sort((left, right) => {
+          if (left.avgScore !== right.avgScore) {
+            return left.avgScore - right.avgScore;
+          }
+          return right.attempts - left.attempts;
+        })
+        .find((item) => item.attempts > 0) || null,
+    [themeStats],
+  );
+
+  const latestAttempt = useMemo(
+    () =>
+      [...attempts].sort(
+        (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
+      )[0] || null,
+    [attempts],
+  );
+
+  const selectedThemeStats = useMemo(
+    () => themeStats.find((themeItem) => themeItem.theme === selectedTheme) || null,
+    [selectedTheme, themeStats],
+  );
+
   useEffect(() => {
     if (availableCourses.length === 0) {
       if (selectedCourseId) setSelectedCourseId("");
@@ -457,8 +501,8 @@ export default function ExerciseQuizStatsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-4">
-          <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-4">
+          <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
             <div className="pointer-events-none absolute -left-[70px] -top-[90px] h-[180px] w-[180px] rounded-full bg-sky-300/25" />
             <div className="pointer-events-none absolute -right-[90px] -bottom-[90px] h-[200px] w-[200px] rounded-full bg-violet-300/20" />
             <div className="relative z-10 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
@@ -475,7 +519,7 @@ export default function ExerciseQuizStatsPage() {
                 </p>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
+              <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3">
                 <label
                   htmlFor="quiz-stats-course-select"
                   className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500"
@@ -486,7 +530,7 @@ export default function ExerciseQuizStatsPage() {
                   <BookOpen className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <select
                     id="quiz-stats-course-select"
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     value={selectedCourseId}
                     onChange={(e) => handleCourseChange(e.target.value)}
                   >
@@ -513,7 +557,7 @@ export default function ExerciseQuizStatsPage() {
                   <button
                     type="button"
                     disabled
-                    className="mt-2 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-400"
+                    className="mt-2 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200/60 bg-slate-50 px-3 text-xs font-semibold text-slate-400"
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
                     Back to Quiz Bank Studio
@@ -524,7 +568,7 @@ export default function ExerciseQuizStatsPage() {
           </section>
 
           {loading ? (
-            <div className="mt-4 flex min-h-[320px] items-center justify-center rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+            <div className="mt-4 flex min-h-[320px] items-center justify-center rounded-2xl border border-slate-200/60 bg-white p-8 shadow-sm">
               <div className="space-y-2 text-center">
                 <Loader2 className="mx-auto h-7 w-7 animate-spin text-sky-600" />
                 <p className="text-base font-semibold text-slate-900">Loading statistics</p>
@@ -533,70 +577,161 @@ export default function ExerciseQuizStatsPage() {
             </div>
           ) : (
             <div className="mt-4 space-y-4">
-              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
-                      <Layers className="h-4 w-4" />
+              <section className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm">
+                <div className="border-b border-slate-200/60 bg-gradient-to-r from-slate-50 via-white to-sky-50/60 px-4 py-4">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="max-w-2xl">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">
+                        Analytics Studio
+                      </p>
+                      <h3 className="mt-1 text-xl font-bold text-slate-900">
+                        Course attempt analytics
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Track participation, compare theme performance, and inspect each quiz attempt in one workspace.
+                      </p>
                     </div>
-                    <p className="text-lg font-extrabold leading-5 text-slate-900">{themeStats.length}</p>
+
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Course
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {selectedCourse?.code || "--"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Students
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {uniqueStudentCount}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Attempts
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {attempts.length}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Last activity
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {latestAttempt ? formatDate(latestAttempt.createdAt) : "--"}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Total themes</p>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
-                      <Activity className="h-4 w-4" />
+                <div className="grid grid-cols-2 gap-2 px-4 py-4 md:grid-cols-4">
+                  <div className="rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                        <Layers className="h-4 w-4" />
+                      </div>
+                      <p className="text-lg font-extrabold leading-5 text-slate-900">{themeStats.length}</p>
                     </div>
-                    <p className="text-lg font-extrabold leading-5 text-slate-900">{attempts.length}</p>
+                    <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Themes in analytics</p>
                   </div>
-                  <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Total attempts</p>
-                </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
-                      <TrendingUp className="h-4 w-4" />
+                  <div className="rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
+                        <Activity className="h-4 w-4" />
+                      </div>
+                      <p className="text-lg font-extrabold leading-5 text-slate-900">{attempts.length}</p>
                     </div>
-                    <p className="text-lg font-extrabold leading-5 text-slate-900">{averageScore.toFixed(1)}%</p>
+                    <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Total attempts</p>
                   </div>
-                  <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Average score</p>
-                </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
-                      <AwardIcon className="h-4 w-4" />
+                  <div className="rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+                        <TrendingUp className="h-4 w-4" />
+                      </div>
+                      <p className="text-lg font-extrabold leading-5 text-slate-900">{averageScore.toFixed(1)}%</p>
                     </div>
-                    <p className="text-lg font-extrabold leading-5 text-slate-900">{passRate.toFixed(1)}%</p>
+                    <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Average score</p>
                   </div>
-                  <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Pass rate</p>
+
+                  <div className="rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                        <AwardIcon className="h-4 w-4" />
+                      </div>
+                      <p className="text-lg font-extrabold leading-5 text-slate-900">{passRate.toFixed(1)}%</p>
+                    </div>
+                    <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Pass rate</p>
+                  </div>
                 </div>
-              </div>
+              </section>
 
               <div className="space-y-4">
-                <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="mb-3 flex items-center gap-2">
-                    <Filter className="h-4 w-4 text-sky-700" />
-                    <p className="text-base font-bold text-slate-900">{isTeacher ? "Filter by Theme" : "My Themes"}</p>
+                <section className="rounded-2xl border border-slate-200/60 bg-white shadow-sm">
+                  <div className="border-b border-slate-200/60 px-4 py-4">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Filter className="h-4 w-4 text-sky-700" />
+                          <p className="text-base font-bold text-slate-900">
+                            {isTeacher ? "Theme filters and trends" : "My theme filters"}
+                          </p>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Focus on one theme or keep the full course view to compare results.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50/70 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Strongest theme
+                          </p>
+                          <p className="mt-1 truncate text-sm font-semibold text-emerald-700">
+                            {strongestTheme ? strongestTheme.theme : "--"}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50/70 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Needs attention
+                          </p>
+                          <p className="mt-1 truncate text-sm font-semibold text-rose-700">
+                            {weakestTheme ? weakestTheme.theme : "--"}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50/70 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Selected scope
+                          </p>
+                          <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                            {selectedTheme === "all" ? "All themes" : selectedTheme}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                    <div>
+                  <div className="grid gap-3 px-4 py-4 xl:grid-cols-[minmax(0,1.15fr)_360px]">
+                    <div className="rounded-xl border border-slate-200/60 bg-slate-50/50 p-3">
                       <label
                         htmlFor="quiz-stats-theme-select"
-                        className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500"
+                        className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
                       >
-                        {isTeacher ? "Theme" : "My Theme"}
+                        {isTeacher ? "Theme scope" : "My theme"}
                       </label>
-                      <div className="relative">
+                      <div className="relative mt-3">
                         <BookMarked className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                         <select
                           id="quiz-stats-theme-select"
                           value={selectedTheme}
                           onChange={(event) => setSelectedTheme(event.target.value)}
-                          className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                          className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                         >
                           <option value="all">{isTeacher ? `All themes (${attempts.length})` : `All my themes (${attempts.length})`}</option>
                           {themeStats.map((item) => (
@@ -606,23 +741,54 @@ export default function ExerciseQuizStatsPage() {
                           ))}
                         </select>
                       </div>
+                      <p className="mt-2 text-xs text-slate-500">
+                        {selectedTheme === "all"
+                          ? `${attempts.length} attempts across all themes`
+                          : `${visibleAttempts.length} attempts in ${selectedTheme}`}
+                      </p>
                     </div>
 
-                    <p className="text-xs text-slate-500 md:text-right">
-                      {selectedTheme === "all"
-                        ? `${attempts.length} attempts across all themes`
-                        : `${visibleAttempts.length} attempts in ${selectedTheme}`}
-                    </p>
+                    <div className="rounded-xl border border-slate-200/60 bg-white p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                        Current theme snapshot
+                      </p>
+                      {selectedThemeStats ? (
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Students</p>
+                            <p className="mt-1 text-sm font-semibold text-slate-900">{selectedThemeStats.uniqueStudents}</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Attempts</p>
+                            <p className="mt-1 text-sm font-semibold text-slate-900">{selectedThemeStats.attempts}</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Average</p>
+                            <p className="mt-1 text-sm font-semibold text-indigo-700">{selectedThemeStats.avgScore.toFixed(1)}%</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Best</p>
+                            <p className="mt-1 text-sm font-semibold text-emerald-700">{selectedThemeStats.bestScore}%</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-3 rounded-lg border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">
+                          Select one theme to see its summary here.
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {themeStats.length === 0 && (
-                    <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">
-                      No themes with attempts yet.
-                    </p>
+                    <div className="px-4 pb-4">
+                      <p className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-xs text-slate-500">
+                        No themes with attempts yet.
+                      </p>
+                    </div>
                   )}
                 </section>
 
-                <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <section className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                       <div className="flex items-center gap-2">
@@ -641,7 +807,7 @@ export default function ExerciseQuizStatsPage() {
                             value={studentSearchQuery}
                             onChange={(event) => setStudentSearchQuery(event.target.value)}
                             placeholder="Search student..."
-                            className="h-9 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                            className="h-9 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                           />
                         </div>
                       )}
@@ -651,7 +817,7 @@ export default function ExerciseQuizStatsPage() {
                         className={`inline-flex h-9 items-center gap-1 rounded-xl border px-2.5 text-xs font-semibold transition ${
                           sortBy === "date"
                             ? "border-sky-300 bg-sky-50 text-sky-700"
-                            : "border-slate-200 bg-slate-50 text-slate-600 hover:border-sky-200 hover:bg-sky-50"
+                            : "border-slate-200/60 bg-slate-50 text-slate-600 hover:border-sky-200 hover:bg-sky-50"
                         }`}
                         title="Sort by date"
                       >
@@ -665,7 +831,7 @@ export default function ExerciseQuizStatsPage() {
                         className={`inline-flex h-9 items-center gap-1 rounded-xl border px-2.5 text-xs font-semibold transition ${
                           sortBy === "score"
                             ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                            : "border-slate-200 bg-slate-50 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50"
+                            : "border-slate-200/60 bg-slate-50 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50"
                         }`}
                         title="Sort by score"
                       >
@@ -680,7 +846,7 @@ export default function ExerciseQuizStatsPage() {
                         className={`inline-flex h-9 items-center gap-1 rounded-xl border px-2.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                           sortBy === "student"
                             ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-slate-50 text-slate-600 hover:border-emerald-200 hover:bg-emerald-50"
+                            : "border-slate-200/60 bg-slate-50 text-slate-600 hover:border-emerald-200 hover:bg-emerald-50"
                         }`}
                         title={isTeacher ? "Sort by student" : "Only for teacher view"}
                       >
@@ -691,7 +857,7 @@ export default function ExerciseQuizStatsPage() {
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <div className="overflow-x-auto rounded-xl border border-slate-200/60">
                     <table className="min-w-full text-sm">
                       <thead className="bg-slate-50">
                         <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -751,7 +917,7 @@ export default function ExerciseQuizStatsPage() {
                                       event.stopPropagation();
                                       setExpandedAttemptId((prev) => (prev === attempt.id ? null : attempt.id));
                                     }}
-                                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50"
+                                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200/60 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50"
                                   >
                                     {isExpanded ? "Hide" : "Show"}
                                     <ChevronRight className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
@@ -778,7 +944,7 @@ export default function ExerciseQuizStatsPage() {
                               {isExpanded && (
                                 <tr className="bg-slate-50/70">
                                   <td colSpan={isTeacher ? 7 : 5} className="px-3 py-3">
-                                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                                    <div className="rounded-xl border border-slate-200/60 bg-white p-3">
                                       <p className="mb-2 text-xs text-slate-600">
                                         {isTeacher && (
                                           <>
@@ -806,7 +972,7 @@ export default function ExerciseQuizStatsPage() {
                                               : "N/A";
 
                                           return (
-                                            <div key={`${answer.questionId}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50/50 p-2.5">
+                                            <div key={`${answer.questionId}-${index}`} className="rounded-lg border border-slate-200/60 bg-slate-50/50 p-2.5">
                                               <p className="text-xs font-medium text-slate-900">
                                                 {index + 1}. {question?.question || answer.questionId}
                                               </p>
@@ -843,45 +1009,79 @@ export default function ExerciseQuizStatsPage() {
                   </div>
                 </section>
 
-                {selectedTheme !== "all" &&
-                  themeStats
-                    .filter((themeItem) => themeItem.theme === selectedTheme)
-                    .map((stat) => (
-                      <section key={stat.theme} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                        <div className="mb-3 flex items-center gap-2">
-                          <Target className="h-4 w-4 text-indigo-700" />
-                          <p className="text-base font-bold text-slate-900">Theme Overview</p>
-                        </div>
+                {selectedThemeStats && (
+                  <section className="rounded-2xl border border-slate-200/60 bg-white shadow-sm">
+                    <div className="border-b border-slate-200/60 px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        <Target className="h-4 w-4 text-indigo-700" />
+                        <p className="text-base font-bold text-slate-900">
+                          Theme performance detail
+                        </p>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        A focused look at {selectedThemeStats.theme} within this course.
+                      </p>
+                    </div>
 
-                        <div className="space-y-2 text-sm">
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-500">Students</span>
-                            <span className="font-semibold text-slate-900">{stat.uniqueStudents}</span>
+                    <div className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+                      <div className="rounded-xl border border-slate-200/60 bg-slate-50/50 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">
+                              Average performance
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Based on all recorded attempts for this theme.
+                            </p>
                           </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-500">Average score</span>
-                            <span className="font-semibold text-indigo-700">{stat.avgScore.toFixed(1)}%</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-500">Best score</span>
-                            <span className="font-semibold text-emerald-700">{stat.bestScore}%</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-500">Total questions</span>
-                            <span className="font-semibold text-slate-900">{stat.totalQuestions}</span>
-                          </div>
+                          <p className="text-lg font-extrabold text-indigo-700">
+                            {selectedThemeStats.avgScore.toFixed(1)}%
+                          </p>
                         </div>
+                        <progress
+                          max={100}
+                          value={Math.max(0, Math.min(100, selectedThemeStats.avgScore))}
+                          className="mt-3 h-2.5 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-slate-200 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-indigo-500 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-indigo-500"
+                        />
+                      </div>
 
-                        <div className="mt-3 border-t border-slate-200 pt-3">
-                          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Average performance</p>
-                          <progress
-                            max={100}
-                            value={Math.max(0, Math.min(100, stat.avgScore))}
-                            className="h-2 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-slate-200 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-indigo-500 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-indigo-500"
-                          />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Students
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">
+                            {selectedThemeStats.uniqueStudents}
+                          </p>
                         </div>
-                      </section>
-                    ))}
+                        <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Questions
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">
+                            {selectedThemeStats.totalQuestions}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Best score
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-emerald-700">
+                            {selectedThemeStats.bestScore}%
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Attempts
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">
+                            {selectedThemeStats.attempts}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                )}
               </div>
             </div>
           )}

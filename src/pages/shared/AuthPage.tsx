@@ -1,6 +1,6 @@
 // src/pages/AuthPage.tsx
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Mail,
@@ -19,12 +19,24 @@ import {
   Target,
   GraduationCap,
   BriefcaseBusiness,
+  Building2,
 } from "lucide-react";
 import { z } from "zod";
 import { firebaseAuth, firebaseDB } from "@/lib/firebase";
+import { PublicFooter } from "@/components/common/PublicFooter";
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import {
+  resolvePlatformLogoUrl,
+  useAdminPlatformSettings,
+} from "@/lib/services/adminSettingsService";
 import { isTeacherPlanExpired } from "@/lib/services/teacherPlanAccessService";
 import { isAccountMarkedDeleted } from "@/lib/services/accountDeletionService";
+import {
+  findPublicInstitutionByName,
+  getInstitutionSuggestions,
+  syncPublicInstitutionSuggestions,
+  syncPublicInstitutionDirectoryRecord,
+} from "@/lib/services/institutionProfileService";
 import {
   createUserWithEmailAndPassword,
   deleteUser,
@@ -44,7 +56,7 @@ const registerSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   idNumber: z.string().min(5, "ID must be at least 5 characters"),
   whatsApp: z.string().min(10, "Please enter a valid WhatsApp number"),
-  selectedRole: z.enum(["estudiante", "docente"]),
+  selectedRole: z.enum(["estudiante", "docente", "institucion"]),
 });
 
 const parseAuthError = (error: unknown): { code?: string; message?: string } => {
@@ -55,6 +67,11 @@ const parseAuthError = (error: unknown): { code?: string; message?: string } => 
     message: typeof maybeError.message === "string" ? maybeError.message : undefined,
   };
 };
+
+const OTHER_INSTITUTION_OPTION = "__other__";
+
+const normalizeColombianWhatsApp = (value: string): string =>
+  value.replace(/\D/g, "").replace(/^57/, "");
 
 // Componente separado para el Modal
 const ForgotPasswordModal = ({
@@ -101,15 +118,16 @@ const ForgotPasswordModal = ({
     return () => document.removeEventListener("keydown", handleEscape);
   }, [isOpen, handleClose]);
 
-  // Prevenir scroll del body cuando el modal está abierto
+  // Prevent body scrolling only while the modal is open, then restore previous state.
   useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
     if (isOpen) {
       document.body.style.overflow = "hidden";
     } else {
-      document.body.style.overflow = "auto";
+      document.body.style.overflow = previousOverflow;
     }
     return () => {
-      document.body.style.overflow = "auto";
+      document.body.style.overflow = previousOverflow;
     };
   }, [isOpen]);
 
@@ -169,12 +187,12 @@ const ForgotPasswordModal = ({
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 px-4 py-2 backdrop-blur-sm"
       onClick={handleOverlayClick}
     >
       <div
         ref={modalRef}
-        className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_28px_70px_-35px_rgba(15,23,42,0.55)]"
+        className="w-full max-w-md rounded-2xl border border-slate-200/60 bg-white p-5 shadow-[0_28px_70px_-35px_rgba(15,23,42,0.55)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div>
@@ -190,7 +208,7 @@ const ForgotPasswordModal = ({
             </div>
             <button
               onClick={handleClose}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-white text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
               aria-label="Close modal"
             >
               <X className="h-4 w-4" />
@@ -230,7 +248,7 @@ const ForgotPasswordModal = ({
                   value={resetEmail}
                   onChange={(e) => setResetEmail(e.target.value)}
                   placeholder="your-email@example.com"
-                  className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                   required
                   autoComplete="off"
                 />
@@ -241,7 +259,7 @@ const ForgotPasswordModal = ({
               <button
                 type="button"
                 onClick={handleClose}
-                className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300/60 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                 disabled={isLoading}
               >
                 Cancel
@@ -263,7 +281,7 @@ const ForgotPasswordModal = ({
             </div>
           </form>
 
-          <div className="mt-4 border-t border-slate-200 pt-3">
+          <div className="mt-4 border-t border-slate-200/60 pt-3">
             <p className="text-xs text-slate-500">
               Remember your password?{" "}
               <button
@@ -281,6 +299,18 @@ const ForgotPasswordModal = ({
 };
 
 export default function AuthPage() {
+  const { settings } = useAdminPlatformSettings();
+  const platformName = String(settings.platformName || "").trim() || "Socrattica";
+  const brandLogo = resolvePlatformLogoUrl(settings.logoUrl);
+  const maintenanceMode = settings.maintenanceMode === true;
+  const maintenanceCtaLabel = String(settings.maintenanceCtaLabel || "").trim() || "Request support";
+  const maintenanceCtaHref = String(settings.maintenanceCtaHref || "").trim() || "/contact";
+  const allowTeacherSelfRequest = settings.allowTeacherSelfRequest !== false;
+  const teacherSelfRequestMessage =
+    String(settings.teacherSelfRequestMessage || "").trim() ||
+    "Teacher self-registration is currently disabled. Please contact the admin team to request access.";
+  const teacherInstitutionReviewMessage =
+    "Teachers linked to an institution with an active plan can still register and wait for approval from their institution admin.";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -290,17 +320,51 @@ export default function AuthPage() {
   const [name, setName] = useState("");
   const [idNumber, setIdNumber] = useState("");
   const [whatsApp, setWhatsApp] = useState("");
-  const [selectedRole, setSelectedRole] = useState<"estudiante" | "docente">("estudiante");
+  const [institutionSuggestions, setInstitutionSuggestions] = useState<string[]>([]);
+  const [selectedInstitutionOption, setSelectedInstitutionOption] = useState("");
+  const [customInstitution, setCustomInstitution] = useState("");
+  const [selectedRole, setSelectedRole] = useState<"estudiante" | "docente" | "institucion">("estudiante");
   const [isLogin, setIsLogin] = useState(true);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const isInstitutionRegistration = selectedRole === "institucion";
+  const isTeacherRegistration = selectedRole === "docente";
+  const normalizedWhatsApp = normalizeColombianWhatsApp(whatsApp);
+  const nameLabel = isInstitutionRegistration ? "Institution Name" : "Full Name";
+  const namePlaceholder = isInstitutionRegistration ? "Colegio Colombo Británico" : "Juan Pérez";
+  const idLabel = isInstitutionRegistration ? "NIT" : "ID Document";
+  const idPlaceholder = isInstitutionRegistration ? "900123456-7" : "1234567890";
+  const emailPlaceholder = isInstitutionRegistration
+    ? "rectoria@institucion.edu.co"
+    : "correo@universidad.edu.co";
+  const whatsAppLabel = isInstitutionRegistration ? "Institution WhatsApp" : "WhatsApp Number";
+  const institutionValueForInstitution = name.trim();
 
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
   const resolveHomePath = (role?: string) => {
     if (role === "docente") return "/teacher";
     if (role === "admin") return "/admin/dashboard";
+    if (role === "institucion") return "/institution";
     return "/student";
   };
+
+  const loadInstitutionOptions = useCallback(async (): Promise<void> => {
+    try {
+      const options = await getInstitutionSuggestions();
+      setInstitutionSuggestions(options);
+    } catch {
+      setInstitutionSuggestions([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadInstitutionOptions();
+  }, [loadInstitutionOptions]);
+
+  useEffect(() => {
+    if (isLogin || institutionSuggestions.length > 0) return;
+    void loadInstitutionOptions();
+  }, [institutionSuggestions.length, isLogin, loadInstitutionOptions]);
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -314,6 +378,15 @@ export default function AuthPage() {
         teacherPlanStatus === "pending_payment"
       ) {
         navigate("/teacher-approval-waiting?reason=payment-pending");
+        return;
+      }
+      const institutionPlanStatus = String(user.institutionPlanStatus || "").trim().toLowerCase();
+      if (user.role === "institucion" && institutionPlanStatus === "pending_payment") {
+        navigate("/teacher-approval-waiting?reason=institution-payment-pending");
+        return;
+      }
+      if (user.role === "institucion" && institutionPlanStatus === "inactive") {
+        navigate("/teacher-approval-waiting?reason=institution-plan-inactive");
         return;
       }
       if (
@@ -401,6 +474,11 @@ export default function AuthPage() {
     setError("");
     setSuccessMessage("");
 
+    if (maintenanceMode) {
+      setError("Account creation is temporarily disabled while maintenance mode is active.");
+      return;
+    }
+
     // Protect owner admin account from being re-registered.
     if (email.trim().toLowerCase() === "rcroman20@gmail.com") {
       setError(
@@ -420,6 +498,52 @@ export default function AuthPage() {
 
     if (!result.success) {
       setError(result.error.errors[0].message);
+      return;
+    }
+
+    const institutionValue = isInstitutionRegistration
+      ? institutionValueForInstitution
+      : selectedInstitutionOption === OTHER_INSTITUTION_OPTION
+        ? customInstitution.trim()
+        : selectedInstitutionOption.trim();
+
+    if (institutionValue.length < 2) {
+      setError(
+        isInstitutionRegistration
+          ? "Please enter your institution name."
+          : "Please select your institution or add a new one.",
+      );
+      return;
+    }
+
+    if (isInstitutionRegistration && idNumber.trim().length < 8) {
+      setError("Please enter a valid NIT for your institution.");
+      return;
+    }
+
+    if (!isInstitutionRegistration && idNumber.trim().length < 5) {
+      setError("Please enter a valid ID document.");
+      return;
+    }
+
+    if (normalizedWhatsApp.length !== 10 || !normalizedWhatsApp.startsWith("3")) {
+      setError("Please enter a valid Colombian WhatsApp number.");
+      return;
+    }
+
+    const matchedInstitution =
+      selectedRole === "docente"
+        ? await findPublicInstitutionByName(institutionValue).catch(() => null)
+        : null;
+    const isInstitutionTeacherRequest =
+      selectedRole === "docente" && matchedInstitution?.planStatus === "active";
+
+    if (selectedRole === "docente" && !allowTeacherSelfRequest && !isInstitutionTeacherRequest) {
+      setError(
+        matchedInstitution
+          ? "This institution does not have an active plan yet. Ask the institution admin to activate the plan or contact platform support."
+          : `${teacherSelfRequestMessage} ${teacherInstitutionReviewMessage}`,
+      );
       return;
     }
 
@@ -492,10 +616,46 @@ export default function AuthPage() {
       }
 
       const user = userCredential.user;
-      const wantsTeacherRole = selectedRole === "docente";
-      const role = "estudiante";
+      const wantsTeacherRole =
+        selectedRole === "docente" && (allowTeacherSelfRequest || isInstitutionTeacherRequest);
+      const isInstitutionRole = selectedRole === "institucion";
+      const role = isInstitutionRole ? "institucion" : "estudiante";
       const teacherApprovalStatus = wantsTeacherRole ? "pending" : "approved";
       const now = new Date();
+      const institutionPayload = {
+        institutionName: institutionValue,
+        institution: institutionValue,
+        ...(isInstitutionRole
+          ? {
+              institutionId: user.uid,
+              institutionRole: "owner",
+              institutionPlanStatus: "pending_payment",
+              institutionPlanName: "Institution Plan",
+              institutionCourseLimit: 25,
+              institutionStudentLimit: 500,
+              institutionTeacherLimit: null,
+            }
+          : {}),
+        ...(isInstitutionTeacherRequest && matchedInstitution
+          ? {
+              institutionId: matchedInstitution.id,
+              institutionName: matchedInstitution.name,
+              institution: matchedInstitution.name,
+              teacherInstitutionName: matchedInstitution.name,
+            }
+          : {}),
+        ...(selectedRole === "docente" && !isInstitutionTeacherRequest
+          ? { teacherInstitutionName: institutionValue }
+          : {}),
+      };
+      const rolePayload = isInstitutionRole
+        ? {}
+        : {
+            requestedRole: selectedRole,
+            teacherApprovalStatus,
+            ...(wantsTeacherRole ? { teacherRequestedAt: now } : {}),
+            ...(wantsTeacherRole ? { teacherRequestCount: 1 } : {}),
+          };
 
       // 1. Save to /users
       await setDoc(doc(firebaseDB, "usuarios", user.uid), {
@@ -504,12 +664,10 @@ export default function AuthPage() {
         name,
         idNumber,
         role,
-        whatsApp,
+        whatsApp: normalizedWhatsApp,
         createdAt: now,
-        requestedRole: selectedRole,
-        teacherApprovalStatus,
-        ...(wantsTeacherRole ? { teacherRequestedAt: now } : {}),
-        ...(wantsTeacherRole ? { teacherRequestCount: 1 } : {}),
+        ...institutionPayload,
+        ...rolePayload,
       });
 
       // 2. Also save to /students
@@ -519,16 +677,49 @@ export default function AuthPage() {
         email,
         name,
         role,
-        whatsApp,
+        whatsApp: normalizedWhatsApp,
         createdAt: now,
-        requestedRole: selectedRole,
-        teacherApprovalStatus,
-        ...(wantsTeacherRole ? { teacherRequestedAt: now } : {}),
-        ...(wantsTeacherRole ? { teacherRequestCount: 1 } : {}),
+        ...institutionPayload,
+        ...rolePayload,
       });
 
+      if (isInstitutionRole) {
+        await setDoc(doc(firebaseDB, "instituciones", user.uid), {
+          name: institutionValue,
+          ownerUserId: user.uid,
+          ownerName: name,
+          ownerEmail: email,
+          planStatus: "pending_payment",
+          planName: "Institution Plan",
+          courseLimit: 25,
+          studentLimit: 500,
+          teacherLimit: null,
+          createdAt: now,
+          updatedAt: now,
+        }, { merge: true });
+
+        await syncPublicInstitutionDirectoryRecord({
+          id: user.uid,
+          name: institutionValue,
+          planStatus: "pending_payment",
+        }).catch(() => undefined);
+      }
+
+      setInstitutionSuggestions((current) =>
+        current.includes(institutionValue)
+          ? current
+          : [...current, institutionValue].sort((left, right) =>
+              left.localeCompare(right),
+            ),
+      );
+      await syncPublicInstitutionSuggestions([institutionValue]).catch(() => undefined);
+
       setSuccessMessage(
-        wantsTeacherRole
+        isInstitutionRole
+          ? "Institution account created successfully. Sign in to continue with plan purchase and activation."
+          : isInstitutionTeacherRequest
+          ? "Teacher account request created. Your institution admin must approve it before teacher features are enabled."
+          : wantsTeacherRole
           ? "Teacher account request created. An admin must approve it before teacher features are enabled."
           : "Student account created successfully! You can now sign in.",
       );
@@ -558,14 +749,13 @@ export default function AuthPage() {
 
   return (
     <>
-      <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-2 sm:px-6 lg:px-8 lg:py-2">
         <div className="pointer-events-none absolute -left-16 top-6 h-44 w-44 rounded-full bg-white/80 blur-[40px]" />
         <div className="pointer-events-none absolute -right-14 bottom-8 h-52 w-52 rounded-full bg-slate-300/60 blur-[44px]" />
 
-        <div className="relative mx-auto w-full max-w-[1320px]">
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
-            <div className="grid grid-cols-1 gap-4 xl:items-start xl:grid-cols-[minmax(0,1.05fr)_460px]">
-              <section className="relative self-start overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-5 shadow-sm lg:p-6">
+        <div className="relative mx-auto flex w-full max-w-[1320px] flex-col">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+<div className="grid grid-cols-1 gap-4 xl:items-start xl:grid-cols-[minmax(0,1.05fr)_460px]">              <section className="relative self-start overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-5 shadow-sm lg:p-6">
                 <div className="pointer-events-none absolute -left-[70px] -top-[90px] h-[180px] w-[180px] rounded-full bg-sky-300/25" />
                 <div className="pointer-events-none absolute -right-[90px] -bottom-[90px] h-[200px] w-[200px] rounded-full bg-indigo-300/20" />
 
@@ -576,13 +766,13 @@ export default function AuthPage() {
                       Academic Workspace
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-                        <img src="/logo.png" alt="MultiCourses logo" className="h-full w-full object-contain" />
+                    <div className="flex flex-col items-center gap-3 text-center">
+                      <div className="inline-flex h-28 w-28 items-center justify-center rounded-[2rem] border border-slate-200/60 bg-white p-3 shadow-sm">
+                        <img src={brandLogo} alt={`${platformName} logo`} className="h-full w-full object-contain" />
                       </div>
                       <div>
-                        <h1 className="text-2xl font-bold text-slate-900">MultiCourses</h1>
-                        <p className="mt-0.5 text-xs text-slate-500">Designed by Roberto Román</p>
+                        <h1 className="text-[2rem] font-bold leading-tight text-slate-900">{platformName}</h1>
+                        <p className="mt-1 text-sm text-slate-500">Designed by Roberto Román</p>
                       </div>
                     </div>
 
@@ -596,21 +786,21 @@ export default function AuthPage() {
                     </div>
 
                     <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-                      <div className="rounded-xl border border-slate-200 bg-white/90 p-3 backdrop-blur">
+                      <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3 backdrop-blur">
                         <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
                           <BookOpen className="h-4 w-4" />
                         </div>
                         <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Learning</p>
                         <p className="text-sm font-semibold text-slate-900">Always available content</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-white/90 p-3 backdrop-blur">
+                      <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3 backdrop-blur">
                         <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
                           <Target className="h-4 w-4" />
                         </div>
                         <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Progress</p>
                         <p className="text-sm font-semibold text-slate-900">Real-time grade visibility</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-white/90 p-3 backdrop-blur">
+                      <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3 backdrop-blur">
                         <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
                           <Zap className="h-4 w-4" />
                         </div>
@@ -620,7 +810,7 @@ export default function AuthPage() {
                     </div>
                   </div>
 
-                  <div className="mt-5 grid grid-cols-1 gap-2.5 rounded-2xl border border-slate-200 bg-white/85 p-3 shadow-sm sm:grid-cols-3">
+                  <div className="mt-5 grid grid-cols-1 gap-2.5 rounded-2xl border border-slate-200/60 bg-white/85 p-3 shadow-sm sm:grid-cols-3">
                     <div>
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Step 1</p>
                       <p className="mt-1 text-sm font-semibold text-slate-900">Create account</p>
@@ -637,8 +827,9 @@ export default function AuthPage() {
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-                <div className="mb-4 inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-1">
+              <section className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm sm:p-5">
+                <div className="mb-3 flex justify-center">
+                  <div className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-50 p-0.5">
                   <button
                     type="button"
                     onClick={() => {
@@ -648,7 +839,7 @@ export default function AuthPage() {
                         setSuccessMessage("");
                       }
                     }}
-                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
                       isLogin
                         ? "bg-sky-100 text-sky-800"
                         : "text-slate-600 hover:text-slate-800"
@@ -665,7 +856,7 @@ export default function AuthPage() {
                         setSuccessMessage("");
                       }
                     }}
-                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
                       !isLogin
                         ? "bg-emerald-100 text-emerald-800"
                         : "text-slate-600 hover:text-slate-800"
@@ -674,8 +865,9 @@ export default function AuthPage() {
                     Create account
                   </button>
                 </div>
+                </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+                <div className="rounded-2xl border border-slate-200/60 bg-slate-50/70 p-4 sm:p-5">
                   <div className="mb-4 space-y-1">
                     <h2 className="text-2xl font-bold text-slate-900">
                       {isLogin ? "Welcome Back" : "Create Your Account"}
@@ -711,14 +903,14 @@ export default function AuthPage() {
                           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                             Register as
                           </p>
-                          <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-1">
+                          <div className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200/60 bg-white p-1 sm:grid-cols-3">
                             <button
                               type="button"
                               onClick={() => setSelectedRole("estudiante")}
                               className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border text-xs font-semibold transition ${
                                 selectedRole === "estudiante"
                                   ? "border-sky-200 bg-sky-50 text-sky-800"
-                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                  : "border-slate-200/60 bg-white text-slate-600 hover:bg-slate-50"
                               }`}
                             >
                               <GraduationCap className="h-4 w-4" />
@@ -730,23 +922,35 @@ export default function AuthPage() {
                               className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border text-xs font-semibold transition ${
                                 selectedRole === "docente"
                                   ? "border-amber-200 bg-amber-50 text-amber-800"
-                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                  : "border-slate-200/60 bg-white text-slate-600 hover:bg-slate-50"
                               }`}
                             >
                               <BriefcaseBusiness className="h-4 w-4" />
                               Teacher
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedRole("institucion")}
+                              className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border text-xs font-semibold transition ${
+                                selectedRole === "institucion"
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                  : "border-slate-200/60 bg-white text-slate-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              <Building2 className="h-4 w-4" />
+                              Institution
+                            </button>
                           </div>
-                          {selectedRole === "docente" && (
-                            <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
-                              Teacher access requires administrator approval before teacher features are enabled.
+                          {!allowTeacherSelfRequest ? (
+                            <p className="rounded-lg border border-slate-200/60 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700">
+                              {teacherSelfRequestMessage} {teacherInstitutionReviewMessage}
                             </p>
-                          )}
+                          ) : null}
                         </div>
 
                         <div className="space-y-1.5">
                           <label htmlFor="name" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Full Name
+                            {nameLabel}
                           </label>
                           <div className="relative">
                             <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -755,8 +959,8 @@ export default function AuthPage() {
                               type="text"
                               value={name}
                               onChange={(e) => setName(e.target.value)}
-                              placeholder="Juan Pérez"
-                              className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                              placeholder={namePlaceholder}
+                              className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                               required
                             />
                           </div>
@@ -764,7 +968,7 @@ export default function AuthPage() {
 
                         <div className="space-y-1.5">
                           <label htmlFor="idNumber" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            ID Number / Document
+                            {idLabel}
                           </label>
                           <div className="relative">
                             <Hash className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -773,12 +977,70 @@ export default function AuthPage() {
                               type="text"
                               value={idNumber}
                               onChange={(e) => setIdNumber(e.target.value)}
-                              placeholder="1234567890"
-                              className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                              placeholder={idPlaceholder}
+                              className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                               required
                             />
                           </div>
                         </div>
+
+                        {!isInstitutionRegistration && (
+                        <div className="space-y-1.5">
+                          <label
+                            htmlFor="institutionSelect"
+                            className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+                          >
+                            Institution
+                          </label>
+                          <div className="relative">
+                            <BriefcaseBusiness className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                            <select
+                              id="institutionSelect"
+                              value={selectedInstitutionOption}
+                              onChange={(e) =>
+                                setSelectedInstitutionOption(e.target.value)
+                              }
+                              className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                              required
+                            >
+                              <option value="">Select institution</option>
+                              {institutionSuggestions.map((institution) => (
+                                <option key={institution} value={institution}>
+                                  {institution}
+                                </option>
+                              ))}
+                              <option value={OTHER_INSTITUTION_OPTION}>
+                                Other
+                              </option>
+                            </select>
+                          </div>
+                        </div>
+                        )}
+
+                        {!isInstitutionRegistration && selectedInstitutionOption === OTHER_INSTITUTION_OPTION && (
+                          <div className="space-y-1.5">
+                            <label
+                              htmlFor="customInstitution"
+                              className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+                            >
+                              New Institution
+                            </label>
+                            <div className="relative">
+                              <BriefcaseBusiness className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                              <input
+                                id="customInstitution"
+                                type="text"
+                                value={customInstitution}
+                                onChange={(e) =>
+                                  setCustomInstitution(e.target.value)
+                                }
+                                placeholder="Enter institution name"
+                                className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                                required
+                              />
+                            </div>
+                          </div>
+                        )}
                       </>
                     )}
 
@@ -793,8 +1055,8 @@ export default function AuthPage() {
                           type="email"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
-                          placeholder="correo@universidad.edu.co"
-                          className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                          placeholder={emailPlaceholder}
+                          className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                           required
                         />
                       </div>
@@ -803,7 +1065,7 @@ export default function AuthPage() {
                     {!isLogin && (
                       <div className="space-y-1.5">
                         <label htmlFor="whatsApp" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          WhatsApp Number
+                          {whatsAppLabel}
                         </label>
                         <div className="relative">
                           <Smartphone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -813,7 +1075,7 @@ export default function AuthPage() {
                             value={whatsApp}
                             onChange={(e) => setWhatsApp(e.target.value)}
                             placeholder="3001234567"
-                            className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                            className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                             required
                           />
                         </div>
@@ -845,7 +1107,7 @@ export default function AuthPage() {
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           placeholder="••••••••"
-                          className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-11 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                          className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-11 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                           required
                         />
                         <button
@@ -864,9 +1126,39 @@ export default function AuthPage() {
                       <p className="text-xs text-slate-500">Minimum 6 characters</p>
                     </div>
 
+                    {!isLogin && selectedRole === "docente" && (
+                        <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                       - Teacher access requires review before teacher features are enabled. <br /> - If your institution already has an active plan, the approval comes from your institution admin.
+                      </p>
+                    )}
+
+                    {!isLogin && maintenanceMode ? (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                        <p className="font-semibold">Registration is paused during maintenance mode.</p>
+                        <p className="mt-1 text-xs text-amber-700">
+                          You can still sign in with an existing account.
+                          {" "}
+                          {maintenanceCtaHref.startsWith("http") ? (
+                            <a
+                              href={maintenanceCtaHref}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-semibold underline underline-offset-2"
+                            >
+                              {maintenanceCtaLabel}
+                            </a>
+                          ) : (
+                            <Link to={maintenanceCtaHref} className="font-semibold underline underline-offset-2">
+                              {maintenanceCtaLabel}
+                            </Link>
+                          )}
+                        </p>
+                      </div>
+                    ) : null}
+
                     <button
                       type="submit"
-                      disabled={isLoading}
+                      disabled={isLoading || (!isLogin && maintenanceMode)}
                       className="mt-1 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-sky-500 bg-gradient-to-b from-sky-500 to-sky-600 px-4 text-sm font-semibold text-white shadow-[0_18px_30px_-18px_rgba(2,132,199,0.95)] transition hover:from-sky-600 hover:to-sky-700 disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       {isLoading ? (
@@ -882,13 +1174,13 @@ export default function AuthPage() {
                       ) : (
                         <>
                           <Sparkles className="h-4 w-4" />
-                          Create Account
+                          {maintenanceMode ? "Account creation paused" : "Create Account"}
                         </>
                       )}
                     </button>
                   </form>
 
-                  <div className="mt-4 border-t border-slate-200 pt-3">
+                  <div className="mt-4 border-t border-slate-200/60 pt-3">
                     <button
                       onClick={() => {
                         setIsLogin(!isLogin);
@@ -898,6 +1190,8 @@ export default function AuthPage() {
                           setName("");
                           setIdNumber("");
                           setWhatsApp("");
+                          setSelectedInstitutionOption("");
+                          setCustomInstitution("");
                           setSelectedRole("estudiante");
                         }
                       }}
@@ -912,6 +1206,9 @@ export default function AuthPage() {
               </section>
             </div>
           </div>
+          <PublicFooter
+            summary="Access Socrattica securely to manage courses, teaching workflows, and student progress from one academic workspace."
+          />
         </div>
       </div>
 

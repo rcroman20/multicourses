@@ -1,6 +1,7 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDocs,
   limit,
@@ -33,6 +34,9 @@ export interface ContactMessageRecord {
   subject: string;
   message: string;
   status: "new" | "resolved";
+  archived?: boolean;
+  archivedAt?: Date | null;
+  archivedBy?: string;
   source: "contact_page";
   createdAt: Date | null;
   resolvedAt?: Date | null;
@@ -131,6 +135,9 @@ export async function getContactMessages(): Promise<ContactMessageRecord[]> {
       subject: String(data.subject || "").trim(),
       message: String(data.message || "").trim(),
       status: String(data.status || "new").trim().toLowerCase() === "resolved" ? "resolved" : "new",
+      archived: Boolean(data.archived),
+      archivedAt: toDate(data.archivedAt),
+      archivedBy: String(data.archivedBy || "").trim(),
       source: "contact_page",
       createdAt: toDate(data.createdAt),
       resolvedAt: toDate(data.resolvedAt),
@@ -153,4 +160,39 @@ export async function markContactMessageResolved(
     },
     { merge: true },
   );
+}
+
+export async function archiveContactMessage(
+  messageId: string,
+  archivedBy: string,
+): Promise<void> {
+  await setDoc(
+    doc(firebaseDB, COLLECTION_NAME, messageId),
+    {
+      archived: true,
+      archivedBy: String(archivedBy || "").trim().toLowerCase() || null,
+      archivedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function restoreContactMessage(
+  messageId: string,
+): Promise<void> {
+  await setDoc(
+    doc(firebaseDB, COLLECTION_NAME, messageId),
+    {
+      archived: false,
+      archivedBy: null,
+      archivedAt: null,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function deleteContactMessage(messageId: string): Promise<void> {
+  await deleteDoc(doc(firebaseDB, COLLECTION_NAME, messageId));
 }

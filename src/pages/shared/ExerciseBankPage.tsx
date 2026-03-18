@@ -239,12 +239,12 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-        <div className="flex items-center justify-between border-b border-slate-200 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 px-5 py-4">
+      <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex items-center justify-between border-b border-slate-200/60 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 px-5 py-4">
           <h3 className="text-base font-semibold text-slate-900">{title}</h3>
           <button
             onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/80 text-slate-600 transition hover:bg-white hover:text-slate-800"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-white/80 text-slate-600 transition hover:bg-white hover:text-slate-800"
           >
             <X className="h-4 w-4" />
           </button>
@@ -306,7 +306,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+      <div className="w-full max-w-md rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
         <div className="p-5">
           <div className="flex items-center gap-4 mb-4">
             <div
@@ -322,7 +322,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
           <div className="flex items-center justify-end gap-3">
             <button
               onClick={onClose}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              className="rounded-lg border border-slate-300/60 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
             >
               {cancelText}
             </button>
@@ -361,7 +361,7 @@ const STAT_TONE_CLASSES: Record<NonNullable<StatCardProps["tone"]>, string> = {
 
 const StatCard: React.FC<StatCardProps> = ({ icon, label, value, trend, tone = "sky" }) => {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+    <div className="rounded-xl border border-slate-200/60 bg-white p-2.5 shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <div className={`inline-flex h-8 w-8 items-center justify-center rounded-xl ${STAT_TONE_CLASSES[tone]}`}>
           {icon}
@@ -426,7 +426,7 @@ const ThemeCard: React.FC<ThemeCardProps> = ({
       className={`group cursor-pointer rounded-xl border transition-all ${
         isSelected
           ? "border-sky-300 bg-sky-50 shadow-sm"
-          : "border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50/40"
+          : "border-slate-200/60 bg-white hover:border-sky-200 hover:bg-sky-50/40"
       }`}
       onClick={onSelect}
     >
@@ -442,7 +442,7 @@ const ThemeCard: React.FC<ThemeCardProps> = ({
             className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
               isLinked
                 ? "border-indigo-200 bg-indigo-50 text-indigo-700"
-                : "border-slate-200 bg-slate-50 text-slate-700"
+                : "border-slate-200/60 bg-slate-50 text-slate-700"
             }`}
           >
             {isLinked ? "Linked" : "Practice"}
@@ -461,7 +461,7 @@ const ThemeCard: React.FC<ThemeCardProps> = ({
         </div>
 
         {attempt && (
-          <div className="mb-3 rounded-lg border border-slate-200 bg-white p-2">
+          <div className="mb-3 rounded-lg border border-slate-200/60 bg-white p-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-600">Last score</span>
               <span className="text-sm font-semibold text-sky-700">
@@ -560,7 +560,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
   onEditingChange,
 }) => {
   return (
-    <div className="bg-white border border-slate-200 rounded-xl hover:shadow-md transition-all duration-300 overflow-hidden">
+    <div className="bg-white border border-slate-200/60 rounded-xl hover:shadow-md transition-all duration-300 overflow-hidden">
       {isEditing ? (
         <div className="p-4">
           <div className="space-y-2">
@@ -571,7 +571,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
               <input
                 value={editingValues.theme}
                 onChange={(e) => onEditingChange("theme", e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                className="w-full rounded-lg border border-slate-300/60 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                 placeholder="Theme"
               />
             </div>
@@ -583,7 +583,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
               <textarea
                 value={editingValues.question}
                 onChange={(e) => onEditingChange("question", e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                className="w-full rounded-lg border border-slate-300/60 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                 rows={2}
                 placeholder="Question"
               />
@@ -608,7 +608,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
                       newOptions[idx] = e.target.value;
                       onEditingChange("options", newOptions);
                     }}
-                    className="flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                    className="flex-1 rounded-lg border border-slate-300/60 px-2.5 py-1.5 text-xs focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                     placeholder={`Option ${idx + 1}`}
                   />
                 </div>
@@ -788,7 +788,7 @@ const QuizQuestionView: React.FC<QuizQuestionViewProps> = ({
         />
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+      <div className="bg-white rounded-xl border border-slate-200/60 p-4 shadow-sm">
         <div className="mb-4">
           <span className="inline-block px-3 py-1 bg-sky-100 text-sky-700 text-xs font-semibold rounded-full">
             {question.theme}
@@ -809,7 +809,7 @@ const QuizQuestionView: React.FC<QuizQuestionViewProps> = ({
                 className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
                   isSelected
                     ? "border-sky-500 bg-sky-50"
-                    : "border-slate-200 hover:border-sky-300 hover:bg-sky-50/50"
+                    : "border-slate-200/60 hover:border-sky-300 hover:bg-sky-50/50"
                 }`}
               >
                 <div className="flex items-center gap-3">
@@ -817,7 +817,7 @@ const QuizQuestionView: React.FC<QuizQuestionViewProps> = ({
                     className={`h-6 w-6 rounded-full border-2 flex items-center justify-center text-sm font-medium ${
                       isSelected
                         ? "border-sky-500 bg-sky-500 text-white"
-                        : "border-slate-300 text-slate-500"
+                        : "border-slate-300/60 text-slate-500"
                     }`}
                   >
                     {String.fromCharCode(65 + index)}
@@ -888,7 +888,7 @@ const QuizResultView: React.FC<QuizResultViewProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+    <div className="bg-white rounded-xl border border-slate-200/60 p-4 shadow-sm">
       <div className="text-center mb-6">
         <div className="inline-flex h-20 w-20 rounded-full bg-amber-50 items-center justify-center mb-4">
           <Trophy className="h-8 w-8 text-amber-600" />
@@ -1531,6 +1531,79 @@ export default function ExerciseBankPage() {
           : question.isPublished) && themesToPublish.includes(question.theme),
     ).length;
   }, [availableThemes, bulkPublishTheme, bulkVisibilityAction, questions]);
+
+  const authoringWorkspaceTabs = useMemo(() => {
+    const tabs: Array<{
+      id: AuthoringWorkspacePanel;
+      label: string;
+      description: string;
+      badge?: string;
+    }> = [
+      {
+        id: "create",
+        label: "Create Questions",
+        description: "Single questions or bulk import",
+      },
+      {
+        id: "questionBank",
+        label: "Question Bank",
+        description: "Review, edit, and publish by theme",
+        badge: `${filteredQuestions.length}`,
+      },
+    ];
+
+    if (!isAdmin) {
+      tabs.push({
+        id: "sharedQuizBank",
+        label: "Shared Quiz Bank",
+        description: "Import and publish reusable quizzes",
+      });
+    }
+
+    if (showMandatoryTeacherQuizzesCard) {
+      tabs.push({
+        id: "mandatoryTeacherQuizzes",
+        label: "Mandatory Course Quizzes",
+        description: "Review the required teacher quizzes",
+      });
+    }
+
+    return tabs;
+  }, [filteredQuestions.length, isAdmin, showMandatoryTeacherQuizzesCard]);
+
+  const activeAuthoringWorkspaceCopy = useMemo(() => {
+    switch (activeAuthoringPanel) {
+      case "questionBank":
+        return {
+          eyebrow: "Workspace",
+          title: "Question Bank",
+          description:
+            "Filter by publication status, focus on one theme, and keep edits organized before saving.",
+        };
+      case "sharedQuizBank":
+        return {
+          eyebrow: "Workspace",
+          title: "Shared Quiz Bank",
+          description:
+            "Bring proven quizzes into this course or publish your own themes for other teachers.",
+        };
+      case "mandatoryTeacherQuizzes":
+        return {
+          eyebrow: "Workspace",
+          title: "Mandatory Course Quizzes",
+          description:
+            "Monitor the onboarding quizzes teachers must complete in the mandatory course.",
+        };
+      case "create":
+      default:
+        return {
+          eyebrow: "Workspace",
+          title: "Create Questions",
+          description:
+            "Build new questions, assign them to a theme, and decide whether they start as draft or published.",
+        };
+    }
+  }, [activeAuthoringPanel]);
 
   const isLinkedTheme = (theme: string) => Boolean(themeLinksByTheme[theme]);
   const getThemeAttemptCount = useCallback(
@@ -3655,9 +3728,9 @@ export default function ExerciseBankPage() {
   const renderSharedQuizBankPanel = () => (
     isAdmin ? null : (
     <div
-      className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+      className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm"
     >
-      <div className="px-4 py-3 border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+      <div className="px-4 py-3 border-b border-slate-200/60 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
         <div className="flex items-start gap-3">
           <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
             <Sparkles className="h-5 w-5 text-sky-600" />
@@ -3748,7 +3821,7 @@ export default function ExerciseBankPage() {
             value={sharedSearchQuery}
             onChange={(event) => setSharedSearchQuery(event.target.value)}
             placeholder="Search shared quizzes..."
-            className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+            className="w-full rounded-lg border border-slate-200/60 py-2 pl-9 pr-3 text-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
           />
         </div>
 
@@ -3758,7 +3831,7 @@ export default function ExerciseBankPage() {
               <Loader2 className="h-5 w-5 animate-spin text-sky-600" />
             </div>
           ) : filteredSharedTemplates.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-500">
+            <p className="rounded-xl border border-dashed border-slate-200/60 px-3 py-6 text-center text-sm text-slate-500">
               No shared templates found yet.
             </p>
           ) : (
@@ -3828,7 +3901,7 @@ export default function ExerciseBankPage() {
                 return (
                   <article
                     key={template.id}
-                    className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm transition hover:border-sky-200"
+                    className="rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm transition hover:border-sky-200"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -3916,7 +3989,7 @@ export default function ExerciseBankPage() {
                             void handleDeleteSharedTemplate(template);
                           }}
                           disabled={hasActiveAction || hasAnotherTemplateAction}
-                          className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300/60 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {isDeletingSharedTemplate ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -3944,8 +4017,8 @@ export default function ExerciseBankPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-4">
-          <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-4">
+          <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
             <div className="pointer-events-none absolute -left-[70px] -top-[90px] h-[180px] w-[180px] rounded-full bg-sky-300/25" />
             <div className="pointer-events-none absolute -right-[90px] -bottom-[90px] h-[200px] w-[200px] rounded-full bg-violet-300/20" />
             <div className="relative z-10 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -3962,7 +4035,7 @@ export default function ExerciseBankPage() {
                 </p>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
+              <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3">
                 <label
                   className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500"
                   htmlFor="exercise-bank-course-select"
@@ -3973,7 +4046,7 @@ export default function ExerciseBankPage() {
                   <BookOpen className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <select
                     id="exercise-bank-course-select"
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     value={selectedCourseId}
                     onChange={(e) => handleCourseChange(e.target.value)}
                   >
@@ -4000,7 +4073,7 @@ export default function ExerciseBankPage() {
                     <button
                       type="button"
                       disabled
-                      className="mt-2 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-400"
+                      className="mt-2 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200/60 bg-slate-50 px-3 text-xs font-semibold text-slate-400"
                     >
                       <BarChart3 className="h-3.5 w-3.5" />
                       View Quiz Stats
@@ -4015,7 +4088,7 @@ export default function ExerciseBankPage() {
             {!selectedCourseId ? (
               isTeacher ? (
                 <div className="space-y-4">
-                  <div className="flex flex-col items-center justify-center min-h-[320px] bg-white border border-slate-200 rounded-2xl p-8">
+                  <div className="flex flex-col items-center justify-center min-h-[320px] bg-white border border-slate-200/60 rounded-2xl p-8">
                     <div className="h-20 w-20 rounded-full bg-sky-100 flex items-center justify-center mb-4">
                       <BookOpen className="h-8 w-8 text-sky-600" />
                     </div>
@@ -4030,7 +4103,7 @@ export default function ExerciseBankPage() {
                   {renderSharedQuizBankPanel()}
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center min-h-[400px] bg-white border border-slate-200 rounded-2xl p-8">
+                <div className="flex flex-col items-center justify-center min-h-[400px] bg-white border border-slate-200/60 rounded-2xl p-8">
                   <div className="h-20 w-20 rounded-full bg-sky-100 flex items-center justify-center mb-4">
                     <BookOpen className="h-8 w-8 text-sky-600" />
                   </div>
@@ -4076,86 +4149,127 @@ export default function ExerciseBankPage() {
 
                 {isAuthoringMode && (
                   <div className="space-y-4">
-                    <div
-                      className={`grid grid-cols-1 gap-3 ${
-                        showMandatoryTeacherQuizzesCard
-                          ? "md:grid-cols-2 xl:grid-cols-4"
-                          : "md:grid-cols-3"
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveAuthoringPanel("create");
-                          setShowCreatorForm(true);
-                        }}
-                        className={`rounded-2xl border p-4 text-left transition ${
-                          activeAuthoringPanel === "create"
-                            ? "border-sky-300 bg-sky-50"
-                            : "border-slate-200 bg-white hover:border-sky-200"
-                        }`}
-                      >
-                        <p className="text-sm font-bold text-slate-900">Create Questions</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          Add single or bulk questions
-                        </p>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setActiveAuthoringPanel("questionBank")}
-                        className={`rounded-2xl border p-4 text-left transition ${
-                          activeAuthoringPanel === "questionBank"
-                            ? "border-sky-300 bg-sky-50"
-                            : "border-slate-200 bg-white hover:border-sky-200"
-                        }`}
-                      >
-                        <p className="text-sm font-bold text-slate-900">Question Bank</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {filteredQuestions.length} questions available
-                        </p>
-                      </button>
-                      {!isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => setActiveAuthoringPanel("sharedQuizBank")}
-                          className={`rounded-2xl border p-4 text-left transition ${
-                            activeAuthoringPanel === "sharedQuizBank"
-                              ? "border-sky-300 bg-sky-50"
-                              : "border-slate-200 bg-white hover:border-sky-200"
-                          }`}
-                        >
-                          <p className="text-sm font-bold text-slate-900">Shared Quiz Bank</p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            Reuse, import, and publish quizzes
-                          </p>
-                        </button>
-                      )}
-                      {showMandatoryTeacherQuizzesCard && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setActiveAuthoringPanel("mandatoryTeacherQuizzes")
-                          }
-                          className={`rounded-2xl border p-4 text-left transition ${
-                            activeAuthoringPanel === "mandatoryTeacherQuizzes"
-                              ? "border-sky-300 bg-sky-50"
-                              : "border-slate-200 bg-white hover:border-sky-200"
-                          }`}
-                        >
-                          <p className="text-sm font-bold text-slate-900">
-                            Mandatory Course Quizzes
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            Quizzes teachers must complete
-                          </p>
-                        </button>
-                      )}
+                    <div className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm">
+                      <div className="border-b border-slate-200/60 bg-gradient-to-r from-slate-50 via-white to-sky-50/60 px-4 py-4">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="max-w-2xl">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">
+                              Teacher Studio
+                            </p>
+                            <h2 className="mt-1 text-xl font-bold text-slate-900">
+                              {activeAuthoringWorkspaceCopy.title}
+                            </h2>
+                            <p className="mt-1 text-sm text-slate-600">
+                              {activeAuthoringWorkspaceCopy.description}
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                Course
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-slate-900">
+                                {selectedCourse?.code || "--"}
+                              </p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                Themes
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-slate-900">
+                                {stats.totalThemes}
+                              </p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                Published
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-emerald-700">
+                                {stats.publishedCount}
+                              </p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                Drafts
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-slate-900">
+                                {stats.draftCount}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="border-b border-slate-200/60 bg-slate-50/70 px-3 py-3">
+                        <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                          {authoringWorkspaceTabs.map((panel) => {
+                            const isActive = activeAuthoringPanel === panel.id;
+
+                            return (
+                              <button
+                                key={panel.id}
+                                type="button"
+                                onClick={() => {
+                                  setActiveAuthoringPanel(panel.id);
+                                  if (panel.id === "create") {
+                                    setShowCreatorForm(true);
+                                  }
+                                }}
+                                className={`min-w-[220px] flex-1 rounded-xl border px-4 py-3 text-left transition ${
+                                  isActive
+                                    ? "border-sky-300 bg-sky-50 shadow-sm"
+                                    : "border-slate-200/60 bg-white hover:border-slate-300/60 hover:bg-slate-50"
+                                }`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <div
+                                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                                      isActive
+                                        ? "bg-white text-sky-700"
+                                        : "bg-slate-100 text-slate-600"
+                                    }`}
+                                  >
+                                    {panel.id === "create" && (
+                                      <PenTool className="h-4 w-4" />
+                                    )}
+                                    {panel.id === "questionBank" && (
+                                      <BookOpen className="h-4 w-4" />
+                                    )}
+                                    {panel.id === "sharedQuizBank" && (
+                                      <Sparkles className="h-4 w-4" />
+                                    )}
+                                    {panel.id === "mandatoryTeacherQuizzes" && (
+                                      <CheckCircle2 className="h-4 w-4" />
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-semibold text-slate-900">
+                                        {panel.label}
+                                      </p>
+                                      {panel.badge && (
+                                        <span className="rounded-full border border-slate-200/60 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                                          {panel.badge}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="mt-1 text-xs text-slate-500">
+                                      {panel.description}
+                                    </p>
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="space-y-2">
                       {activeAuthoringPanel === "create" && (
-                        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-                        <div className="px-4 py-3 border-b border-slate-200 bg-white">
+                        <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden">
+                        <div className="px-4 py-3 border-b border-slate-200/60 bg-white">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div className="h-8 w-8 rounded-lg bg-sky-100 flex items-center justify-center">
@@ -4196,7 +4310,7 @@ export default function ExerciseBankPage() {
                                 className={`h-9 rounded-lg border px-3 text-sm font-semibold transition ${
                                   questionCreationMode === "single"
                                     ? "border-sky-500 bg-sky-50 text-sky-700"
-                                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                                    : "border-slate-200/60 hover:border-slate-300/60 hover:bg-slate-50"
                                 }`}
                               >
                                 Single Question
@@ -4206,7 +4320,7 @@ export default function ExerciseBankPage() {
                                 className={`h-9 rounded-lg border px-3 text-sm font-semibold transition ${
                                   questionCreationMode === "bulk"
                                     ? "border-sky-500 bg-sky-50 text-sky-700"
-                                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                                    : "border-slate-200/60 hover:border-slate-300/60 hover:bg-slate-50"
                                 }`}
                               >
                                 Bulk Import
@@ -4219,7 +4333,7 @@ export default function ExerciseBankPage() {
                                 className={`h-9 rounded-lg border px-3 text-sm font-semibold transition ${
                                   themeMode === "existing"
                                     ? "border-sky-500 bg-sky-50 text-sky-700"
-                                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                                    : "border-slate-200/60 hover:border-slate-300/60 hover:bg-slate-50"
                                 }`}
                               >
                                 Existing Theme
@@ -4229,7 +4343,7 @@ export default function ExerciseBankPage() {
                                 className={`h-9 rounded-lg border px-3 text-sm font-semibold transition ${
                                   themeMode === "new"
                                     ? "border-sky-500 bg-sky-50 text-sky-700"
-                                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                                    : "border-slate-200/60 hover:border-slate-300/60 hover:bg-slate-50"
                                 }`}
                               >
                                 New Theme
@@ -4242,7 +4356,7 @@ export default function ExerciseBankPage() {
                                 onChange={(e) =>
                                   setSelectedExistingTheme(e.target.value)
                                 }
-                                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                                className="h-10 w-full rounded-lg border border-slate-200/60 px-3 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                               >
                                 <option value="">Select a theme</option>
                                 {availableThemes.map((theme) => (
@@ -4256,7 +4370,7 @@ export default function ExerciseBankPage() {
                                 value={themeInput}
                                 onChange={(e) => setThemeInput(e.target.value)}
                                 placeholder="Enter new theme name"
-                                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                                className="h-10 w-full rounded-lg border border-slate-200/60 px-3 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                               />
                             )}
 
@@ -4273,7 +4387,7 @@ export default function ExerciseBankPage() {
                                     }
                                     placeholder="Enter your question here..."
                                     rows={2}
-                                    className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                                    className="w-full resize-none rounded-lg border border-slate-200/60 px-3 py-2 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                                   />
                                 </div>
 
@@ -4304,7 +4418,7 @@ export default function ExerciseBankPage() {
                                         );
                                       }}
                                         placeholder={`Option ${index + 1}`}
-                                        className="h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                                        className="h-10 flex-1 rounded-lg border border-slate-200/60 px-3 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                                       />
                                     </div>
                                   ))}
@@ -4321,7 +4435,7 @@ export default function ExerciseBankPage() {
                                     setBulkQuestionsInput(e.target.value)
                                   }
                                   rows={6}
-                                  className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-xs focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                                  className="w-full rounded-lg border border-slate-200/60 px-3 py-2 font-mono text-xs focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                                   placeholder={`Q: What is the correct form of "to be" for I?
 A) am
 B) is
@@ -4345,7 +4459,7 @@ D) goes
                               </div>
                             )}
 
-                            <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                            <div className="flex items-center justify-between rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2.5">
                               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                                 Initial Visibility
                               </p>
@@ -4356,7 +4470,7 @@ D) goes
                                     e.target.value === "published",
                                   )
                                 }
-                                className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700"
+                                className="h-8 rounded-lg border border-slate-200/60 bg-white px-2.5 text-xs font-medium text-slate-700"
                               >
                                 <option value="draft">Draft</option>
                                 <option value="published">Published</option>
@@ -4393,9 +4507,9 @@ D) goes
                       )}
 
                       {activeAuthoringPanel === "questionBank" && (
-                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
-                        <div className="px-4 py-3 border-b border-slate-200">
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                      <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm">
+                        <div className="border-b border-slate-200/60 px-4 py-4">
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                             <div className="flex items-center gap-3">
                               <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
                                 <BookOpen className="h-5 w-5 text-sky-600" />
@@ -4405,150 +4519,200 @@ D) goes
                                   Question Bank
                                 </h2>
                                 <p className="text-xs text-slate-500">
-                                  {filteredQuestions.length} questions
+                                  Review everything by theme before publishing changes to students.
                                 </p>
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-slate-500">
-                                {Object.keys(pendingQuestionUpdates).length}{" "}
-                                unsaved
-                              </span>
-                              <button
-                                onClick={saveAllQuestionChanges}
-                                disabled={
-                                  savingAllQuestionChanges ||
-                                  Object.keys(pendingQuestionUpdates).length ===
-                                    0
-                                }
-                                className="inline-flex h-8 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {savingAllQuestionChanges
-                                  ? "Saving..."
-                                  : "Save All"}
-                              </button>
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                              <div className="rounded-xl border border-slate-200/60 bg-slate-50/70 px-3 py-2">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  Questions
+                                </p>
+                                <p className="mt-1 text-sm font-semibold text-slate-900">
+                                  {filteredQuestions.length}
+                                </p>
+                              </div>
+                              <div className="rounded-xl border border-slate-200/60 bg-slate-50/70 px-3 py-2">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  Themes in view
+                                </p>
+                                <p className="mt-1 text-sm font-semibold text-slate-900">
+                                  {visibleGroupedQuestions.length}
+                                </p>
+                              </div>
+                              <div className="rounded-xl border border-slate-200/60 bg-slate-50/70 px-3 py-2 sm:col-span-1 col-span-2">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  Unsaved edits
+                                </p>
+                                <div className="mt-1 flex items-center justify-between gap-2">
+                                  <p className="text-sm font-semibold text-slate-900">
+                                    {Object.keys(pendingQuestionUpdates).length}
+                                  </p>
+                                  <button
+                                    onClick={saveAllQuestionChanges}
+                                    disabled={
+                                      savingAllQuestionChanges ||
+                                      Object.keys(pendingQuestionUpdates).length ===
+                                        0
+                                    }
+                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {savingAllQuestionChanges
+                                      ? "Saving..."
+                                      : "Save all"}
+                                  </button>
+                                </div>
+                              </div>
                             </div>
                           </div>
+                        </div>
 
-                          <div className="flex flex-col sm:flex-row gap-3 mt-4">
-                            <div className="flex-1 relative">
-                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                              <input
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Search questions..."
-                                className="w-full pl-9 pr-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
-                              />
+                        <div className="space-y-3 border-b border-slate-200/60 bg-slate-50/50 px-4 py-4">
+                          <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.9fr)]">
+                            <div className="rounded-xl border border-slate-200/60 bg-white p-3">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                                Find Questions
+                              </p>
+                              <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                                <div className="relative flex-1">
+                                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                  <input
+                                    value={searchQuery}
+                                    onChange={(e) =>
+                                      setSearchQuery(e.target.value)
+                                    }
+                                    placeholder="Search questions or themes..."
+                                    className="w-full rounded-lg border border-slate-200/60 py-2 pl-9 pr-4 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                                  />
+                                </div>
+                                <div className="flex gap-2">
+                                  <select
+                                    value={questionFilter}
+                                    onChange={(e) =>
+                                      setQuestionFilter(
+                                        e.target.value as QuestionFilter,
+                                      )
+                                    }
+                                    className="rounded-lg border border-slate-200/60 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500"
+                                  >
+                                    <option value="all">All</option>
+                                    <option value="published">Published</option>
+                                    <option value="draft">Draft</option>
+                                  </select>
+                                  <button
+                                    onClick={() =>
+                                      setViewMode(
+                                        viewMode === "grid" ? "list" : "grid",
+                                      )
+                                    }
+                                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200/60 bg-white transition-colors hover:bg-slate-50"
+                                    title={
+                                      viewMode === "grid"
+                                        ? "Switch to list view"
+                                        : "Switch to card view"
+                                    }
+                                  >
+                                    {viewMode === "grid" ? (
+                                      <List className="h-4 w-4" />
+                                    ) : (
+                                      <Grid className="h-4 w-4" />
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
                             </div>
-                            <div className="flex gap-2">
+
+                            <div className="rounded-xl border border-slate-200/60 bg-white p-3">
+                              <label
+                                htmlFor="question-bank-theme-dropdown"
+                                className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+                              >
+                                Focus By Theme
+                              </label>
                               <select
-                                value={questionFilter}
+                                id="question-bank-theme-dropdown"
+                                value={selectedQuestionBankTheme}
                                 onChange={(e) =>
-                                  setQuestionFilter(
-                                    e.target.value as QuestionFilter,
-                                  )
+                                  setSelectedQuestionBankTheme(e.target.value)
                                 }
-                                className="px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-sky-500"
+                                className="mt-3 h-10 w-full rounded-lg border border-slate-200/60 bg-white px-3 text-sm focus:ring-2 focus:ring-sky-500"
                               >
-                                <option value="all">All</option>
-                                <option value="published">Published</option>
-                                <option value="draft">Draft</option>
-                              </select>
-                              <button
-                                onClick={() =>
-                                  setViewMode(
-                                    viewMode === "grid" ? "list" : "grid",
-                                  )
-                                }
-                                className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
-                              >
-                                {viewMode === "grid" ? (
-                                  <List className="h-4 w-4" />
-                                ) : (
-                                  <Grid className="h-4 w-4" />
+                                <option value="all">
+                                  All themes ({groupedFilteredQuestions.length})
+                                </option>
+                                {groupedFilteredQuestions.map(
+                                  ([theme, themeQuestions]) => (
+                                    <option key={theme} value={theme}>
+                                      {theme} ({themeQuestions.length})
+                                    </option>
+                                  ),
                                 )}
-                              </button>
+                              </select>
+                              <p className="mt-2 text-xs text-slate-500">
+                                Narrow the workspace to one theme when you need
+                                to edit, link, or publish faster.
+                              </p>
                             </div>
                           </div>
 
-                          <div className="mt-3 flex flex-col gap-1.5 sm:max-w-sm">
-                            <label
-                              htmlFor="question-bank-theme-dropdown"
-                              className="text-[11px] font-semibold uppercase tracking-wide text-slate-500"
-                            >
-                              Question Bank Dropdown
-                            </label>
-                            <select
-                              id="question-bank-theme-dropdown"
-                              value={selectedQuestionBankTheme}
-                              onChange={(e) =>
-                                setSelectedQuestionBankTheme(e.target.value)
-                              }
-                              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:ring-2 focus:ring-sky-500"
-                            >
-                              <option value="all">
-                                All themes ({groupedFilteredQuestions.length})
-                              </option>
-                              {groupedFilteredQuestions.map(
-                                ([theme, themeQuestions]) => (
-                                  <option key={theme} value={theme}>
-                                    {theme} ({themeQuestions.length})
-                                  </option>
-                                ),
-                              )}
-                            </select>
-                          </div>
-
-                          <div className="mt-2 p-2 bg-slate-50 rounded-xl text-[14px]">
-                            <p className="text-xs font-semibold tracking-wide text-slate-600 mb-3">
-                              Bulk Actions
-                            </p>
-                            <div className="flex flex-wrap gap-3">
-                              <select
-                                value={bulkVisibilityAction}
-                                onChange={(e) =>
-                                  setBulkVisibilityAction(
-                                    e.target.value as "publish" | "draft",
-                                  )
-                                }
-                                className="flex-1 min-w-[160px] px-2 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-sky-500"
-                              >
-                                <option value="publish">Publish drafts</option>
-                                <option value="draft">Unpublish</option>
-                              </select>
-                              <select
-                                value={bulkPublishTheme}
-                                onChange={(e) =>
-                                  setBulkPublishTheme(e.target.value)
-                                }
-                                className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-sky-500"
-                              >
-                                <option value="all">All themes</option>
-                                {availableThemes.map((theme) => (
-                                  <option key={theme} value={theme}>
-                                    {theme}
-                                  </option>
-                                ))}
-                              </select>
-                              <button
-                                onClick={applyBulkVisibilityByTheme}
-                                disabled={
-                                  bulkPublishing ||
-                                  bulkVisibilityTargetCount === 0
-                                }
-                                className={`inline-flex h-9 items-center justify-center rounded-lg px-4 text-xs font-semibold transition ${
-                                  bulkVisibilityAction === "publish"
-                                    ? "border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
-                                    : "border border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
-                                } disabled:opacity-50 disabled:cursor-not-allowed`}
-                              >
-                                {bulkPublishing ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  `${bulkVisibilityAction === "publish" ? "Publish" : "Unpublish"} (${bulkVisibilityTargetCount})`
-                                )}
-                              </button>
+                          <div className="rounded-xl border border-slate-200/60 bg-white p-3">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                              <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                                  Bulk Visibility
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  Apply a publish or unpublish action to an
+                                  entire theme at once.
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-3">
+                                <select
+                                  value={bulkVisibilityAction}
+                                  onChange={(e) =>
+                                    setBulkVisibilityAction(
+                                      e.target.value as "publish" | "draft",
+                                    )
+                                  }
+                                  className="min-w-[160px] rounded-lg border border-slate-200/60 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500"
+                                >
+                                  <option value="publish">Publish drafts</option>
+                                  <option value="draft">Unpublish</option>
+                                </select>
+                                <select
+                                  value={bulkPublishTheme}
+                                  onChange={(e) =>
+                                    setBulkPublishTheme(e.target.value)
+                                  }
+                                  className="min-w-[180px] rounded-lg border border-slate-200/60 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-sky-500"
+                                >
+                                  <option value="all">All themes</option>
+                                  {availableThemes.map((theme) => (
+                                    <option key={theme} value={theme}>
+                                      {theme}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  onClick={applyBulkVisibilityByTheme}
+                                  disabled={
+                                    bulkPublishing ||
+                                    bulkVisibilityTargetCount === 0
+                                  }
+                                  className={`inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold transition ${
+                                    bulkVisibilityAction === "publish"
+                                      ? "border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+                                      : "border border-slate-300/60 bg-slate-100 text-slate-700 hover:bg-slate-200"
+                                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                                >
+                                  {bulkPublishing ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    `${bulkVisibilityAction === "publish" ? "Publish" : "Unpublish"} ${bulkVisibilityTargetCount}`
+                                  )}
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -4581,7 +4745,7 @@ D) goes
                                   return (
                                     <div
                                       key={theme}
-                                      className="rounded-xl border border-slate-200"
+                                      className="rounded-xl border border-slate-200/60"
                                     >
                                       <div
                                         className={`flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-4 py-3 transition-colors hover:bg-slate-100 ${
@@ -4614,7 +4778,7 @@ D) goes
                                         </button>
 
                                         <div className="flex flex-wrap items-center gap-2">
-                                          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5">
+                                          <div className="flex items-center gap-1 rounded-lg border border-slate-200/60 bg-white px-2 py-1.5">
                                             <FileText className="h-3.5 w-3.5 text-slate-500" />
                                             <select
                                               value={themeLinksByTheme[theme] || ""}
@@ -4819,8 +4983,8 @@ D) goes
                       )}
 
                       {activeAuthoringPanel === "mandatoryTeacherQuizzes" && (
-                        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-                          <div className="border-b border-slate-200 px-4 py-3">
+                        <div className="rounded-2xl border border-slate-200/60 bg-white shadow-sm">
+                          <div className="border-b border-slate-200/60 px-4 py-3">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div>
                                 <h2 className="text-base font-bold text-slate-900">
@@ -4861,7 +5025,7 @@ D) goes
                                 {mandatoryCourseQuizThemes.map((item) => (
                                   <div
                                     key={item.theme}
-                                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                                    className="rounded-xl border border-slate-200/60 bg-slate-50 px-3 py-2"
                                   >
                                     <p className="text-sm font-semibold text-slate-900">
                                       {item.theme}
@@ -4907,8 +5071,8 @@ D) goes
                       </div>
 
                       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
-                        <div className="px-4 py-3 border-b border-slate-200 bg-white">
+                      <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm">
+                        <div className="px-4 py-3 border-b border-slate-200/60 bg-white">
                           <div className="flex items-center gap-3">
                             <div className="h-9 w-9 rounded-lg bg-slate-100 flex items-center justify-center">
                               <Eye className="h-5 w-5 text-slate-600" />
@@ -4951,7 +5115,7 @@ D) goes
                                 Publish questions to see the student view
                               </p>
                             )}
-                            <div className="mt-4 pt-4 border-t border-slate-200">
+                            <div className="mt-4 pt-4 border-t border-slate-200/60">
                               <p className="text-xs text-slate-500">
                                 <span className="font-medium text-sky-600">
                                   Linked themes:
@@ -4967,8 +5131,8 @@ D) goes
                         </div>
                       </div>
 
-                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
-                        <div className="px-4 py-3 border-b border-slate-200">
+                      <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm">
+                        <div className="px-4 py-3 border-b border-slate-200/60">
                           <div className="flex items-center gap-3">
                             <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
                               <BarChart3 className="h-5 w-5 text-sky-600" />
@@ -5027,8 +5191,8 @@ D) goes
                 {isLearnerMode && (
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                     <div className="lg:col-span-2 space-y-2">
-                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
-                        <div className="px-4 py-3 border-b border-slate-200">
+                      <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm">
+                        <div className="px-4 py-3 border-b border-slate-200/60">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
@@ -5120,9 +5284,9 @@ D) goes
                       {selectedTheme && (
                         <div
                           ref={quizStartSectionRef}
-                          className="bg-white border border-slate-200 rounded-2xl shadow-sm"
+                          className="bg-white border border-slate-200/60 rounded-2xl shadow-sm"
                         >
-                          <div className="px-4 py-3 border-b border-slate-200">
+                          <div className="px-4 py-3 border-b border-slate-200/60">
                             <h3 className="text-base font-bold text-slate-900">
                               Selected Theme: {selectedTheme}
                             </h3>
@@ -5200,8 +5364,8 @@ D) goes
 
                     <div className="space-y-2">
                       {Object.keys(attemptsByTheme).length > 0 && (
-                        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
-                          <div className="px-4 py-3 border-b border-slate-200">
+                        <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm">
+                          <div className="px-4 py-3 border-b border-slate-200/60">
                             <div className="flex items-center gap-3">
                               <div className="h-9 w-9 rounded-lg bg-emerald-100 flex items-center justify-center">
                                 <TrendingUp className="h-5 w-5 text-emerald-600" />
@@ -5288,8 +5452,8 @@ D) goes
                       )}
 
                       {attemptHistory.length > 0 && (
-                        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
-                          <div className="px-4 py-3 border-b border-slate-200">
+                        <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm">
+                          <div className="px-4 py-3 border-b border-slate-200/60">
                             <div className="flex items-center gap-3">
                               <div className="h-9 w-9 rounded-lg bg-sky-100 flex items-center justify-center">
                                 <Clock className="h-5 w-5 text-sky-600" />
@@ -5410,7 +5574,7 @@ D) goes
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200/60">
                 <button
                   onClick={() => {
                     setShowStartWarning(false);

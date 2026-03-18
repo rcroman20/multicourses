@@ -18,6 +18,9 @@ import {
   isMutedType,
   isWithinQuietHours,
 } from "@/lib/services/notificationPreferences";
+import {
+  showBrowserNotification,
+} from "@/lib/services/browserNotificationService";
 
 interface NotificationContextType {
   notifications: AppNotification[];
@@ -134,6 +137,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const hasInitializedSoundRef = useRef(false);
   const previousUnreadCountRef = useRef(0);
+  const lastBrowserNotificationIdRef = useRef<string | null>(null);
   const processingDeadlineRemindersRef = useRef(false);
   const processingStudentRemindersRef = useRef(false);
   const processingDailyClassesDigestRef = useRef(false);
@@ -199,6 +203,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     if (!user?.id) {
       hasInitializedSoundRef.current = false;
       previousUnreadCountRef.current = 0;
+      lastBrowserNotificationIdRef.current = null;
       return;
     }
 
@@ -213,6 +218,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const shouldPlaySound =
       user.preferences?.soundEffects &&
       unreadCount > previousUnreadCountRef.current;
+    const shouldShowBrowserNotification =
+      user.preferences?.notifications &&
+      unreadCount > previousUnreadCountRef.current &&
+      typeof document !== "undefined" &&
+      document.visibilityState !== "visible";
 
     const hubPrefs = getNotificationHubPreferences(user.id);
     const latestUnread = notifications.find((item) => !item.read);
@@ -220,36 +230,58 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const blockedByQuietHours = isWithinQuietHours(hubPrefs);
     previousUnreadCountRef.current = unreadCount;
 
-    if (!shouldPlaySound || mutedLatestType || blockedByQuietHours) return;
+    if (!mutedLatestType && !blockedByQuietHours && latestUnread) {
+      if (
+        shouldShowBrowserNotification &&
+        lastBrowserNotificationIdRef.current !== latestUnread.id
+      ) {
+        lastBrowserNotificationIdRef.current = latestUnread.id;
+        void showBrowserNotification({
+          title: latestUnread.title,
+          body: latestUnread.message,
+          link: latestUnread.link,
+          tag: latestUnread.id,
+        });
+      }
 
-    try {
-      const AudioContextClass =
-        window.AudioContext ||
-        (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioContextClass) return;
+      if (shouldPlaySound) {
+        try {
+          const AudioContextClass =
+            window.AudioContext ||
+            (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          if (!AudioContextClass) return;
 
-      const audioContext = new AudioContextClass();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
+          const audioContext = new AudioContextClass();
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
 
-      oscillator.type = "sine";
-      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
-      gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.04, audioContext.currentTime + 0.02);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 1);
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+          gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.04, audioContext.currentTime + 0.02);
+          gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 1);
 
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
 
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 1);
-      oscillator.onended = () => {
-        audioContext.close().catch(() => null);
-      };
-    } catch {
-      // Ignore playback errors (browser autoplay policies, etc.)
+          oscillator.start(audioContext.currentTime);
+          oscillator.stop(audioContext.currentTime + 1);
+          oscillator.onended = () => {
+            audioContext.close().catch(() => null);
+          };
+        } catch {
+          // Ignore playback errors (browser autoplay policies, etc.)
+        }
+      }
     }
-  }, [loading, notifications, unreadCount, user?.id, user?.preferences?.soundEffects]);
+  }, [
+    loading,
+    notifications,
+    unreadCount,
+    user?.id,
+    user?.preferences?.notifications,
+    user?.preferences?.soundEffects,
+  ]);
 
   const createNotification: NotificationContextType["createNotification"] = async (input) => {
     if (!user?.id) return;

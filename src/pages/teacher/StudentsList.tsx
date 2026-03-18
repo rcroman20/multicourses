@@ -35,6 +35,7 @@ import {
   Shield,
   Clock,
   BookOpen,
+  School,
   SortAsc,
   SortDesc,
 } from "lucide-react";
@@ -45,6 +46,7 @@ import { toast } from "sonner";
 import { deleteUserByAdmin } from "@/lib/services/adminUserDeletionService";
 import { isTeacherPlanExpired } from "@/lib/services/teacherPlanAccessService";
 import { isAdminEmail } from "@/lib/services/adminAccessService";
+import { purgeUserDataInSparkMode } from "@/lib/services/accountDeletionService";
 import {
   getUserStoredInstitution,
   isInstitutionMissing,
@@ -65,14 +67,19 @@ const studentSchema = z.object({
   email: z.string().email("Enter a valid email"),
   name: z.string().min(3, "Name must have at least 3 characters"),
   whatsApp: z.string().min(10, "Enter a valid phone number"),
-  role: z.enum(["estudiante", "docente"]).default("estudiante"),
 });
 
-type UserRole = "estudiante" | "docente" | "admin";
+type UserRole = "estudiante" | "docente" | "admin" | "institucion";
 type RequestedRole = "estudiante" | "docente";
 type TeacherApprovalStatus = "pending" | "approved" | "rejected";
-type StudentRoleDisplay = "student" | "teacher" | "teacher_pending" | "teacher_rejected" | "admin";
-type RoleFilter = "all" | "estudiante" | "docente" | "admin";
+type StudentRoleDisplay =
+  | "student"
+  | "teacher"
+  | "teacher_pending"
+  | "teacher_rejected"
+  | "admin"
+  | "institution";
+type RoleFilter = "all" | "estudiante" | "docente" | "admin" | "institucion";
 
 const INSTITUTION_FILTER_FIELDS = [
   "teacherInstitutionName",
@@ -142,6 +149,14 @@ const normalizeUserRole = (value: unknown): UserRole | null => {
     return "admin";
   }
 
+  if (
+    normalized === "institucion" ||
+    normalized === "institución" ||
+    normalized === "institution"
+  ) {
+    return "institucion";
+  }
+
   return null;
 };
 
@@ -186,6 +201,7 @@ const getStudentRoleDisplay = (
   student: Pick<Student, "role" | "requestedRole" | "teacherApprovalStatus">,
 ): StudentRoleDisplay => {
   if (student.role === "admin") return "admin";
+  if (student.role === "institucion") return "institution";
   if (student.role === "docente") return "teacher";
   if (student.requestedRole !== "docente") return "student";
   if (student.teacherApprovalStatus === "pending") return "teacher_pending";
@@ -202,6 +218,65 @@ const isTeacherDisplay = (
     roleDisplay === "teacher" ||
     roleDisplay === "teacher_pending" ||
     roleDisplay === "teacher_rejected"
+  );
+};
+
+const matchesRoleFilter = (
+  student: Pick<Student, "role" | "requestedRole" | "teacherApprovalStatus">,
+  roleFilter: RoleFilter,
+): boolean => {
+  const roleDisplay = getStudentRoleDisplay(student);
+
+  if (roleFilter === "all") return true;
+  if (roleFilter === "docente") return isTeacherDisplay(student);
+  if (roleFilter === "admin") return roleDisplay === "admin";
+  if (roleFilter === "institucion") return roleDisplay === "institution";
+  return roleDisplay === "student";
+};
+
+const getErrorCode = (error: unknown): string => {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+  ) {
+    return String((error as { code: string }).code).toLowerCase();
+  }
+  return "";
+};
+
+const getErrorMessage = (error: unknown): string => {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof (error as { message?: unknown }).message === "string"
+  ) {
+    return String((error as { message: string }).message).toLowerCase();
+  }
+  return "";
+};
+
+const isFunctionsFallbackError = (error: unknown): boolean => {
+  const code = getErrorCode(error);
+  if (
+    code.includes("functions/unavailable") ||
+    code.includes("functions/not-found") ||
+    code.includes("functions/unimplemented") ||
+    code.includes("functions/internal") ||
+    code.includes("functions/deadline-exceeded")
+  ) {
+    return true;
+  }
+
+  const message = getErrorMessage(error);
+  return (
+    message.includes("failed to fetch") ||
+    message.includes("preflight") ||
+    message.includes("cors") ||
+    message.includes("access control checks") ||
+    message.includes("network request failed")
   );
 };
 
@@ -223,7 +298,9 @@ export default function StudentsPage() {
   const [courseNames, setCourseNames] = useState<Record<string, string>>({});
 
   const isTeacher = user?.role === "docente";
+  const isInstitution = user?.role === "institucion";
   const isAdmin = isAdminEmail(user?.email);
+  const canManageUsers = isTeacher || isInstitution;
   const [myCourseStudentIds, setMyCourseStudentIds] = useState<Set<string>>(
     new Set(),
   );
@@ -247,7 +324,6 @@ export default function StudentsPage() {
     email: "",
     name: "",
     whatsApp: "",
-    role: "estudiante" as "estudiante" | "docente",
   });
 
   const fetchCourseNames = useCallback(async () => {
@@ -317,7 +393,90 @@ export default function StudentsPage() {
       const matchedInstitutionTeacherIds = new Set<string>();
       const usersWithAnyCourse = new Set<string>();
 
-      if (isTeacher && user?.id && !isAdmin) {
+      if (isInstitution && user?.id && !isAdmin) {
+        const institutionId =
+          (typeof user.institutionId === "string" && user.institutionId.trim()) || user.id;
+        const storedInstitutionName = await getUserStoredInstitution(user.id, "institucion");
+        const institutionKey = normalizeInstitutionValue(storedInstitutionName);
+
+        const [usersSnapshot, studentsSnapshot, coursesSnapshot, currentUserDoc, currentStudentDoc] =
+          await Promise.all([
+            getDocs(query(collection(firebaseDB, "usuarios"), where("institutionId", "==", institutionId))),
+            getDocs(query(collection(firebaseDB, "estudiantes"), where("institutionId", "==", institutionId))),
+            getDocs(query(collection(firebaseDB, "cursos"), where("institutionId", "==", institutionId))),
+            getDoc(doc(firebaseDB, "usuarios", user.id)),
+            getDoc(doc(firebaseDB, "estudiantes", user.id)),
+          ]);
+
+        usersSnapshot.forEach((userDoc) => {
+          usersById.set(userDoc.id, userDoc.data() as Record<string, any>);
+          userIds.add(userDoc.id);
+        });
+
+        studentsSnapshot.forEach((studentDoc) => {
+          studentsById.set(studentDoc.id, studentDoc.data() as Record<string, any>);
+          userIds.add(studentDoc.id);
+        });
+
+        if (currentUserDoc.exists()) {
+          usersById.set(user.id, currentUserDoc.data() as Record<string, any>);
+          userIds.add(user.id);
+        }
+        if (currentStudentDoc.exists()) {
+          studentsById.set(user.id, currentStudentDoc.data() as Record<string, any>);
+          userIds.add(user.id);
+        }
+
+        coursesSnapshot.forEach((courseDoc) => {
+          const courseData = courseDoc.data() as Record<string, any>;
+          const courseId = courseDoc.id;
+          validCourseIds.add(courseId);
+
+          const teacherId = typeof courseData.teacherId === "string" ? courseData.teacherId : "";
+          if (teacherId) {
+            teacherIds.add(teacherId);
+            if (!coursesByUserId.has(teacherId)) coursesByUserId.set(teacherId, new Set());
+            coursesByUserId.get(teacherId)?.add(courseId);
+            userIds.add(teacherId);
+          }
+
+          const enrolled = Array.isArray(courseData.enrolledStudents)
+            ? courseData.enrolledStudents
+            : [];
+          enrolled.forEach((entry) => {
+            const enrolledId = typeof entry === "string" ? entry : entry?.id;
+            if (!enrolledId || typeof enrolledId !== "string") return;
+            if (!coursesByUserId.has(enrolledId)) coursesByUserId.set(enrolledId, new Set());
+            coursesByUserId.get(enrolledId)?.add(courseId);
+            userIds.add(enrolledId);
+          });
+        });
+
+        if (institutionKey) {
+          const [allUsersSnapshot, allStudentsSnapshot] = await Promise.all([
+            getDocs(collection(firebaseDB, "usuarios")),
+            getDocs(collection(firebaseDB, "estudiantes")),
+          ]);
+
+          allUsersSnapshot.forEach((matchedDoc) => {
+            if (usersById.has(matchedDoc.id)) return;
+            const data = matchedDoc.data() as Record<string, unknown>;
+            if (!recordMatchesInstitution(data, institutionKey)) return;
+
+            usersById.set(matchedDoc.id, data as Record<string, any>);
+            userIds.add(matchedDoc.id);
+          });
+
+          allStudentsSnapshot.forEach((matchedDoc) => {
+            if (studentsById.has(matchedDoc.id)) return;
+            const data = matchedDoc.data() as Record<string, unknown>;
+            if (!recordMatchesInstitution(data, institutionKey)) return;
+
+            studentsById.set(matchedDoc.id, data as Record<string, any>);
+            userIds.add(matchedDoc.id);
+          });
+        }
+      } else if (isTeacher && user?.id && !isAdmin) {
         const [ownedCoursesSnapshot, allCoursesSnapshot] = await Promise.all([
           getDocs(
             query(collection(firebaseDB, "cursos"), where("teacherId", "==", user.id)),
@@ -517,6 +676,12 @@ export default function StudentsPage() {
           userData.createdAt?.toDate?.() ||
           undefined;
 
+        const roleDisplay = getStudentRoleDisplay({
+          role: inferredRole as UserRole,
+          requestedRole,
+          teacherApprovalStatus,
+        });
+
         return {
           id,
           idNumber:
@@ -540,7 +705,7 @@ export default function StudentsPage() {
           avatarEmoji: userData.avatarEmoji || studentData.avatarEmoji || "",
           createdAt,
           courses: Array.from(new Set([...directCourses, ...inferredCourses])),
-          canDelete: inferredRole === "estudiante",
+          canDelete: roleDisplay === "student",
         };
       });
 
@@ -555,7 +720,7 @@ export default function StudentsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, isTeacher, user?.id]);
+  }, [isAdmin, isInstitution, isTeacher, user?.id, user?.institutionId]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -585,30 +750,28 @@ export default function StudentsPage() {
 
   const studentsWithCourses = useMemo(
     () =>
-      students.filter(
-        (student) =>
-          isTeacherDisplay(student) ||
-          (student.courses && student.courses.length > 0),
-      ),
+      students.filter((student) => {
+        if (getStudentRoleDisplay(student) === "institution") return false;
+        return isTeacherDisplay(student) || student.courses.length > 0;
+      }),
     [students],
   );
 
   const studentsWithoutCourses = useMemo(() => {
-    const withoutCourses = students.filter(
-      (student) =>
-        !isTeacherDisplay(student) &&
-        (!student.courses || student.courses.length === 0),
-    );
+    const withoutCourses = students.filter((student) => !student.courses || student.courses.length === 0);
 
     if (isTeacher) return withoutCourses;
 
+    if (isInstitution) return withoutCourses;
+
     if (isAdmin) return withoutCourses;
     return [];
-  }, [students, isTeacher, isAdmin]);
+  }, [students, isAdmin, isInstitution, isTeacher]);
 
   const baseStudents = useMemo(() => {
     if (isTeacher) {
       return students.filter((student) => {
+        if (getStudentRoleDisplay(student) === "institution") return false;
         if (isTeacherDisplay(student)) {
           return sameInstitutionTeacherIds.has(student.id);
         }
@@ -619,12 +782,14 @@ export default function StudentsPage() {
         return courseIds.some((courseId) => myTeacherCourseIds.has(courseId));
       });
     }
+    if (isInstitution) return studentsWithCourses;
     if (isAdmin) return studentsWithCourses;
     return studentsWithCourses.filter((student) => student.id === user?.id);
   }, [
     students,
     studentsWithCourses,
     isAdmin,
+    isInstitution,
     isTeacher,
     myCourseStudentIds,
     myTeacherCourseIds,
@@ -635,13 +800,7 @@ export default function StudentsPage() {
   const filteredStudents = useMemo(() => {
     let list = [...baseStudents];
 
-    if (roleFilter !== "all") {
-      list = list.filter((student) => {
-        if (roleFilter === "docente") return isTeacherDisplay(student);
-        if (roleFilter === "admin") return getStudentRoleDisplay(student) === "admin";
-        return !isTeacherDisplay(student) && getStudentRoleDisplay(student) !== "admin";
-      });
-    }
+    list = list.filter((student) => matchesRoleFilter(student, roleFilter));
 
     if (debouncedSearchTerm) {
       list = list.filter((student) => {
@@ -684,6 +843,118 @@ export default function StudentsPage() {
     return list;
   }, [baseStudents, roleFilter, debouncedSearchTerm, sortBy, sortOrder]);
 
+  const filteredStudentsWithoutCourses = useMemo(() => {
+    let list = [...studentsWithoutCourses];
+
+    list = list.filter((student) => matchesRoleFilter(student, roleFilter));
+
+    if (debouncedSearchTerm) {
+      list = list.filter((student) => {
+        const normalizedName = student.name.toLowerCase();
+        const normalizedEmail = student.email.toLowerCase();
+        return (
+          normalizedName.includes(debouncedSearchTerm) ||
+          normalizedEmail.includes(debouncedSearchTerm) ||
+          student.whatsApp.includes(debouncedSearchTerm) ||
+          student.idNumber.includes(debouncedSearchTerm)
+        );
+      });
+    }
+
+    return list;
+  }, [studentsWithoutCourses, roleFilter, debouncedSearchTerm]);
+
+  const withoutCoursesContainsInstitution = useMemo(
+    () =>
+      filteredStudentsWithoutCourses.some(
+        (student) => getStudentRoleDisplay(student) === "institution",
+      ),
+    [filteredStudentsWithoutCourses],
+  );
+  const showWithoutCoursesSection =
+    ((isTeacher &&
+      (roleFilter === "all" || roleFilter === "institucion")) ||
+      isInstitution) &&
+    filteredStudentsWithoutCourses.length > 0;
+
+  const withoutCoursesSectionTitle = (() => {
+    if (roleFilter === "docente") {
+      return `Teachers Without Courses (${filteredStudentsWithoutCourses.length})`;
+    }
+    if (roleFilter === "admin") {
+      return `Admins Without Courses (${filteredStudentsWithoutCourses.length})`;
+    }
+    if (roleFilter === "institucion") {
+      return `Institutions Without Courses (${filteredStudentsWithoutCourses.length})`;
+    }
+    if (withoutCoursesContainsInstitution) {
+      return `Users Without Courses (${filteredStudentsWithoutCourses.length})`;
+    }
+    return `Students Without Courses (${filteredStudentsWithoutCourses.length})`;
+  })();
+
+  const withoutCoursesSectionSubtitle = (() => {
+    if (roleFilter === "docente") {
+      return "These teachers are not currently assigned to any course";
+    }
+    if (roleFilter === "admin") {
+      return "These admins are related to the institution but not linked to courses";
+    }
+    if (roleFilter === "institucion") {
+      return "These institutions are not linked to any course";
+    }
+    if (withoutCoursesContainsInstitution) {
+      return "These users are not enrolled in or linked to any course";
+    }
+    return "These students are not enrolled in any course";
+  })();
+  const primarySectionTitle = (() => {
+    if (isInstitution) {
+      if (roleFilter === "institucion") return "Institution Accounts";
+      if (roleFilter === "docente") return "Teachers";
+      if (roleFilter === "admin") return "Admins";
+      if (roleFilter === "estudiante") return "Students";
+      return "Institution Users";
+    }
+    if (!isTeacher) return "Registered Users";
+    if (roleFilter === "institucion") return "Institution Accounts";
+    if (roleFilter === "docente") return "Teachers";
+    if (roleFilter === "estudiante") return "Students";
+    return "My Students";
+  })();
+  const primarySectionSubtitle = (() => {
+    if (roleFilter === "institucion") {
+      return `${filteredStudents.length} institution accounts with courses`;
+    }
+    if (roleFilter === "docente") {
+      return `${filteredStudents.length} teachers with courses`;
+    }
+    if (roleFilter === "estudiante") {
+      return `${filteredStudents.length} students with courses`;
+    }
+    return `${filteredStudents.length} users with courses`;
+  })();
+  const primaryEmptyTitle =
+    searchTerm || roleFilter !== "all"
+      ? "No results found"
+      : roleFilter === "institucion"
+        ? "No institutions with courses"
+        : roleFilter === "admin"
+          ? "No admins with course links"
+        : roleFilter === "docente"
+          ? "No teachers with courses"
+          : "No students with courses";
+  const primaryEmptySubtitle =
+    searchTerm || roleFilter !== "all"
+      ? "Try different search terms"
+      : roleFilter === "institucion"
+        ? "No institution accounts are currently linked to courses"
+        : roleFilter === "admin"
+          ? "No institution admins are currently linked to course activity"
+        : roleFilter === "docente"
+          ? "No teachers are currently linked to courses"
+          : "All students are currently without course assignments";
+
   useEffect(() => {
     setCurrentPage(1);
   }, [debouncedSearchTerm, roleFilter, sortBy, sortOrder]);
@@ -704,7 +975,7 @@ export default function StudentsPage() {
         <img
           src={student.avatarUrl}
           alt={`${student.name} avatar`}
-          className="h-10 w-10 rounded-full object-cover border border-gray-200"
+          className="h-10 w-10 rounded-full object-cover border border-gray-200/60"
         />
       );
     }
@@ -759,6 +1030,15 @@ export default function StudentsPage() {
         <span className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700">
           <AlertCircle className="h-3 w-3" />
           Teacher Rejected
+        </span>
+      );
+    }
+
+    if (roleDisplay === "institution") {
+      return (
+        <span className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-xs font-bold text-cyan-700">
+          <School className="h-3 w-3" />
+          Institution
         </span>
       );
     }
@@ -832,6 +1112,7 @@ export default function StudentsPage() {
       // Add to Firestore
       const docRef = await addDoc(collection(firebaseDB, "estudiantes"), {
         ...newStudent,
+        role: "estudiante",
         courses: [],
         createdAt: new Date(),
       });
@@ -840,6 +1121,7 @@ export default function StudentsPage() {
       const addedStudent: Student = {
         id: docRef.id,
         ...newStudent,
+        role: "estudiante",
         courses: [],
         createdAt: new Date(),
         canDelete: true,
@@ -853,7 +1135,6 @@ export default function StudentsPage() {
         email: "",
         name: "",
         whatsApp: "",
-        role: "estudiante",
       });
       setShowAddForm(false);
       await createNotification({
@@ -888,20 +1169,43 @@ export default function StudentsPage() {
       toast.success("User deleted successfully (Firestore + Auth).");
       setStudentToDelete(null);
     } catch (error: unknown) {
-      const code =
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        typeof (error as { code?: unknown }).code === "string"
-          ? (error as { code: string }).code
-          : "";
+      const code = getErrorCode(error);
+
+      if (isFunctionsFallbackError(error)) {
+        try {
+          await purgeUserDataInSparkMode(
+            studentToDelete.id,
+            studentToDelete.email,
+          );
+          setStudents((prev) =>
+            prev.filter((student) => student.id !== studentToDelete.id),
+          );
+          toast.success(
+            "Student removed successfully.",
+          );
+          setStudentToDelete(null);
+          return;
+        } catch {
+          setError("Error deleting student");
+          toast.error("Could not remove the student from Firestore.");
+          return;
+        }
+      }
 
       if (code.includes("functions/permission-denied")) {
-        toast.error("You do not have permission to delete this account.");
+        toast.error(
+          isTeacher
+            ? "You can only delete students assigned exclusively to your courses."
+            : "You do not have permission to delete this account.",
+        );
       } else if (code.includes("functions/unavailable")) {
         toast.error("Delete service unavailable. Deploy Cloud Functions and retry.");
       } else if (code.includes("functions/failed-precondition")) {
-        toast.error("This account cannot be deleted from this panel.");
+        toast.error(
+          isTeacher
+            ? "Only student accounts from your course roster can be deleted here."
+            : "This account cannot be deleted from this panel.",
+        );
       } else {
         setError("Error deleting student");
         toast.error("Error deleting student");
@@ -912,18 +1216,19 @@ export default function StudentsPage() {
   };
 
   // Statistics
-  const studentCount = isAdmin
+  const statsSource = isInstitution ? students : filteredStudents;
+  const studentCount = isAdmin || isInstitution
     ? students.length
     : isTeacher
       ? filteredStudents.length
       : students.filter((s) => s.id === user?.id).length;
 
   const studentCountByRole = {
-    estudiante: filteredStudents.filter(
+    estudiante: statsSource.filter(
       (s) => getStudentRoleDisplay(s) === "student",
     ).length,
-    docente: filteredStudents.filter((s) => isTeacherDisplay(s)).length,
-    admin: filteredStudents.filter((s) => getStudentRoleDisplay(s) === "admin").length,
+    docente: statsSource.filter((s) => isTeacherDisplay(s)).length,
+    admin: statsSource.filter((s) => getStudentRoleDisplay(s) === "admin").length,
   };
   const teacherPlanCourseLimit =
     typeof user?.teacherPlanCourseLimit === "number" && user.teacherPlanCourseLimit > 0
@@ -970,7 +1275,7 @@ export default function StudentsPage() {
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="space-y-2 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
@@ -994,9 +1299,9 @@ export default function StudentsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="flex flex-col gap-3">
-        <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+        <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
           <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
           <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
           <div className="relative z-10">
@@ -1034,7 +1339,7 @@ export default function StudentsPage() {
               : "lg:grid-cols-5"
           }`}
         >
-          <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+          <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -1045,13 +1350,13 @@ export default function StudentsPage() {
                 </div>
                 <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Total Registered</p>
               </div>
-              <div className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
+              <div className="rounded-full border border-slate-200/60 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-600">
                 All
               </div>
             </div>
           </div>
 
-          <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+          <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -1068,7 +1373,7 @@ export default function StudentsPage() {
             </div>
           </div>
 
-          <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+          <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -1086,7 +1391,7 @@ export default function StudentsPage() {
           </div>
 
           {!isTeacher && (
-            <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+            <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -1104,7 +1409,7 @@ export default function StudentsPage() {
             </div>
           )}
 
-          <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 shadow-sm">
+          <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -1158,7 +1463,7 @@ export default function StudentsPage() {
           )}
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="flex-1">
               <div className="relative">
@@ -1168,7 +1473,7 @@ export default function StudentsPage() {
                   placeholder="Search by ID, name, email or phone..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-slate-50 py-2.5 pl-10 pr-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  className="w-full rounded-xl border border-slate-300/60 bg-slate-50 py-2.5 pl-10 pr-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 />
               </div>
             </div>
@@ -1181,13 +1486,14 @@ export default function StudentsPage() {
                   onChange={(e) =>
                     setRoleFilter(e.target.value as RoleFilter)
                   }
-                  className="h-10 appearance-none rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-8 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                  className="h-10 appearance-none rounded-xl border border-slate-300/60 bg-slate-50 pl-10 pr-8 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                 >
                   <option value="all">All Roles</option>
                   <option value="estudiante">Students</option>
                   <option value="docente">
                     {isTeacher ? "Teachers (same institution)" : "Teachers"}
                   </option>
+                  <option value="institucion">Institutions</option>
                   {!isTeacher && <option value="admin">Admins</option>}
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -1205,8 +1511,8 @@ export default function StudentsPage() {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 bg-slate-50/60 px-4 py-4 sm:px-6">
+        <div className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm">
+          <div className="border-b border-slate-200/60 bg-slate-50/60 px-4 py-4 sm:px-6">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-3">
@@ -1215,10 +1521,10 @@ export default function StudentsPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-slate-900">
-                      {isTeacher ? "My Students" : "Registered Users"}
+                      {primarySectionTitle}
                     </h3>
                     <p className="mt-0.5 text-sm text-slate-500">
-                      {filteredStudents.length} users with courses
+                      {primarySectionSubtitle}
                     </p>
                   </div>
                 </div>
@@ -1232,7 +1538,7 @@ export default function StudentsPage() {
                 </span>
                 <button
                   onClick={() => handleSortClick("createdAt")}
-                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200/60 bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   Most Recent
                   {sortBy === "createdAt" &&
@@ -1248,7 +1554,7 @@ export default function StudentsPage() {
                       setSearchTerm("");
                       setRoleFilter("all");
                     }}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200/60 bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     <X className="h-3 w-3" />
                     Clear filters
@@ -1264,21 +1570,17 @@ export default function StudentsPage() {
                 <Users className="h-10 w-10 text-slate-400" />
               </div>
               <h3 className="mb-2 text-xl font-bold text-slate-900">
-                {searchTerm || roleFilter !== "all"
-                  ? "No results found"
-                  : "No students with courses"}
+                {primaryEmptyTitle}
               </h3>
               <p className="mx-auto mb-6 max-w-md text-slate-600">
-                {searchTerm || roleFilter !== "all"
-                  ? "Try different search terms"
-                  : "All students are currently without course assignments"}
+                {primaryEmptySubtitle}
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto stm-table-wrap">
-              <table className="w-full table-modern stm-table">
+            <div className="overflow-x-auto [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar]:h-2">
+              <table className="w-full table-modern [&_td]:align-top [&_th]:align-top">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50">
+                  <tr className="border-b border-slate-200/60 bg-slate-50">
                     <th className="min-w-[180px] px-6 py-4 text-left font-bold text-slate-900">
                       <button
                         onClick={() => handleSortClick("idNumber")}
@@ -1325,7 +1627,7 @@ export default function StudentsPage() {
                           ))}
                       </button>
                     </th>
-                    {isTeacher && (
+                    {canManageUsers && (
                       <th className="min-w-[140px] px-4 py-4 text-left font-bold text-slate-900">
                         Actions
                       </th>
@@ -1337,7 +1639,7 @@ export default function StudentsPage() {
                     <tr
                       key={student.id}
                       className={cn(
-                        "border-b border-slate-200 transition-all duration-300 hover:bg-sky-50/30",
+                        "border-b border-slate-200/60 transition-all duration-300 hover:bg-sky-50/30",
                         index % 2 === 0 ? "bg-white" : "bg-slate-50/30",
                       )}
                     >
@@ -1406,13 +1708,19 @@ export default function StudentsPage() {
                       <td className="px-4 py-4">
                         {renderStudentRoleBadge(student)}
                       </td>
-                      {isTeacher && (
+                      {canManageUsers && (
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
                             {(() => {
+                              const roleDisplay = getStudentRoleDisplay(student);
+                              const isInstitutionRecord = roleDisplay === "institution";
+                              const isAdminRecord = roleDisplay === "admin";
                               const canOpenEnrollPage =
-                                !isTeacherPlanBlocked &&
-                                (!isTeacherStudentQuotaReached || myCourseStudentIds.has(student.id));
+                                !isInstitutionRecord &&
+                                !isAdminRecord &&
+                                (!isTeacher ||
+                                  (!isTeacherPlanBlocked &&
+                                    (!isTeacherStudentQuotaReached || myCourseStudentIds.has(student.id))));
                               return canOpenEnrollPage ? (
                                 <Link
                                   to={`/students/${student.id}/enroll`}
@@ -1427,7 +1735,11 @@ export default function StudentsPage() {
                                   disabled
                                   className="cursor-not-allowed rounded-xl p-2 text-slate-400"
                                   title={
-                                    isTeacherPlanBlocked
+                                    isInstitutionRecord
+                                      ? "Institution accounts cannot be enrolled in courses."
+                                      : isAdminRecord
+                                      ? "Admin accounts cannot be enrolled in courses."
+                                      : isTeacher && isTeacherPlanBlocked
                                       ? "Plan expired. Renew payment to continue."
                                       : "Student quota reached for your current plan."
                                   }
@@ -1465,7 +1777,7 @@ export default function StudentsPage() {
             </div>
           )}
           {filteredStudents.length > 0 && (
-            <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-4">
+            <div className="flex items-center justify-between border-t border-slate-200/60 bg-slate-50 px-6 py-4">
               <p className="text-sm text-slate-600">
                 Showing {(currentPage - 1) * pageSize + 1}-
                 {Math.min(currentPage * pageSize, filteredStudents.length)} of{" "}
@@ -1477,7 +1789,7 @@ export default function StudentsPage() {
                   onClick={() =>
                     setCurrentPage((prev) => Math.max(1, prev - 1))
                   }
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-300/60 bg-white px-3 py-1.5 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-slate-50"
                 >
                   Prev
                 </button>
@@ -1489,7 +1801,7 @@ export default function StudentsPage() {
                   onClick={() =>
                     setCurrentPage((prev) => Math.min(totalPages, prev + 1))
                   }
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-300/60 bg-white px-3 py-1.5 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-slate-50"
                 >
                   Next
                 </button>
@@ -1499,26 +1811,26 @@ export default function StudentsPage() {
         </div>
 
         {/* Students Without Courses Section - Only students WITHOUT courses */}
-        {isTeacher && studentsWithoutCourses.length > 0 && (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 shadow-sm sm:p-6">
+        {showWithoutCoursesSection && (
+          <div className="rounded-2xl border border-slate-200/60 bg-slate-50/60 p-4 shadow-sm sm:p-6">
             <div className="flex items-center gap-3 mb-4">
               <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100">
                 <BookOpen className="h-4 w-4 text-amber-700" />
               </div>
               <div>
                 <h3 className="text-lg font-bold text-slate-900">
-                  Students Without Courses ({studentsWithoutCourses.length})
+                  {withoutCoursesSectionTitle}
                 </h3>
                 <p className="text-sm text-slate-600">
-                  These students are not enrolled in any course
+                  {withoutCoursesSectionSubtitle}
                 </p>
               </div>
             </div>
 
-            <div className="overflow-x-auto stm-table-wrap">
-              <table className="w-full table-modern stm-table">
+            <div className="overflow-x-auto [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar]:h-2">
+              <table className="w-full table-modern [&_td]:align-top [&_th]:align-top">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-100/70">
+                  <tr className="border-b border-slate-200/60 bg-slate-100/70">
                     <th className="min-w-[180px] px-6 py-4 text-left font-bold text-slate-900">
                       <div className="flex items-center gap-2">
                         <Hash className="h-4 w-4 text-slate-500" />
@@ -1540,11 +1852,11 @@ export default function StudentsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {studentsWithoutCourses.map((student, index) => (
+                  {filteredStudentsWithoutCourses.map((student, index) => (
                     <tr
                       key={student.id}
                       className={cn(
-                        "border-b border-slate-200 transition-all duration-300 hover:bg-sky-50/30",
+                        "border-b border-slate-200/60 transition-all duration-300 hover:bg-sky-50/30",
                         index % 2 === 0 ? "bg-white" : "bg-slate-50/30",
                       )}
                     >
@@ -1562,7 +1874,7 @@ export default function StudentsPage() {
                             {student.name}
                           </span>
                           <div className="mt-2">
-                            <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
+                            <span className="rounded-full border border-slate-300/60 bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
                               No courses
                             </span>
                           </div>
@@ -1593,13 +1905,32 @@ export default function StudentsPage() {
                       </td>
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-2">
-                          <Link
-                            to={`/students/${student.id}/enroll`}
-                            className="rounded-xl p-2 text-sky-600 transition-all duration-300 hover:bg-sky-50 hover:text-sky-700"
-                            title="Enroll in courses"
-                          >
-                            <LinkIcon className="h-4 w-4" />
-                          </Link>
+                          {(() => {
+                            const roleDisplay = getStudentRoleDisplay(student);
+                            const isInstitutionRecord = roleDisplay === "institution";
+                            const isAdminRecord = roleDisplay === "admin";
+                            return isInstitutionRecord || isAdminRecord ? (
+                            <button
+                              type="button"
+                              disabled
+                              className="cursor-not-allowed rounded-xl p-2 text-slate-400"
+                              title={
+                                isInstitutionRecord
+                                  ? "Institution accounts cannot be enrolled in courses."
+                                  : "Admin accounts cannot be enrolled in courses."
+                              }
+                            >
+                              <LinkIcon className="h-4 w-4" />
+                            </button>
+                          ) : (
+                            <Link
+                              to={`/students/${student.id}/enroll`}
+                              className="rounded-xl p-2 text-sky-600 transition-all duration-300 hover:bg-sky-50 hover:text-sky-700"
+                              title="Enroll in courses"
+                            >
+                              <LinkIcon className="h-4 w-4" />
+                            </Link>
+                          )})()}
                           <Link
                             to={`/students/${student.id}`}
                             className="rounded-xl p-2 text-slate-600 transition-all duration-300 hover:bg-slate-100 hover:text-slate-800"
@@ -1676,9 +2007,9 @@ export default function StudentsPage() {
 
       {/* Add Student Modal */}
       {showAddForm && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px] stm-modal-overlay">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)] stm-modal">
-            <div className="border-b border-slate-200 p-4 stm-modal-head">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px]">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200/60 bg-white shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)]">
+            <div className="border-b border-slate-200/60 bg-slate-50 p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100">
@@ -1686,10 +2017,10 @@ export default function StudentsPage() {
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-slate-900">
-                      Add New User
+                      Add New Student
                     </h3>
                     <p className="mt-0.5 text-xs text-slate-500">
-                      Register a student or teacher
+                      Register a student
                     </p>
                   </div>
                 </div>
@@ -1698,7 +2029,7 @@ export default function StudentsPage() {
                     setShowAddForm(false);
                     setError("");
                   }}
-                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                  className="rounded-lg border border-slate-200/60 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -1706,7 +2037,7 @@ export default function StudentsPage() {
             </div>
 
             {error && (
-              <div className="mx-4 mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700 stm-alert">
+              <div className="mx-4 mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-rose-700">
                 <div className="flex items-center gap-3">
                   <AlertCircle className="h-4 w-4 shrink-0" />
                   <p className="text-sm font-medium">{error}</p>
@@ -1714,7 +2045,7 @@ export default function StudentsPage() {
               </div>
             )}
 
-            <form onSubmit={handleAddStudent} className="p-4 stm-modal-form">
+            <form onSubmit={handleAddStudent} className="p-4">
               <div className="space-y-2">
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-700">
@@ -1726,8 +2057,8 @@ export default function StudentsPage() {
                     onChange={(e) =>
                       setNewStudent({ ...newStudent, idNumber: e.target.value })
                     }
-                    placeholder="Student or teacher ID"
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 stm-modal-input"
+                    placeholder="Student ID"
+                    className="h-10 w-full rounded-xl border border-slate-300/60 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     required
                   />
                   <p className="mt-1 text-xs text-slate-500">
@@ -1746,7 +2077,7 @@ export default function StudentsPage() {
                       setNewStudent({ ...newStudent, name: e.target.value })
                     }
                     placeholder="Full name"
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 stm-modal-input"
+                    className="h-10 w-full rounded-xl border border-slate-300/60 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     required
                   />
                 </div>
@@ -1762,7 +2093,7 @@ export default function StudentsPage() {
                       setNewStudent({ ...newStudent, email: e.target.value })
                     }
                     placeholder="Email address"
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 stm-modal-input"
+                    className="h-10 w-full rounded-xl border border-slate-300/60 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     required
                   />
                 </div>
@@ -1778,49 +2109,26 @@ export default function StudentsPage() {
                       setNewStudent({ ...newStudent, whatsApp: e.target.value })
                     }
                     placeholder="Phone number"
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 stm-modal-input"
+                    className="h-10 w-full rounded-xl border border-slate-300/60 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     required
                   />
                 </div>
 
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-slate-700">
-                    Role *
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={newStudent.role}
-                      onChange={(e) =>
-                        setNewStudent({
-                          ...newStudent,
-                          role: e.target.value as "estudiante" | "docente",
-                        })
-                      }
-                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm font-medium text-slate-700 transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 stm-modal-input"
-                      required
-                    >
-                      <option value="estudiante">Student</option>
-                      <option value="docente">Teacher</option>
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  </div>
-                </div>
-
-                <div className="flex gap-2 pt-3 stm-modal-actions">
+                <div className="mt-1 flex gap-2 border-t border-slate-200 pt-4">
                   <button
                     type="button"
                     onClick={() => {
                       setShowAddForm(false);
                       setError("");
                     }}
-                    className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 stm-modal-btn-secondary"
+                    className="flex min-h-11 flex-1 items-center justify-center rounded-lg border border-slate-200/60 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-sky-300 bg-sky-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50 stm-modal-btn-primary"
+                    className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-sky-300 bg-sky-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <>
@@ -1830,7 +2138,7 @@ export default function StudentsPage() {
                     ) : (
                       <>
                         <Save className="h-4 w-4" />
-                        Add User
+                        Add Student
                       </>
                     )}
                   </button>

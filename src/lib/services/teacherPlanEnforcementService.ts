@@ -60,7 +60,7 @@ type TeacherPlanContext = {
   status: string;
 };
 
-const normalizeUserRole = (value: unknown): "docente" | "estudiante" | "" => {
+const normalizeUserRole = (value: unknown): "docente" | "estudiante" | "admin" | "" => {
   const normalized = String(value || "").trim().toLowerCase();
   if (
     normalized === "docente" ||
@@ -78,6 +78,9 @@ const normalizeUserRole = (value: unknown): "docente" | "estudiante" | "" => {
     normalized === "learner"
   ) {
     return "estudiante";
+  }
+  if (normalized === "admin" || normalized === "administrator") {
+    return "admin";
   }
   return "";
 };
@@ -138,6 +141,16 @@ const getFunctionCode = (error: unknown): string => {
     return String((error as { code: string }).code).trim().toLowerCase();
   }
   return "";
+};
+
+const isPermissionDeniedError = (error: unknown): boolean =>
+  getFunctionCode(error).includes("permission-denied");
+
+const shouldPreferLocalPlanFallback = (): boolean => {
+  const envValue = String(import.meta.env.VITE_FIREBASE_USE_FUNCTIONS || "")
+    .trim()
+    .toLowerCase();
+  return envValue !== "true" && envValue !== "1" && envValue !== "yes";
 };
 
 const isLocalDevEnvironment = (): boolean => {
@@ -212,6 +225,70 @@ const getCurrentUserId = (): string => {
   return uid;
 };
 
+const syncStudentCourseLink = async ({
+  actorUserId,
+  courseId,
+  studentId,
+  action,
+}: {
+  actorUserId: string;
+  courseId: string;
+  studentId: string;
+  action: EnrollmentAction;
+}): Promise<void> => {
+  const studentRef = doc(firebaseDB, "estudiantes", studentId);
+  const courseMutation =
+    action === "enroll" ? arrayUnion(courseId) : arrayRemove(courseId);
+
+  try {
+    const studentSnap = await getDoc(studentRef);
+
+    if (studentSnap.exists()) {
+      await updateDoc(studentRef, {
+        courses: courseMutation,
+        updatedAt: new Date(),
+      });
+      return;
+    }
+
+    if (action === "enroll" && actorUserId === studentId) {
+      await setDoc(
+        studentRef,
+        {
+          id: studentId,
+          role: "estudiante",
+          courses: arrayUnion(courseId),
+          updatedAt: new Date(),
+        },
+        { merge: true },
+      );
+    }
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      console.warn(
+        "[teacherPlanEnforcement] Enrollment sync skipped for student document due to permissions.",
+        { studentId, courseId, action },
+      );
+      return;
+    }
+    throw error;
+  }
+};
+
+const getCourseManagerIds = (courseData: Record<string, unknown>): Set<string> =>
+  new Set(
+    [
+      courseData.teacherId,
+      courseData.createdBy,
+      courseData.createdById,
+      courseData.createdByUserId,
+      courseData.ownerId,
+      courseData.adminId,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  );
+
 const getTeacherPlanContext = async (teacherId: string): Promise<TeacherPlanContext> => {
   const [userSnap, studentSnap] = await Promise.all([
     getDoc(doc(firebaseDB, "usuarios", teacherId)),
@@ -251,6 +328,9 @@ const getTeacherPlanContext = async (teacherId: string): Promise<TeacherPlanCont
     status,
   };
 };
+
+const isInstitutionManagedTeacherRecord = (record: Record<string, unknown>): boolean =>
+  Boolean(record.institutionManaged) || String(record.institutionId || "").trim().length > 0;
 
 const assertPlanIsActive = (plan: TeacherPlanContext): void => {
   if (plan.status === "pending_payment") {
@@ -308,11 +388,21 @@ async function createCourseWithPlanFallback(
   if (description.length > 100) {
     throw new Error("Description must be 100 characters or less.");
   }
-  const [existingCodeSnap, teacherCoursesSnap, teacherProfileSnap] = await Promise.all([
+  const [existingCodeSnap, teacherCoursesSnap, teacherUserSnap, teacherStudentSnap] = await Promise.all([
     getDocs(query(collection(firebaseDB, "cursos"), where("code", "==", code))),
     getDocs(query(collection(firebaseDB, "cursos"), where("teacherId", "==", teacherId))),
     getDoc(doc(firebaseDB, "usuarios", teacherId)),
+    getDoc(doc(firebaseDB, "estudiantes", teacherId)),
   ]);
+
+  const teacherProfileData = {
+    ...(teacherStudentSnap.exists() ? (teacherStudentSnap.data() as Record<string, unknown>) : {}),
+    ...(teacherUserSnap.exists() ? (teacherUserSnap.data() as Record<string, unknown>) : {}),
+  };
+
+  if (isInstitutionManagedTeacherRecord(teacherProfileData)) {
+    throw new Error("Institution-managed teachers cannot create courses. Your institution must create and assign them.");
+  }
 
   if (!existingCodeSnap.empty) {
     throw new Error(`Course code "${code}" already exists. Please use a unique code.`);
@@ -324,8 +414,8 @@ async function createCourseWithPlanFallback(
   }
 
   const teacherName =
-    teacherProfileSnap.exists() && typeof teacherProfileSnap.data()?.name === "string"
-      ? String(teacherProfileSnap.data()?.name).trim()
+    typeof teacherProfileData.name === "string"
+      ? String(teacherProfileData.name).trim()
       : "Teacher";
 
   const courseRef = doc(collection(firebaseDB, "cursos"));
@@ -373,12 +463,63 @@ async function changeCourseEnrollmentWithPlanFallback(
   const courseData = courseSnap.data() as Record<string, unknown>;
   const teacherId =
     typeof courseData.teacherId === "string" ? courseData.teacherId.trim() : "";
-  if (!teacherId) throw new Error("Course has no teacher assigned.");
-
-  const canManageAsTeacher = actorUserId === teacherId;
+  const [actorUserSnap, actorStudentSnap] = await Promise.all([
+    getDoc(doc(firebaseDB, "usuarios", actorUserId)),
+    getDoc(doc(firebaseDB, "estudiantes", actorUserId)),
+  ]);
+  const actorUserData = actorUserSnap.exists()
+    ? (actorUserSnap.data() as Record<string, unknown>)
+    : {};
+  const actorStudentData = actorStudentSnap.exists()
+    ? (actorStudentSnap.data() as Record<string, unknown>)
+    : {};
+  const actorRole = normalizeUserRole(
+    actorUserData.role ||
+      actorStudentData.role ||
+      actorUserData.requestedRole ||
+      actorStudentData.requestedRole,
+  );
+  const canManageAsTeacher = Boolean(teacherId) && actorUserId === teacherId;
   const canManageAsSelf = actorUserId === studentId;
-  if (!canManageAsTeacher && !canManageAsSelf) {
+  const canManageAsAdminOwner =
+    actorRole === "admin" && getCourseManagerIds(courseData).has(actorUserId);
+
+  if (!canManageAsTeacher && !canManageAsSelf && !canManageAsAdminOwner) {
     throw new Error("You are not allowed to change this enrollment.");
+  }
+
+  if (!teacherId) {
+    if (canManageAsSelf || canManageAsAdminOwner) {
+      const courseUpdate =
+        canManageAsSelf && !canManageAsAdminOwner
+          ? {
+              enrolledStudents:
+                action === "enroll" ? arrayUnion(studentId) : arrayRemove(studentId),
+            }
+          : {
+              enrolledStudents:
+                action === "enroll" ? arrayUnion(studentId) : arrayRemove(studentId),
+              updatedAt: new Date(),
+            };
+      await updateDoc(courseRef, courseUpdate);
+      await syncStudentCourseLink({
+        actorUserId,
+        courseId,
+        studentId,
+        action,
+      });
+
+      return {
+        ok: true,
+        courseId,
+        studentId,
+        action,
+        planName: canManageAsSelf ? "Self enrollment" : "Admin managed",
+        studentLimit: 0,
+      };
+    }
+
+    throw new Error("Course has no teacher assigned.");
   }
 
   const plan = await getTeacherPlanContext(teacherId);
@@ -418,33 +559,39 @@ async function changeCourseEnrollmentWithPlanFallback(
   }
 
   if (action === "enroll") {
-    await updateDoc(courseRef, {
-      enrolledStudents: arrayUnion(studentId),
-      updatedAt: new Date(),
+    const courseUpdate =
+      canManageAsSelf && !canManageAsTeacher && !canManageAsAdminOwner
+        ? {
+            enrolledStudents: arrayUnion(studentId),
+          }
+        : {
+            enrolledStudents: arrayUnion(studentId),
+            updatedAt: new Date(),
+          };
+    await updateDoc(courseRef, courseUpdate);
+    await syncStudentCourseLink({
+      actorUserId,
+      courseId,
+      studentId,
+      action,
     });
-    await setDoc(
-      doc(firebaseDB, "estudiantes", studentId),
-      {
-        id: studentId,
-        role: "estudiante",
-        courses: arrayUnion(courseId),
-        updatedAt: new Date(),
-      },
-      { merge: true },
-    );
   } else {
-    await updateDoc(courseRef, {
-      enrolledStudents: arrayRemove(studentId),
-      updatedAt: new Date(),
+    const courseUpdate =
+      canManageAsSelf && !canManageAsTeacher && !canManageAsAdminOwner
+        ? {
+            enrolledStudents: arrayRemove(studentId),
+          }
+        : {
+            enrolledStudents: arrayRemove(studentId),
+            updatedAt: new Date(),
+          };
+    await updateDoc(courseRef, courseUpdate);
+    await syncStudentCourseLink({
+      actorUserId,
+      courseId,
+      studentId,
+      action,
     });
-    await setDoc(
-      doc(firebaseDB, "estudiantes", studentId),
-      {
-        courses: arrayRemove(courseId),
-        updatedAt: new Date(),
-      },
-      { merge: true },
-    );
   }
 
   return {
@@ -460,6 +607,10 @@ async function changeCourseEnrollmentWithPlanFallback(
 export async function createCourseWithPlan(
   payload: CreateCourseWithPlanPayload,
 ): Promise<CreateCourseWithPlanResponse> {
+  if (shouldPreferLocalPlanFallback()) {
+    return createCourseWithPlanFallback(payload);
+  }
+
   try {
     const callable = httpsCallable<CreateCourseWithPlanPayload, CreateCourseWithPlanResponse>(
       firebaseFunctions,
@@ -484,6 +635,10 @@ export async function createCourseWithPlan(
 export async function changeCourseEnrollmentWithPlan(
   payload: ChangeEnrollmentPayload,
 ): Promise<ChangeEnrollmentResponse> {
+  if (shouldPreferLocalPlanFallback()) {
+    return changeCourseEnrollmentWithPlanFallback(payload);
+  }
+
   try {
     const callable = httpsCallable<ChangeEnrollmentPayload, ChangeEnrollmentResponse>(
       firebaseFunctions,

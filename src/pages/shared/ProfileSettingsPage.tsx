@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Award,
   Bell,
+  Building2,
   Calendar,
   Camera,
   Check,
@@ -40,6 +41,11 @@ import {
   type AccountDeletionRequestRecord,
 } from "@/lib/services/accountDeletionService";
 import { notificationService } from "@/lib/services/notificationService";
+import {
+  getBrowserNotificationPermission,
+  isBrowserNotificationSupported,
+  requestBrowserNotificationPermission,
+} from "@/lib/services/browserNotificationService";
 
 const avatarOptions = [
   { emoji: "😀", label: "Happy" },
@@ -68,10 +74,10 @@ const defaultPreferences: UserPreferences = {
 };
 
 const inputClassName =
-  "h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
+  "h-10 w-full rounded-xl border border-slate-300/60 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
 
 const toggleTrackClassName =
-  "relative inline-flex h-6 w-11 rounded-full border border-slate-200 bg-slate-200/80 transition peer-checked:border-sky-500 peer-checked:bg-sky-500";
+  "relative inline-flex h-6 w-11 rounded-full border border-slate-200/60 bg-slate-200/80 transition peer-checked:border-sky-500 peer-checked:bg-sky-500";
 
 export default function ProfileSettingsPage() {
   const { user, updateProfile } = useAuth();
@@ -196,8 +202,12 @@ export default function ProfileSettingsPage() {
       } catch {
         toast.warning("Profile was saved, but we could not create the notification.");
       }
-    } catch {
-      toast.error("Could not save profile");
+    } catch (error: any) {
+      const reason =
+        typeof error?.message === "string" && error.message.trim().length > 0
+          ? error.message
+          : "Could not save profile";
+      toast.error(reason);
     } finally {
       setSaving(false);
     }
@@ -309,6 +319,24 @@ export default function ProfileSettingsPage() {
     if (!user) return;
 
     const previousPreferences = preferences;
+    if (key === "notifications" && value) {
+      if (!isBrowserNotificationSupported()) {
+        toast.error("This browser does not support push notifications.");
+        return;
+      }
+
+      const permissionBefore = getBrowserNotificationPermission();
+      const permissionAfter =
+        permissionBefore === "granted"
+          ? "granted"
+          : await requestBrowserNotificationPermission();
+
+      if (permissionAfter !== "granted") {
+        toast.error("Browser notification permission was not granted.");
+        return;
+      }
+    }
+
     const nextPreferences = { ...preferences, [key]: value };
     setPreferences(nextPreferences);
 
@@ -320,14 +348,18 @@ export default function ProfileSettingsPage() {
 
     try {
       await updateProfile({ preferences: nextPreferences });
-    } catch {
+    } catch (error: any) {
       setPreferences(previousPreferences);
       if (key === "darkMode") {
         const previousDarkMode = Boolean(previousPreferences.darkMode);
         root.classList.toggle("dark", previousDarkMode);
         root.style.colorScheme = previousDarkMode ? "dark" : "light";
       }
-      toast.error("Could not update preference");
+      const reason =
+        typeof error?.message === "string" && error.message.trim().length > 0
+          ? error.message
+          : "Could not update preference";
+      toast.error(reason);
     }
   };
 
@@ -377,7 +409,13 @@ export default function ProfileSettingsPage() {
   }, [user?.createdAt]);
 
   const roleLabel =
-    user?.role === "docente" ? "Teacher" : user?.role === "admin" ? "Admin" : "Student";
+    user?.role === "docente"
+      ? "Teacher"
+      : user?.role === "admin"
+        ? "Admin"
+        : user?.role === "institucion"
+          ? "Institution"
+          : "Student";
 
   const profileCompletion = useMemo(() => {
     const checklist = [
@@ -408,7 +446,14 @@ export default function ProfileSettingsPage() {
   const statusTone = isEditing
     ? "border-amber-200 bg-amber-50 text-amber-700"
     : "border-emerald-200 bg-emerald-50 text-emerald-700";
-  const RoleStatIcon = user?.role === "docente" ? Award : user?.role === "admin" ? Shield : User;
+  const RoleStatIcon =
+    user?.role === "docente"
+      ? Award
+      : user?.role === "admin"
+        ? Shield
+        : user?.role === "institucion"
+          ? Building2
+          : User;
   const scheduledDeletionAt = pendingDeletionRequest?.scheduledDeletionAt || null;
   const remainingMs = Math.max(
     0,
@@ -433,9 +478,9 @@ export default function ProfileSettingsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="relative mx-auto w-full max-w-[1400px] space-y-4 pb-2">
-        <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-white to-sky-50 p-4 shadow-sm lg:p-5">
+        <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-white to-sky-50 p-4 shadow-sm lg:p-5">
           <div className="pointer-events-none absolute -left-10 top-0 h-28 w-28 rounded-full bg-sky-100/70 blur-sm" />
           <div className="pointer-events-none absolute -bottom-12 -right-8 h-36 w-36 rounded-full bg-indigo-100/60 blur-sm" />
 
@@ -458,7 +503,7 @@ export default function ProfileSettingsPage() {
                 <button
                   type="button"
                   onClick={() => setIsEditing(true)}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 shadow-[0_6px_16px_-12px_rgba(15,23,42,0.45)] transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-300/60 bg-white px-5 text-sm font-semibold text-slate-700 shadow-[0_6px_16px_-12px_rgba(15,23,42,0.45)] transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
                 >
                   <Edit3 className="h-4 w-4" />
                   Edit profile
@@ -469,7 +514,7 @@ export default function ProfileSettingsPage() {
                     type="button"
                     onClick={handleCancelEdit}
                     disabled={saving}
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 shadow-[0_6px_16px_-12px_rgba(15,23,42,0.45)] transition hover:border-slate-400 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[148px]"
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-300/60 bg-white px-5 text-sm font-semibold text-slate-700 shadow-[0_6px_16px_-12px_rgba(15,23,42,0.45)] transition hover:border-slate-400 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200 disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-[148px]"
                   >
                     <X className="h-4 w-4" />
                     Cancel
@@ -490,7 +535,7 @@ export default function ProfileSettingsPage() {
         </section>
 
         <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <article className="rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Role</p>
@@ -502,7 +547,7 @@ export default function ProfileSettingsPage() {
             </div>
           </article>
 
-          <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <article className="rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Completion</p>
@@ -520,7 +565,7 @@ export default function ProfileSettingsPage() {
             </div>
           </article>
 
-          <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <article className="rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Member since</p>
@@ -532,7 +577,7 @@ export default function ProfileSettingsPage() {
             </div>
           </article>
 
-          <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <article className="rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</p>
@@ -547,7 +592,7 @@ export default function ProfileSettingsPage() {
           </article>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+        <section className="rounded-2xl border border-slate-200/60 bg-white p-2 shadow-sm">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {[
               {
@@ -579,7 +624,7 @@ export default function ProfileSettingsPage() {
                   className={`inline-flex h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition ${
                     isActive
                       ? "border-sky-300 bg-sky-50 text-sky-800"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-sky-200 hover:bg-sky-50/70 hover:text-sky-700"
+                      : "border-slate-200/60 bg-white text-slate-600 hover:border-sky-200 hover:bg-sky-50/70 hover:text-sky-700"
                   }`}
                 >
                   <span
@@ -598,29 +643,29 @@ export default function ProfileSettingsPage() {
 
         {activeTab === "profile" && (
           <section className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-            <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mx-auto flex w-full max-w-[250px] flex-col items-center text-center">
                 <div className="relative">
-                  <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-sky-100 text-slate-800 shadow-sm">
+                  <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-slate-200/60 bg-sky-100 text-slate-800 shadow-sm">
                     {hasImageAvatar ? (
                       <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
                     ) : (
                       <span className="text-5xl leading-none">{avatarEmoji || getInitials(name || "US")}</span>
                     )}
                   </div>
-                  <div className="absolute -right-2 -top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm">
+                  <div className="absolute -right-2 -top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/60 bg-white text-slate-600 shadow-sm">
                     <Camera className="h-4 w-4" />
                   </div>
                 </div>
                 <h2 className="mt-4 text-base font-bold text-slate-900">{name || "Your Name"}</h2>
                 <p className="mt-1 w-full break-all text-sm text-slate-500">{user?.email || "No email"}</p>
-                <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600">
+                <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-slate-200/60 bg-white px-2.5 py-1 text-xs text-slate-600">
                   <Award className="h-3.5 w-3.5 text-sky-600" />
                   {roleLabel} since {memberSinceLabel}
                 </div>
               </div>
 
-              <div className="mt-4 border-t border-slate-200 pt-4">
+              <div className="mt-4 border-t border-slate-200/60 pt-4">
                 <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Quick links</p>
                 {normalizedWebsiteUrl || normalizedInstagramUrl ? (
                   <div className="flex flex-wrap gap-2">
@@ -648,7 +693,7 @@ export default function ProfileSettingsPage() {
                     )}
                   </div>
                 ) : (
-                  <p className="rounded-lg border border-dashed border-slate-300 bg-white/90 px-3 py-2 text-xs text-slate-500">
+                  <p className="rounded-lg border border-dashed border-slate-300/60 bg-white/90 px-3 py-2 text-xs text-slate-500">
                     Add website or Instagram to show quick links here.
                   </p>
                 )}
@@ -656,7 +701,7 @@ export default function ProfileSettingsPage() {
 
             </article>
 
-            <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-4 flex items-center gap-2">
                 <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 text-sky-700">
                   <User className="h-4 w-4" />
@@ -731,12 +776,12 @@ export default function ProfileSettingsPage() {
                   onChange={(event) => setBio(event.target.value)}
                   rows={4}
                   disabled={!isEditing}
-                  className="w-full resize-none rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                  className="w-full resize-none rounded-xl border border-slate-300/60 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                   placeholder="Tell us a little about yourself..."
                 />
               </label>
 
-              <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-200 pt-4 md:grid-cols-2">
+              <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-200/60 pt-4 md:grid-cols-2">
                 <label className="space-y-1.5">
                   <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Website</span>
                   <div className="relative">
@@ -773,7 +818,7 @@ export default function ProfileSettingsPage() {
 
         {activeTab === "avatar" && (
           <section className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-            <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-3 flex items-center gap-2">
                 <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 text-sky-700">
                   <ImageIcon className="h-4 w-4" />
@@ -784,8 +829,8 @@ export default function ProfileSettingsPage() {
                 </div>
               </div>
 
-              <div className="flex flex-col items-center rounded-xl border border-slate-200 bg-white/90 p-4">
-                <div className="flex h-36 w-36 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-col items-center rounded-xl border border-slate-200/60 bg-white/90 p-4">
+                <div className="flex h-36 w-36 items-center justify-center overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm">
                   {hasImageAvatar ? (
                     <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
                   ) : (
@@ -823,7 +868,7 @@ export default function ProfileSettingsPage() {
               </div>
             </article>
 
-            <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-3 flex items-center gap-2">
                 <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 text-sky-700">
                   <Camera className="h-4 w-4" />
@@ -849,7 +894,7 @@ export default function ProfileSettingsPage() {
                       className={`group relative rounded-xl border p-2 transition ${
                         selected
                           ? "border-sky-400 bg-sky-50"
-                          : "border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50/60"
+                          : "border-slate-200/60 bg-white hover:border-sky-200 hover:bg-sky-50/60"
                       } ${!isEditing ? "cursor-not-allowed opacity-50" : ""}`}
                       title={option.label}
                     >
@@ -870,7 +915,7 @@ export default function ProfileSettingsPage() {
 
         {activeTab === "settings" && (
           <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-4 flex items-center gap-2">
                 <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 text-sky-700">
                   <Settings className="h-4 w-4" />
@@ -882,13 +927,13 @@ export default function ProfileSettingsPage() {
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
+                <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3">
                   <p className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
                     <Bell className="h-3.5 w-3.5" />
                     Notifications & Sound
                   </p>
                   <div className="space-y-2">
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200/60 bg-white px-3 py-2.5">
                       <span className="text-sm font-medium text-slate-700">Push notifications</span>
                       <span className="relative inline-flex items-center">
                         <input
@@ -902,8 +947,13 @@ export default function ProfileSettingsPage() {
                         </span>
                       </span>
                     </label>
+                    {preferences.notifications && getBrowserNotificationPermission() !== "granted" && (
+                      <p className="text-xs text-amber-600">
+                        Browser permission is pending or blocked. Enable it in your browser to receive alerts.
+                      </p>
+                    )}
 
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200/60 bg-white px-3 py-2.5">
                       <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
                         <Volume2 className="h-4 w-4 text-slate-500" />
                         Sound effects
@@ -923,13 +973,13 @@ export default function ProfileSettingsPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
+                <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3">
                   <p className="mb-3 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
                     <LayoutPanelLeft className="h-3.5 w-3.5" />
                     Appearance
                   </p>
                   <div className="space-y-2">
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200/60 bg-white px-3 py-2.5">
                       <span className="text-sm font-medium text-slate-700">Compact sidebar</span>
                       <span className="relative inline-flex items-center">
                         <input
@@ -944,7 +994,7 @@ export default function ProfileSettingsPage() {
                       </span>
                     </label>
 
-                    <label className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                    <label className="flex items-center justify-between rounded-lg border border-slate-200/60 bg-white px-3 py-2.5">
                       <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
                         <Moon className="h-4 w-4 text-slate-500" />
                         Dark mode
@@ -967,7 +1017,7 @@ export default function ProfileSettingsPage() {
             </article>
 
             <aside className="space-y-4">
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <h4 className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                     <User className="h-4 w-4" />
@@ -1030,7 +1080,7 @@ export default function ProfileSettingsPage() {
                         type="button"
                         onClick={handleCancelDeletionRequest}
                         disabled={cancellingDeletion}
-                        className="mt-1 inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="mt-1 inline-flex h-8 items-center rounded-lg border border-slate-300/60 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {cancellingDeletion ? "Cancelling..." : "Cancel deletion request"}
                       </button>

@@ -37,12 +37,33 @@ interface Student {
   idNumber: string;
   email: string;
   name: string;
-  role: 'estudiante' | 'docente';
+  role: 'estudiante' | 'docente' | 'institucion';
   whatsApp: string;
   avatarUrl?: string;
   avatarEmoji?: string;
   courses: string[]; // Cambiado de enrolledCourses a courses
 }
+
+const normalizeStudentRole = (value: unknown): Student["role"] => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (
+    normalized === "docente" ||
+    normalized === "teacher" ||
+    normalized === "profesor" ||
+    normalized === "professor" ||
+    normalized === "instructor"
+  ) {
+    return "docente";
+  }
+  if (
+    normalized === "institucion" ||
+    normalized === "institución" ||
+    normalized === "institution"
+  ) {
+    return "institucion";
+  }
+  return "estudiante";
+};
 
 interface Course {
   id: string;
@@ -76,6 +97,7 @@ export default function EnrollStudentPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
   const isTeacher = user?.role === 'docente';
+  const isInstitutionAccount = student?.role === 'institucion';
   const teacherPlanName = (user?.teacherPlanName || "No assigned plan").trim();
   const teacherPlanStudentLimit =
     typeof user?.teacherPlanStudentLimit === "number" && user.teacherPlanStudentLimit > 0
@@ -120,7 +142,7 @@ export default function EnrollStudentPage() {
         idNumber: studentData.idNumber || userData.idNumber || userData.identification || '',
         email: studentData.email || userData.email || '',
         name: studentData.name || userData.name || 'Student',
-        role: (studentData.role || userData.role || 'estudiante') as 'estudiante' | 'docente',
+        role: normalizeStudentRole(studentData.role || userData.role || 'estudiante'),
         whatsApp: studentData.whatsApp || userData.whatsApp || userData.whatsapp || userData.phone || '',
         avatarUrl: studentData.avatarUrl || userData.avatarUrl || '',
         avatarEmoji: studentData.avatarEmoji || userData.avatarEmoji || '',
@@ -195,6 +217,10 @@ export default function EnrollStudentPage() {
 
   const enrollStudentInCourse = async (courseId: string) => {
     if (!student || !isTeacher) return;
+    if (student.role === "institucion") {
+      setError("Institution accounts cannot be enrolled in courses.");
+      return;
+    }
 
     if (
       teacherPlanExpiresAt &&
@@ -272,6 +298,10 @@ export default function EnrollStudentPage() {
 
   const unenrollStudentFromCourse = async (courseId: string) => {
     if (!student || !isTeacher) return;
+    if (student.role === "institucion") {
+      setError("Institution accounts cannot be enrolled in courses.");
+      return;
+    }
 
     if (!confirm('Are you sure you want to unenroll this student from the course?')) {
       return;
@@ -364,7 +394,7 @@ export default function EnrollStudentPage() {
         <div className="relative overflow-x-clip">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="space-y-2 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
@@ -386,7 +416,7 @@ export default function EnrollStudentPage() {
         <div className="relative overflow-x-clip">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="text-center">
                 <AlertCircle className="mx-auto mb-3 h-10 w-10 text-slate-400" />
@@ -394,7 +424,7 @@ export default function EnrollStudentPage() {
                 <p className="mb-5 text-xs text-slate-500">The student you are looking for does not exist.</p>
                 <button
                   onClick={() => navigate('/students/list')}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200/60 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" />
                   Back to Students List
@@ -413,9 +443,9 @@ export default function EnrollStudentPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="flex flex-col gap-3">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-cyan-50 p-3 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-cyan-50 p-3 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-cyan-200/35" />
               <div className="relative z-10 grid gap-3 lg:grid-cols-[minmax(0,1fr)_330px] lg:items-start">
@@ -441,10 +471,10 @@ export default function EnrollStudentPage() {
                   </p>
                 </div>
 
-                <aside className="rounded-xl border border-slate-200 bg-white/95 p-2.5">
+                <aside className="rounded-xl border border-slate-200/60 bg-white/95 p-2.5">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Student Scope</p>
 
-                  <div className="mt-1.5 flex min-w-0 items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1">
+                  <div className="mt-1.5 flex min-w-0 items-start gap-2 rounded-lg border border-slate-200/60 bg-slate-50 px-2.5 py-1">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-sky-200 bg-sky-100 text-base font-bold text-sky-700">
                       {student.avatarUrl ? (
                         <img
@@ -497,8 +527,19 @@ export default function EnrollStudentPage() {
               </div>
             )}
 
+            {isInstitutionAccount && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-700" />
+                  <p className="text-sm font-medium text-amber-800">
+                    Institution accounts cannot be enrolled in courses from this workspace.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+              <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white p-2.5 shadow-sm">
                 <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                   <BookOpen className="h-4 w-4" />
                 </div>
@@ -506,7 +547,7 @@ export default function EnrollStudentPage() {
                 <p className="text-lg font-extrabold leading-5 text-slate-900">{courses.length}</p>
               </div>
 
-              <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+              <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white p-2.5 shadow-sm">
                 <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                   <CheckCircle className="h-4 w-4" />
                 </div>
@@ -514,7 +555,7 @@ export default function EnrollStudentPage() {
                 <p className="text-lg font-extrabold leading-5 text-slate-900">{studentCourses.length}</p>
               </div>
 
-              <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+              <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white p-2.5 shadow-sm">
                 <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                   <Target className="h-4 w-4" />
                 </div>
@@ -522,7 +563,7 @@ export default function EnrollStudentPage() {
                 <p className="text-lg font-extrabold leading-5 text-slate-900">{availableCoursesCount}</p>
               </div>
 
-              <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+              <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white p-2.5 shadow-sm">
                 <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                   <Filter className="h-4 w-4" />
                 </div>
@@ -531,7 +572,7 @@ export default function EnrollStudentPage() {
               </div>
             </div>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_220px_200px_auto]">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
@@ -540,7 +581,7 @@ export default function EnrollStudentPage() {
                     placeholder="Search courses by name, code or description..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-3 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-10 w-full rounded-xl border border-slate-300/60 bg-slate-50 pl-10 pr-3 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                   />
                 </div>
 
@@ -549,7 +590,7 @@ export default function EnrollStudentPage() {
                   <select
                     value={semesterFilter}
                     onChange={(e) => setSemesterFilter(e.target.value)}
-                    className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-9 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-slate-50 pl-10 pr-9 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                   >
                     <option value="all">All Semesters</option>
                     {getSemesterOptions().map((semester) => (
@@ -566,7 +607,7 @@ export default function EnrollStudentPage() {
                   <select
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
-                    className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-slate-50 pl-10 pr-9 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-slate-50 pl-10 pr-9 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                   >
                     <option value="all">All Status</option>
                     <option value="active">Active</option>
@@ -583,7 +624,7 @@ export default function EnrollStudentPage() {
                       setSemesterFilter('all');
                       setStatusFilter('all');
                     }}
-                    className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200/60 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     Clear filters
                   </button>
@@ -592,8 +633,8 @@ export default function EnrollStudentPage() {
             </section>
 
             <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
-              <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="border-b border-slate-200 bg-slate-50/60 px-4 py-4 sm:px-6">
+              <section className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm">
+                <div className="border-b border-slate-200/60 bg-slate-50/60 px-4 py-4 sm:px-6">
                   <div className="flex items-center gap-3">
                     <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
                       <Users className="h-4 w-4" />
@@ -623,7 +664,7 @@ export default function EnrollStudentPage() {
                   <div className="overflow-x-auto">
                     <table className="min-w-[920px] w-full border-collapse text-sm">
                       <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50">
+                        <tr className="border-b border-slate-200/60 bg-slate-50">
                           <th className="min-w-[240px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                             Course
                           </th>
@@ -655,7 +696,7 @@ export default function EnrollStudentPage() {
                             <tr
                               key={course.id}
                               className={cn(
-                                'border-b border-slate-200 transition hover:bg-sky-50/30',
+                                'border-b border-slate-200/60 transition hover:bg-sky-50/30',
                                 index % 2 === 0 ? 'bg-white' : 'bg-slate-50/30',
                               )}
                             >
@@ -692,7 +733,7 @@ export default function EnrollStudentPage() {
                                     'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold',
                                     course.status === 'active'
                                       ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                      : 'border-slate-200 bg-slate-100 text-slate-600',
+                                      : 'border-slate-200/60 bg-slate-100 text-slate-600',
                                   )}
                                 >
                                   {course.status === 'active' ? 'Active' : 'Inactive'}
@@ -701,13 +742,20 @@ export default function EnrollStudentPage() {
                               <td className="px-3 py-3">
                                 <button
                                   onClick={() => toggleEnrollment(course.id, isEnrolled)}
-                                  disabled={isUpdating}
+                                  disabled={isUpdating || isInstitutionAccount}
                                   className={cn(
                                     'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
                                     isEnrolled
                                       ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
                                       : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
                                   )}
+                                  title={
+                                    isInstitutionAccount
+                                      ? 'Institution accounts cannot be enrolled in courses.'
+                                      : isEnrolled
+                                        ? 'Unenroll from course'
+                                        : 'Enroll in course'
+                                  }
                                 >
                                   {isUpdating ? (
                                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -744,7 +792,7 @@ export default function EnrollStudentPage() {
                   </div>
                 </section>
 
-                <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                <section className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
                   <h4 className="mb-2 text-sm font-semibold text-slate-900">Enrollment Summary</h4>
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs">
@@ -766,7 +814,7 @@ export default function EnrollStudentPage() {
                   </div>
                 </section>
 
-                <section className="rounded-2xl border border-slate-200 bg-sky-50/60 p-3 shadow-sm">
+                <section className="rounded-2xl border border-slate-200/60 bg-sky-50/60 p-3 shadow-sm">
                   <div className="mb-2 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                     <Zap className="h-4 w-4" />
                   </div>

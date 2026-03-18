@@ -38,6 +38,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   query,
   where,
   Timestamp,
@@ -944,44 +945,76 @@ export default function TeacherDashboard() {
 
   useEffect(() => {
     let active = true;
+    let loadingPromise: Promise<void> | null = null;
 
     const loadAllData = async () => {
       if (!user?.id) return;
+      if (loadingPromise) return loadingPromise;
 
-      setLoading(true);
+      loadingPromise = (async () => {
+        setLoading(true);
 
-      try {
-        const loadedCourses = await fetchCourses();
-        const assessmentsPromise = fetchAssessments(loadedCourses);
-        const mandatoryProgressPromise = fetchMandatoryCourseQuizProgress();
+        try {
+          const loadedCourses = await fetchCourses();
+          const assessmentsPromise = fetchAssessments(loadedCourses);
+          const mandatoryProgressPromise = fetchMandatoryCourseQuizProgress();
 
-        await Promise.all([
-          fetchGradeSheets(loadedCourses),
-          assessmentsPromise,
-          fetchStudents(loadedCourses),
-          mandatoryProgressPromise,
-        ]);
+          await Promise.all([
+            fetchGradeSheets(loadedCourses),
+            assessmentsPromise,
+            fetchStudents(loadedCourses),
+            mandatoryProgressPromise,
+          ]);
 
-        const loadedAssessments = await assessmentsPromise;
-        await fetchSubmissions(loadedAssessments);
+          const loadedAssessments = await assessmentsPromise;
+          await fetchSubmissions(loadedAssessments);
 
-        if (!active) return;
-        setLoading(false);
+          if (!active) return;
+          setLoading(false);
 
-        void Promise.allSettled([
-          fetchLegacyCourseContent(loadedCourses),
-          fetchPeriods(loadedCourses),
-          fetchCourseWeeks(loadedCourses),
-          fetchCourseFiles(loadedCourses),
-          runTransferredCourseBackfill(loadedCourses),
-        ]);
-      } catch {
-        return;
-      }
+          void Promise.allSettled([
+            fetchLegacyCourseContent(loadedCourses),
+            fetchPeriods(loadedCourses),
+            fetchCourseWeeks(loadedCourses),
+            fetchCourseFiles(loadedCourses),
+            runTransferredCourseBackfill(loadedCourses),
+          ]);
+        } catch {
+          if (active) {
+            setLoading(false);
+          }
+        } finally {
+          loadingPromise = null;
+        }
+      })();
+
+      return loadingPromise;
     };
 
     if (isAuthenticated && user?.role === "docente") {
       void loadAllData();
+
+      const teacherCoursesQuery = query(
+        collection(firebaseDB, "cursos"),
+        where("teacherId", "==", user.id),
+      );
+
+      const unsubscribe = onSnapshot(
+        teacherCoursesQuery,
+        () => {
+          if (!active) return;
+          void loadAllData();
+        },
+        () => {
+          if (!active) return;
+          setLoading(false);
+        },
+      );
+
+      return () => {
+        active = false;
+        unsubscribe();
+      };
     }
 
     return () => {
@@ -2500,7 +2533,7 @@ export default function TeacherDashboard() {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="space-y-2 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
@@ -2543,9 +2576,9 @@ export default function TeacherDashboard() {
       <div className="relative overflow-x-hidden">
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="space-y-4">
-        <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+        <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-slate-50/70 p-4 shadow-sm">
           <div className="pointer-events-none absolute -left-16 -top-20 h-40 w-40 rounded-full bg-sky-200/20" />
           <div className="pointer-events-none absolute -bottom-24 -right-20 h-48 w-48 rounded-full bg-indigo-200/20" />
 
@@ -2568,7 +2601,7 @@ export default function TeacherDashboard() {
                       : "No courses available"}
                   </p>
                   {selectedCourseHealth ? (
-                    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white/80 px-2.5 py-1 text-xs text-slate-600">
+                    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200/60 bg-white/80 px-2.5 py-1 text-xs text-slate-600">
                       <span className="font-semibold text-slate-700">
                         Pending: {selectedCourseHealth.pendingCount}
                       </span>
@@ -2588,7 +2621,7 @@ export default function TeacherDashboard() {
 
               <div className="w-full lg:w-auto lg:min-w-[320px]">
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 backdrop-blur">
+                  <div className="rounded-xl border border-slate-200/60 bg-white/90 px-3 py-2.5 backdrop-blur">
                     <p className="text-[11px] uppercase tracking-wide text-slate-500">
                       Course Average
                     </p>
@@ -2597,7 +2630,7 @@ export default function TeacherDashboard() {
                       <span className="text-sm font-medium text-slate-500"> / 5.0</span>
                     </p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 backdrop-blur">
+                  <div className="rounded-xl border border-slate-200/60 bg-white/90 px-3 py-2.5 backdrop-blur">
                     <p className="text-[11px] uppercase tracking-wide text-slate-500">
                       Approval
                     </p>
@@ -2605,7 +2638,7 @@ export default function TeacherDashboard() {
                       {courseStats.approvalRate}%
                     </p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 backdrop-blur">
+                  <div className="rounded-xl border border-slate-200/60 bg-white/90 px-3 py-2.5 backdrop-blur">
                     <p className="text-[11px] uppercase tracking-wide text-slate-500">
                       Assessments
                     </p>
@@ -2616,7 +2649,7 @@ export default function TeacherDashboard() {
                   <button
                     type="button"
                     onClick={openBackupCenter}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left transition-colors hover:bg-slate-50"
+                    className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 text-left transition-colors hover:bg-slate-50"
                   >
                     <p className="text-[11px] uppercase tracking-wide text-slate-600">
                       Recovery
@@ -2629,7 +2662,7 @@ export default function TeacherDashboard() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Your Courses</p>
@@ -2637,13 +2670,13 @@ export default function TeacherDashboard() {
                     Tap a card to switch the active dashboard context
                   </p>
                 </div>
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                   {courses.length} total
                 </span>
               </div>
 
               {courseHealthOverview.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-600">
+                <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-4 text-center text-sm text-slate-600">
                   No courses available.
                 </div>
               ) : (
@@ -2656,7 +2689,7 @@ export default function TeacherDashboard() {
                       className={`group rounded-xl border p-3 text-left transition-colors ${
                         selectedCourseId === course.id
                           ? "border-sky-300 bg-sky-50 shadow-sm"
-                          : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                          : "border-slate-200/60 bg-white hover:border-slate-300/60 hover:bg-slate-50"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -2693,7 +2726,7 @@ export default function TeacherDashboard() {
                       </div>
 
                       <div className="mt-3 grid grid-cols-3 gap-1.5">
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                        <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                             Students
                           </p>
@@ -2701,7 +2734,7 @@ export default function TeacherDashboard() {
                             {course.studentsCount}
                           </p>
                         </div>
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                        <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                             Approval
                           </p>
@@ -2709,7 +2742,7 @@ export default function TeacherDashboard() {
                             {course.approvalRate}%
                           </p>
                         </div>
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                        <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                             Pending
                           </p>
@@ -2727,7 +2760,7 @@ export default function TeacherDashboard() {
         </section>
 
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm sm:p-4 lg:col-span-2">
+          <div className="rounded-2xl border border-slate-200/60 bg-slate-50/70 p-3 shadow-sm sm:p-4 lg:col-span-2">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
                 <p className="text-sm font-semibold text-slate-900">General Cards</p>
@@ -2739,7 +2772,7 @@ export default function TeacherDashboard() {
                 <button
                   type="button"
                   onClick={goToPreviousSnapshot}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/60 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
                   aria-label="Previous metrics card"
                 >
                   <ChevronLeft className="h-4 w-4" />
@@ -2747,7 +2780,7 @@ export default function TeacherDashboard() {
                 <button
                   type="button"
                   onClick={goToNextSnapshot}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/60 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
                   aria-label="Next metrics card"
                 >
                   <ChevronRight className="h-4 w-4" />
@@ -2775,10 +2808,10 @@ export default function TeacherDashboard() {
             >
               {activeSnapshotCard ? (
                 <article className="w-full">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5">
+                        <div className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5">
                           {ActiveSnapshotIcon ? (
                             <ActiveSnapshotIcon
                               className={`h-3.5 w-3.5 ${activeSnapshotCard.iconClassName}`}
@@ -2809,7 +2842,7 @@ export default function TeacherDashboard() {
                         return (
                           <div
                             key={`${activeSnapshotCard.key}-${metric.label}`}
-                            className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-center"
+                            className="rounded-xl border border-slate-200/60 bg-slate-50 p-2 text-center"
                           >
                             <div className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white">
                               <MetricIcon className={`h-3.5 w-3.5 ${metric.iconClassName}`} />
@@ -2846,7 +2879,7 @@ export default function TeacherDashboard() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100">
@@ -2863,7 +2896,7 @@ export default function TeacherDashboard() {
             </div>
 
             {todayClassesAllCourses.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+              <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                 <Clock className="mx-auto h-9 w-9 text-slate-400" />
                 <p className="mt-2 text-sm font-medium text-slate-700">No classes today</p>
                 <p className="text-xs text-slate-500">
@@ -2878,7 +2911,7 @@ export default function TeacherDashboard() {
                     to={classItem.courseCode ? `/courses/view/${classItem.courseCode}` : "/courses"}
                     className="block"
                   >
-                    <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5 transition-colors hover:border-slate-300 hover:bg-slate-50">
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/60 bg-slate-50/60 px-3 py-2.5 transition-colors hover:border-slate-300/60 hover:bg-slate-50">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <div className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100">
@@ -2902,7 +2935,7 @@ export default function TeacherDashboard() {
 
         <section className="space-y-4">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100">
@@ -2919,7 +2952,7 @@ export default function TeacherDashboard() {
               </div>
 
               {upcomingActivitiesAllCourses.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                   <CalendarClock className="mx-auto h-9 w-9 text-slate-400" />
                   <p className="mt-2 text-sm font-medium text-slate-700">
                     No upcoming activities
@@ -2955,7 +2988,7 @@ export default function TeacherDashboard() {
                           }
                         }}
                       >
-                        <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition-colors hover:border-sky-300 hover:bg-sky-50/50">
+                        <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 transition-colors hover:border-sky-300 hover:bg-sky-50/50">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
                               <div className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-100">
@@ -2987,7 +3020,7 @@ export default function TeacherDashboard() {
             </div>
 
             <div className="space-y-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-3">
                     <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-cyan-100">
@@ -3005,11 +3038,11 @@ export default function TeacherDashboard() {
                 </div>
 
                 {loadingMandatoryCourseQuizProgress ? (
-                  <div className="flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 py-6">
+                  <div className="flex items-center justify-center rounded-xl border border-slate-200/60 bg-slate-50 py-6">
                     <Loader2 className="h-5 w-5 animate-spin text-sky-600" />
                   </div>
                 ) : !mandatoryCourseQuizProgress ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center">
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-4 text-center">
                     <p className="text-sm font-medium text-slate-700">No mandatory course data</p>
                     <p className="mt-1 text-xs text-slate-500">
                       We could not load quiz progress for the mandatory teacher course.
@@ -3017,7 +3050,7 @@ export default function TeacherDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="rounded-xl border border-slate-200/60 bg-slate-50 px-3 py-2">
                       <p className="text-sm font-semibold text-slate-900">
                         {mandatoryCourseQuizProgress.courseName}
                       </p>
@@ -3067,7 +3100,7 @@ export default function TeacherDashboard() {
                 )}
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-violet-100">
@@ -3084,7 +3117,7 @@ export default function TeacherDashboard() {
                 <div className="grid grid-cols-2 gap-3">
                   <Link
                     to="/courses/create"
-                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                   >
                     <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-sky-100">
                       <Plus className="h-4 w-4 text-sky-700" />
@@ -3095,7 +3128,7 @@ export default function TeacherDashboard() {
 
                   <Link
                     to="/grades"
-                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                   >
                     <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-violet-100">
                       <FileSpreadsheet className="h-4 w-4 text-violet-700" />
@@ -3106,7 +3139,7 @@ export default function TeacherDashboard() {
 
                   <Link
                     to="/slides"
-                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                   >
                     <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100">
                       <Presentation className="h-4 w-4 text-indigo-700" />
@@ -3121,7 +3154,7 @@ export default function TeacherDashboard() {
                         ? `/courses/${selectedCourse.code}/files`
                         : "/courses"
                     }
-                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                   >
                     <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-teal-100">
                       <FolderOpen className="h-4 w-4 text-teal-700" />
@@ -3132,7 +3165,7 @@ export default function TeacherDashboard() {
 
                   <Link
                     to="/students/list"
-                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                   >
                     <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100">
                       <Users className="h-4 w-4 text-emerald-700" />
@@ -3143,7 +3176,7 @@ export default function TeacherDashboard() {
 
                   <Link
                     to="/calendar"
-                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                   >
                     <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100">
                       <CalendarClock className="h-4 w-4 text-amber-700" />
@@ -3158,7 +3191,7 @@ export default function TeacherDashboard() {
                         ? `/courses/${selectedCourse.code}/exercise-bank`
                         : "/courses"
                     }
-                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                    className="group flex flex-col items-center justify-center rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                   >
                     <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100">
                       <ListChecks className="h-4 w-4 text-rose-700" />
@@ -3178,8 +3211,8 @@ export default function TeacherDashboard() {
 
       {showBackupCenter && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-4xl max-h-[85vh] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
+          <div className="w-full max-w-4xl max-h-[85vh] overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+            <div className="flex items-center justify-between border-b border-slate-200/60 bg-slate-50 px-5 py-4">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
                   Backup & Recovery Center
@@ -3267,7 +3300,7 @@ export default function TeacherDashboard() {
                   {backupSnapshots.map((snapshot) => (
                     <div
                       key={snapshot.id}
-                      className="border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+                      className="border border-slate-200/60 rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
                     >
                       <div>
                         <p className="text-sm font-semibold text-slate-900">
@@ -3289,7 +3322,7 @@ export default function TeacherDashboard() {
                         <button
                           type="button"
                           onClick={() => handleDeleteSnapshot(snapshot.id)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-100"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300/60 text-slate-700 text-sm font-medium hover:bg-slate-100"
                         >
                           <Trash2 className="h-3.5 w-3.5 text-red-600" />
                           Delete

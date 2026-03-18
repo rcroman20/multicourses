@@ -1,9 +1,11 @@
 import { useEffect } from "react";
+import {
+  resolvePlatformShareImageUrl,
+  useAdminPlatformSettings,
+} from "@/lib/services/adminSettingsService";
 
-const SITE_NAME = "MultiCourses";
-const SITE_URL = "https://multicourses.web.app";
-const DEFAULT_IMAGE = `${SITE_URL}/logo.png`;
-
+const DEFAULT_SITE_NAME = "Socrattica";
+const SITE_URL = "https://socrattica.web.app";
 type SeoHeadProps = {
   title: string;
   description: string;
@@ -29,11 +31,18 @@ export function SeoHead({
   robots = "index, follow",
   structuredData,
 }: SeoHeadProps) {
-  useEffect(() => {
-    const fullTitle = `${title} | ${SITE_NAME}`;
-    const canonicalUrl = `${SITE_URL}${canonicalPath}`;
+  const { settings } = useAdminPlatformSettings();
 
-    document.title = fullTitle;
+  useEffect(() => {
+    const siteName = String(settings.platformName || "").trim() || DEFAULT_SITE_NAME;
+    const logoCandidate = resolvePlatformShareImageUrl(settings.logoUrl);
+    const socialImage = /^https?:\/\//i.test(logoCandidate)
+      ? logoCandidate
+      : `${SITE_URL}${logoCandidate.startsWith("/") ? logoCandidate : `/${logoCandidate}`}`;
+    const canonicalUrl = `${SITE_URL}${canonicalPath}`;
+    const computedTitle = `${title} | ${siteName}`;
+
+    document.title = computedTitle;
 
     const descriptionMeta = ensureMeta('meta[name="description"]', () => {
       const meta = document.createElement("meta");
@@ -73,7 +82,7 @@ export function SeoHead({
       meta.setAttribute("property", "og:title");
       return meta;
     });
-    ogTitle.content = fullTitle;
+    ogTitle.content = computedTitle;
 
     const ogDescription = ensureMeta('meta[property="og:description"]', () => {
       const meta = document.createElement("meta");
@@ -94,14 +103,14 @@ export function SeoHead({
       meta.setAttribute("property", "og:image");
       return meta;
     });
-    ogImage.content = DEFAULT_IMAGE;
+    ogImage.content = socialImage;
 
     const twitterTitle = ensureMeta('meta[name="twitter:title"]', () => {
       const meta = document.createElement("meta");
       meta.name = "twitter:title";
       return meta;
     });
-    twitterTitle.content = fullTitle;
+    twitterTitle.content = computedTitle;
 
     const twitterDescription = ensureMeta('meta[name="twitter:description"]', () => {
       const meta = document.createElement("meta");
@@ -115,7 +124,7 @@ export function SeoHead({
       meta.name = "twitter:image";
       return meta;
     });
-    twitterImage.content = DEFAULT_IMAGE;
+    twitterImage.content = socialImage;
 
     const scriptId = "seo-structured-data";
     const existingScript = document.getElementById(scriptId);
@@ -130,7 +139,7 @@ export function SeoHead({
       script.text = JSON.stringify(structuredData);
       document.head.appendChild(script);
     }
-  }, [canonicalPath, description, keywords, robots, structuredData, title]);
+  }, [canonicalPath, description, keywords, robots, settings.logoUrl, settings.platformName, structuredData, title]);
 
   return null;
 }

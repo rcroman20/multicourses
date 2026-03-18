@@ -112,6 +112,18 @@ const normalizeMatchText = (value: unknown): string =>
 const normalizeIdentityValue = (value: unknown): string =>
   String(value || "").trim().toLowerCase();
 
+const getFirestoreErrorCode = (error: unknown): string => {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+  ) {
+    return String((error as { code: string }).code).trim().toLowerCase();
+  }
+  return "";
+};
+
 const isCourseOwnedByAdmin = (
   course: Course,
   adminUserId?: string | null,
@@ -148,7 +160,7 @@ const isPublishedSheet = (sheet: any): boolean => {
   if (typeof raw === "boolean") return raw;
   if (typeof raw === "number") return raw === 1;
   const normalized = normalizeIdentityValue(raw);
-  return (
+  const hasExplicitPublishedState = (
     normalized === "true" ||
     normalized === "1" ||
     normalized === "published" ||
@@ -156,6 +168,55 @@ const isPublishedSheet = (sheet: any): boolean => {
     normalized === "active" ||
     normalized === "activo"
   );
+  if (hasExplicitPublishedState) return true;
+  if (normalized.length > 0) return false;
+
+  const rawStudents = Array.isArray(sheet?.students)
+    ? sheet.students
+    : sheet?.students && typeof sheet.students === "object"
+      ? Object.values(sheet.students as Record<string, unknown>)
+      : [];
+
+  return rawStudents.some((studentEntry) => {
+    if (!studentEntry || typeof studentEntry !== "object") return false;
+    const student = studentEntry as Record<string, unknown>;
+    const directTotal =
+      parseLooseNumber(
+        student.total ??
+          student.grade ??
+          student.finalGrade ??
+          student.average ??
+          student.promedio ??
+          student.notaFinal ??
+          student.nota ??
+          student.score,
+      ) ?? null;
+    if (directTotal !== null) return true;
+
+    const rawGrades = student.grades;
+    if (Array.isArray(rawGrades)) {
+      return rawGrades.some((gradeEntry) => parseLooseNumber(gradeEntry) !== null);
+    }
+
+    if (rawGrades && typeof rawGrades === "object") {
+      return Object.values(rawGrades as Record<string, unknown>).some((gradeEntry) => {
+        if (gradeEntry && typeof gradeEntry === "object") {
+          const payload = gradeEntry as Record<string, unknown>;
+          return (
+            parseLooseNumber(payload.value) ??
+            parseLooseNumber(payload.grade) ??
+            parseLooseNumber(payload.score) ??
+            parseLooseNumber(payload.nota) ??
+            parseLooseNumber(payload.total) ??
+            parseLooseNumber(payload.average)
+          ) !== null;
+        }
+        return parseLooseNumber(gradeEntry) !== null;
+      });
+    }
+
+    return false;
+  });
 };
 
 const findStudentInSheet = (students: any[], studentId: string) => {
@@ -398,7 +459,18 @@ const normalizeCourseSchedule = (value: CourseClassSchedule[] | undefined): Cour
 
 const formatScheduleSlot = (slot: CourseClassSchedule, withLocation = false) => {
   const dayLabel = WEEKDAY_SHORT[slot.dayOfWeek] || "Day";
-  const base = `${dayLabel} ${slot.startTime}-${slot.endTime}`;
+  const formatTimeToMeridiem = (value: string) => {
+    const [rawHours, rawMinutes] = value.split(":").map(Number);
+    if (!Number.isFinite(rawHours) || !Number.isFinite(rawMinutes)) return value;
+
+    const meridiem = rawHours >= 12 ? "PM" : "AM";
+    const normalizedHours = rawHours % 12 || 12;
+    const normalizedMinutes = String(rawMinutes).padStart(2, "0");
+
+    return `${normalizedHours}:${normalizedMinutes} ${meridiem}`;
+  };
+
+  const base = `${dayLabel} ${formatTimeToMeridiem(slot.startTime)} - ${formatTimeToMeridiem(slot.endTime)}`;
   if (!withLocation || !slot.location) return base;
   return `${base} • ${slot.location}`;
 };
@@ -552,10 +624,14 @@ export default function CoursesPage() {
   } | null>(null);
 
   const isTeacher = user?.role === "docente";
+  const isInstitution = user?.role === "institucion";
   const isCurrentUserAdmin = user?.role === "admin" || isAdminEmail(user?.email);
   const isAdmin = isCurrentUserAdmin;
-  const isTeacherView = isTeacher || isAdmin;
+  const isTeacherView = isTeacher || isAdmin || isInstitution;
   const isStudentView = !isTeacherView;
+  const institutionId = typeof user?.institutionId === "string" ? user.institutionId.trim() : "";
+  const isInstitutionManagedTeacher =
+    isTeacher && (user?.institutionManaged === true || institutionId.length > 0);
   const [teacherOnboardingCourse, setTeacherOnboardingCourse] = useState<Course | null>(null);
   const [teacherOnboardingCourseId, setTeacherOnboardingCourseId] = useState("");
   const [teacherOnboardingCourseCode, setTeacherOnboardingCourseCode] = useState("");
@@ -565,7 +641,7 @@ export default function CoursesPage() {
       includeAllForAdmin: isAdmin,
       includeEnrolledForTeacher: false,
     });
-  }, [courses, isAdmin, isTeacher, user?.id]);
+  }, [courses, isAdmin, isTeacher, isInstitution, user?.id, user?.institutionId]);
 
   const userAccessibleCourses = useMemo(() => {
     if (!user?.id) return [] as Course[];
@@ -584,7 +660,7 @@ export default function CoursesPage() {
     if (ownedCourses.some((course) => course.id === teacherOnboardingCourse.id)) return ownedCourses;
 
     return [teacherOnboardingCourse, ...ownedCourses];
-  }, [courses, isAdmin, isTeacher, teacherOnboardingCourse, user?.id]);
+  }, [courses, isAdmin, isTeacher, isInstitution, teacherOnboardingCourse, user?.id, user?.institutionId]);
   const userCourses = userAccessibleCourses;
 
   const course = useMemo(() => {
@@ -608,6 +684,16 @@ export default function CoursesPage() {
       ) || null
     );
   }, [courseCode, teacherOnboardingCourseId, userAccessibleCourses]);
+
+  const canManageCurrentCourseRoster =
+    Boolean(course) &&
+    (
+      isAdmin ||
+      (isTeacher && String(course?.teacherId || "").trim() === String(user?.id || "").trim()) ||
+      (isInstitution &&
+        institutionId.length > 0 &&
+        String(course?.institutionId || "").trim() === institutionId)
+    );
 
   useEffect(() => {
     if (!course?.id) return;
@@ -699,18 +785,22 @@ export default function CoursesPage() {
         const gradeSheetsRef = collection(firebaseDB, "gradeSheets");
         const sheets: any[] = [];
         const seenSheetIds = new Set<string>();
-        const snapshots = await Promise.all(
-          Array.from({ length: Math.ceil(courseIds.length / 10) }, (_, index) =>
-            getDocs(
-              query(
-                gradeSheetsRef,
-                where("courseId", "in", courseIds.slice(index * 10, index * 10 + 10)),
-              ),
-            ),
+        const snapshotResults = await Promise.allSettled(
+          courseIds.map((courseId) =>
+            getDocs(query(gradeSheetsRef, where("courseId", "==", courseId))),
           ),
         );
 
-        snapshots.forEach((querySnapshot) => {
+        snapshotResults.forEach((result) => {
+          if (result.status !== "fulfilled") {
+            const code = getFirestoreErrorCode(result.reason);
+            if (!code.includes("permission-denied")) {
+              console.error("Error loading grade sheets:", result.reason);
+            }
+            return;
+          }
+
+          const querySnapshot = result.value;
           querySnapshot.forEach((doc) => {
             if (seenSheetIds.has(doc.id)) return;
             seenSheetIds.add(doc.id);
@@ -741,7 +831,10 @@ export default function CoursesPage() {
 
         setGradeSheets(sheets);
       } catch (error) {
-        console.error("Error loading grade sheets:", error);
+        const code = getFirestoreErrorCode(error);
+        if (!code.includes("permission-denied")) {
+          console.error("Error loading grade sheets:", error);
+        }
         setGradeSheets([]);
       } finally {
         setLoadingSheets(false);
@@ -758,10 +851,10 @@ export default function CoursesPage() {
   }, [id, course]);
 
   useEffect(() => {
-    if (showEnrollModal && isTeacher && course) {
+    if (showEnrollModal && canManageCurrentCourseRoster) {
       loadAvailableStudents();
     }
-  }, [showEnrollModal]);
+  }, [canManageCurrentCourseRoster, enrolledStudents, showEnrollModal]);
 
   useEffect(() => {
     if (!isTeacher || !user?.id) {
@@ -1271,14 +1364,25 @@ export default function CoursesPage() {
     }
   };
 
-  const loadAvailableStudents = async () => {
-    if (!id || !course) return;
+  const loadAvailableStudents = async (enrolledIdsOverride?: string[]) => {
+    if (!id) return;
     setLoadingAvailable(true);
     try {
       const allStudents = await enrollmentService.getAllStudents();
-      const enrolledIds = course.enrolledStudents || [];
+      const enrolledIds = new Set(
+        (
+          enrolledIdsOverride ||
+          enrolledStudents.map((student) => String(student?.id || "").trim()).filter(Boolean)
+        ).filter(Boolean),
+      );
+      const currentUserId = String(user?.id || "").trim();
       const available = allStudents.filter(
-        (student) => !enrolledIds.includes(student.id),
+        (student) => {
+          const studentId = String(student.id || "").trim();
+          if (!studentId) return false;
+          if (studentId === currentUserId) return false;
+          return !enrolledIds.has(studentId);
+        },
       );
       setAvailableStudents(available);
     } catch (error) {
@@ -1836,7 +1940,11 @@ const handleDeleteCourseSimple = async () => {
     teacherManagedStudentIdsForEnrollment.size >= teacherPlanStudentLimitForEnrollment;
 
   const handleEnrollStudent = async (studentId: string) => {
-    if (!id) return;
+    if (!id || !canManageCurrentCourseRoster) return;
+    if (String(studentId || "").trim() === String(user?.id || "").trim()) {
+      alert("You cannot enroll your own account in this course.");
+      return;
+    }
 
     if (isTeacherPlanExpiredForEnrollment) {
       alert("Your teacher plan is expired. Renew payment to enroll students.");
@@ -1855,8 +1963,17 @@ const handleDeleteCourseSimple = async () => {
 
     try {
       await enrollmentService.enrollStudentInCourse(id, studentId);
-      loadEnrolledStudents();
-      loadAvailableStudents();
+      const nextEnrolledIds = Array.from(
+        new Set([
+          ...enrolledStudents.map((student) => String(student?.id || "").trim()).filter(Boolean),
+          studentId,
+        ]),
+      );
+      await refreshCourses();
+      await Promise.all([
+        loadEnrolledStudents(),
+        loadAvailableStudents(nextEnrolledIds),
+      ]);
       setShowEnrollModal(false);
     } catch (error: any) {
       alert(error.message);
@@ -1864,12 +1981,20 @@ const handleDeleteCourseSimple = async () => {
   };
 
   const handleUnenrollStudent = async (studentId: string) => {
-    if (!id) return;
-    if (!confirm("¿Remove student from course?")) return;
+    if (!id || !canManageCurrentCourseRoster) return;
+    if (!confirm("Remove student from this course?")) return;
     try {
       await enrollmentService.unenrollStudentFromCourse(id, studentId);
-      loadEnrolledStudents();
-      loadAvailableStudents();
+      const nextEnrolledIds = enrolledStudents
+        .map((student) => String(student?.id || "").trim())
+        .filter((enrolledId) => enrolledId && enrolledId !== studentId);
+      setEnrolledStudents((prev) => prev.filter((student) => student.id !== studentId));
+      setFilteredStudents((prev) => prev.filter((student) => student.id !== studentId));
+      await refreshCourses();
+      await Promise.all([
+        loadEnrolledStudents(),
+        loadAvailableStudents(nextEnrolledIds),
+      ]);
     } catch (error: any) {
       alert(error.message);
     }
@@ -1958,9 +2083,12 @@ const handleDeleteCourseSimple = async () => {
       });
       setShowJoinCodeModal(false);
     } catch (error: any) {
-      const message = String(error?.message || "").toLowerCase();
-      if (message.includes("ya está inscrito")) {
+      const rawMessage = String(error?.message || "").trim();
+      const message = rawMessage.toLowerCase();
+      if (message.includes("ya está inscrito") || message.includes("already enrolled")) {
         setJoinError("You are already enrolled in this course.");
+      } else if (rawMessage) {
+        setJoinError(rawMessage);
       } else {
         setJoinError("Could not join the course. Please try again.");
       }
@@ -1983,9 +2111,12 @@ const handleDeleteCourseSimple = async () => {
       setJoinCourseCode("");
       setPendingJoinCourse(null);
     } catch (error: any) {
-      const message = String(error?.message || "").toLowerCase();
-      if (message.includes("ya está inscrito")) {
+      const rawMessage = String(error?.message || "").trim();
+      const message = rawMessage.toLowerCase();
+      if (message.includes("ya está inscrito") || message.includes("already enrolled")) {
         setJoinError("You are already enrolled in this course.");
+      } else if (rawMessage) {
+        setJoinError(rawMessage);
       } else {
         setJoinError("Could not join the course. Please try again.");
       }
@@ -2041,7 +2172,7 @@ const handleDeleteCourseSimple = async () => {
         <div className="relative overflow-x-hidden  ">
           <div className="pointer-events-none absolute rounded-full blur-[40px] -left-16 top-8 h-40 w-40 bg-white/70" />
           <div className="pointer-events-none absolute rounded-full blur-[40px] -right-10 bottom-8 h-44 w-44 bg-slate-300/50" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="min-h-[400px] flex items-center justify-center">
               <div className="text-center">
                 <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
@@ -2063,7 +2194,7 @@ const handleDeleteCourseSimple = async () => {
         <div className="relative overflow-x-hidden ">
           <div className="pointer-events-none absolute rounded-full blur-[40px] -left-16 top-8 h-40 w-40 bg-white/70" />
           <div className="pointer-events-none absolute rounded-full blur-[40px] -right-10 bottom-8 h-44 w-44 bg-slate-300/50" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="min-h-[60vh] flex items-center justify-center p-4">
               <div className="text-center max-w-md">
                 <div className="h-20 w-20 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -2138,9 +2269,17 @@ const handleDeleteCourseSimple = async () => {
         : null;
     const gradeSheetsForCourse = gradeSheets.filter((sheet) => sheet.courseId === id);
     const publishedGradeSheetsForCourse = gradeSheetsForCourse.filter((sheet) => sheet.isPublished);
+    const canInstitutionManageCourse =
+      isInstitution &&
+      institutionId.length > 0 &&
+      String(course.institutionId || "").trim() === institutionId;
     const canViewTeacherClassroomSection =
-      isTeacherView && (!isMandatoryCourse || isCurrentUserAdmin);
+      isTeacherView && (!isMandatoryCourse || isCurrentUserAdmin || canInstitutionManageCourse);
     const canManageCourseActions =
+      isAdmin ||
+      canInstitutionManageCourse ||
+      (isTeacher && course.teacherId === user?.id && !isMandatoryCourse);
+    const canManageCourseInstruction =
       isAdmin ||
       (isTeacher && course.teacherId === user?.id && !isMandatoryCourse);
     const showClassroomHeader =
@@ -2163,15 +2302,19 @@ const handleDeleteCourseSimple = async () => {
           <div className="pointer-events-none absolute rounded-full blur-[40px] -left-16 top-8 h-40 w-40 bg-white/70" />
           <div className="pointer-events-none absolute rounded-full blur-[40px] -right-10 bottom-8 h-44 w-44 bg-slate-300/50" />
 
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
 
-            <div className="flex flex-col gap-4">
+            <div className="space-y-4">
               {/* Header with course info */}
-              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
-                <div className="pointer-events-none absolute -left-16 -top-20 h-44 w-44 rounded-full bg-sky-200/35" />
-                <div className="pointer-events-none absolute -bottom-24 -right-20 h-56 w-56 rounded-full bg-indigo-200/35" />
+              <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-slate-50/70 p-4 shadow-sm">
+                <div className="pointer-events-none absolute -left-16 -top-20 h-40 w-40 rounded-full bg-sky-200/20" />
+                <div className="pointer-events-none absolute -bottom-24 -right-20 h-48 w-48 rounded-full bg-indigo-200/20" />
 
-                <div className="relative z-10">
+                <div className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+                  <div className="pointer-events-none absolute -left-16 -top-20 h-44 w-44 rounded-full bg-sky-200/35" />
+                  <div className="pointer-events-none absolute -bottom-24 -right-20 h-56 w-56 rounded-full bg-indigo-200/35" />
+
+                  <div className="relative z-10">
                   <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
                     <div className="flex-1 min-w-0">
                       <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
@@ -2187,7 +2330,7 @@ const handleDeleteCourseSimple = async () => {
                               {course.name}
                             </h1>
                             <div className="flex flex-wrap gap-2">
-                              <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">{course.code}</span>
+                              <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">{course.code}</span>
                             </div>
                           </div>
 
@@ -2204,7 +2347,7 @@ const handleDeleteCourseSimple = async () => {
                               <CreditCard className="h-4 w-4" />
                               <span>{course.credits} Credits</span>
                             </div>
-                            <div className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                            <div className="inline-flex items-center gap-2 rounded-full border border-slate-300/60 bg-white/90 px-2.5 py-1 text-xs font-semibold text-slate-700">
                               <Clock className="h-4 w-4" />
                               <span>{formatScheduleSummary(effectiveCourseSchedule)}</span>
                             </div>
@@ -2230,25 +2373,27 @@ const handleDeleteCourseSimple = async () => {
                         <div className="flex flex-wrap gap-2 justify-start sm:justify-end ml-auto">
                           <Link
                             to={`/courses/${course.code}/edit`}
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:border-sky-200 hover:text-sky-700"
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-300/60 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:border-sky-200 hover:text-sky-700"
                           >
                             <Edit className="h-4 w-4" />
                             Edit
                           </Link>
                           <div className="relative group">
-                            <button className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+                            <button className="inline-flex items-center gap-2 rounded-lg border border-slate-300/60 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
                               <MoreVertical className="h-4 w-4" />
                               More
                             </button>
 
-                            <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-2 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
-                              <Link
-                                to={`/courses/${course.code}/grade-sheets`}
-                                className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 w-full"
-                              >
-                                <FileText className="h-4 w-4" />
-                                Manage Grades
-                              </Link>
+                            <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200/60 rounded-xl shadow-lg py-2 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                              {canManageCourseInstruction ? (
+                                <Link
+                                  to={`/courses/${course.code}/grade-sheets`}
+                                  className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 w-full"
+                                >
+                                  <FileText className="h-4 w-4" />
+                                  Manage Grades
+                                </Link>
+                              ) : null}
                               {isAdmin ? (
                                 <>
                                   <div className="border-t border-slate-100 my-1"></div>
@@ -2289,7 +2434,7 @@ const handleDeleteCourseSimple = async () => {
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
-                    <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                    <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 backdrop-blur sm:p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 flex items-center gap-2">
                           <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-teal-100 text-teal-700">
@@ -2300,7 +2445,7 @@ const handleDeleteCourseSimple = async () => {
                         <p className="shrink-0 text-lg leading-5 font-extrabold text-slate-900">{course.enrolledStudents?.length || 0}</p>
                       </div>
                     </div>
-                    <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                    <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 backdrop-blur sm:p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 flex items-center gap-2">
                           <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
@@ -2311,7 +2456,7 @@ const handleDeleteCourseSimple = async () => {
                         <p className="shrink-0 text-lg leading-5 font-extrabold text-slate-900">{courseAssessments.length}</p>
                       </div>
                     </div>
-                    <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                    <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 backdrop-blur sm:p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 flex items-center gap-2">
                           <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
@@ -2322,7 +2467,7 @@ const handleDeleteCourseSimple = async () => {
                         <p className="shrink-0 text-lg leading-5 font-extrabold text-slate-900">{courseFiles.length}</p>
                       </div>
                     </div>
-                    <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                    <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 backdrop-blur sm:p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 flex items-center gap-2">
                           <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
@@ -2334,11 +2479,12 @@ const handleDeleteCourseSimple = async () => {
                       </div>
                     </div>
                   </div>
+                  </div>
                 </div>
-              </div>
+              </section>
 
               {/* Course Metadata */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm ">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-100">
@@ -2351,29 +2497,29 @@ const handleDeleteCourseSimple = async () => {
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Group</p>
                     <p className="mt-1 text-xl font-extrabold leading-none text-slate-900 text-base">{course.group || "N/A"}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</p>
                     <p className="mt-1 text-xl font-extrabold leading-none text-slate-900 text-base capitalize">
                       {course.enrolledStudents?.length ? "active" : "new"}
                     </p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Students</p>
                     <p className="mt-1 text-xl font-extrabold leading-none text-slate-900 text-base">{course.enrolledStudents?.length || 0}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Assessments</p>
                     <p className="mt-1 text-xl font-extrabold leading-none text-slate-900 text-base">{courseAssessments.length}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Documents</p>
                     <p className="mt-1 text-xl font-extrabold leading-none text-slate-900 text-base">{courseFiles.length}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Grade Sheets</p>
                     <p className="mt-1 text-xl font-extrabold leading-none text-slate-900 text-base">
                       {gradeSheetsForCourse.length}
@@ -2381,13 +2527,13 @@ const handleDeleteCourseSimple = async () => {
                   </div>
                 </div>
 
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-start justify-between gap-2">
+                <div className="mt-3 rounded-xl border border-slate-200/60 bg-slate-50 p-3">
+                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-2">
                     <div className="flex items-center gap-2">
                       <CalendarDays className="h-4 w-4 text-sky-700" />
                       <p className="text-sm font-semibold text-slate-800">Class Schedule</p>
                     </div>
-                      <p className="text-xs text-slate-500">
+                    <p className="text-xs text-slate-500 sm:text-right">
                       {effectiveCourseSchedule.length > 0
                         ? `${effectiveCourseSchedule.length} block${effectiveCourseSchedule.length === 1 ? "" : "s"} per week`
                         : "No class blocks"}
@@ -2407,11 +2553,11 @@ const handleDeleteCourseSimple = async () => {
                       )}
                     </div>
                   ) : (
-                    <div className="mt-2 space-y-1.5">
+                    <div className="mt-2 flex flex-wrap gap-2">
                       {effectiveCourseSchedule.map((slot, slotIndex) => (
                         <span
                           key={`${slot.dayOfWeek}-${slot.startTime}-${slot.endTime}-${slotIndex}`}
-                          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700"
+                          className="inline-flex max-w-full items-center rounded-lg border border-slate-200/60 bg-white px-2.5 py-1.5 text-xs font-medium leading-5 text-slate-700"
                         >
                           {formatScheduleSlot(slot, true)}
                         </span>
@@ -2421,17 +2567,10 @@ const handleDeleteCourseSimple = async () => {
                 </div>
               </div>
 
-              {!(isTeacher && isMandatoryCourse) && (
-                <div className="px-1 pt-1">
-                  <p className="text-base font-bold text-slate-900">Academic Tracking</p>
-                  <p className="text-sm text-slate-600">Performance, upcoming work, and evaluations</p>
-                </div>
-              )}
-
               {/* Stats Cards */}
               {courseStats && !isOnboardingCourseContext && (
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Average</p>
                     <p className="mt-1 text-xl font-extrabold leading-none text-slate-900">
                       {courseStats.studentsWithGrades > 0
@@ -2439,23 +2578,23 @@ const handleDeleteCourseSimple = async () => {
                         : "--"}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700">/5.0</span>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700">/5.0</span>
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Passing</p>
                     <p className="mt-1 text-xl font-extrabold leading-none text-slate-900">{courseStats.passingCount}</p>
                     <p className="text-sm text-slate-600">Students</p>
                   </div>
 
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">At Risk</p>
                     <p className="mt-1 text-xl font-extrabold leading-none text-slate-900">{courseStats.atRiskCount}</p>
                     <p className="text-sm text-slate-600">Students</p>
                   </div>
 
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Failing</p>
                     <p className="mt-1 text-xl font-extrabold leading-none text-slate-900">{courseStats.failingCount}</p>
                     <p className="text-sm text-slate-600">Students</p>
@@ -2463,15 +2602,16 @@ const handleDeleteCourseSimple = async () => {
                 </div>
               )}
 
-              <div className="px-1 pt-1">
-                <p className="text-base font-bold text-slate-900">Course Resources</p>
-                <p className="text-sm text-slate-600">Structure and materials for this course</p>
-              </div>
+              <section className="rounded-2xl border border-slate-200/60 bg-slate-50/70 p-3 shadow-sm sm:p-4">
+                <div className="mb-3">
+                  <p className="text-sm font-semibold text-slate-900">Course Resources</p>
+                  <p className="text-xs text-slate-500">Structure and materials for this course</p>
+                </div>
 
-              {/* Main Content Grid */}
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {/* Main Content Grid */}
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 {/* Course Content */}
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ">
+                <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm ">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-100">
@@ -2488,7 +2628,7 @@ const handleDeleteCourseSimple = async () => {
                           ? `${courseUnits.length} term${courseUnits.length === 1 ? "" : "s"}`
                           : `${fallbackSlideItems.length} slide${fallbackSlideItems.length === 1 ? "" : "s"}`}
                       </span>
-                      {canManageCourseActions ? (
+                      {canManageCourseInstruction ? (
                         <Link
                           to={"/slides"}
                           className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
@@ -2501,13 +2641,13 @@ const handleDeleteCourseSimple = async () => {
                   </div>
 
                   {courseUnits.length === 0 && fallbackSlideItems.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                    <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                       <FolderOpen className="h-12 w-12 mx-auto text-slate-400 mb-3" />
                       <p className="text-sm font-semibold text-slate-700">
                         No content available yet
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
-                        {canManageCourseActions
+                        {canManageCourseInstruction
                           ? "Create your first unit to organize your course materials"
                           : "The teacher will upload content soon"}
                       </p>
@@ -2521,7 +2661,7 @@ const handleDeleteCourseSimple = async () => {
                             weekId: week.id,
                             slideId: week.slides?.[0]?.id,
                           })}
-                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 transition hover:border-sky-200 hover:bg-sky-50/40"
+                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/60 bg-white p-3 transition hover:border-sky-200 hover:bg-sky-50/40"
                         >
                           <div className="min-w-0 flex items-center gap-3">
                             <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 overflow-hidden">
@@ -2537,7 +2677,7 @@ const handleDeleteCourseSimple = async () => {
                               </p>
                             </div>
                           </div>
-                          {week.slides.length === 0 && canManageCourseActions ? (
+                          {week.slides.length === 0 && canManageCourseInstruction ? (
                             <span className="text-sm font-medium text-slate-600">
                               Add
                             </span>
@@ -2549,10 +2689,9 @@ const handleDeleteCourseSimple = async () => {
 
                       <Link
                         to={buildSlidesWorkspaceHref()}
-                        className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:gap-3"
+                        className="mt-4 inline-flex text-sm font-semibold text-sky-700 transition hover:text-sky-800"
                       >
-                        View all slides
-                        <ChevronRight className="h-4 w-4" />
+                        See all
                       </Link>
                     </div>
                   ) : (
@@ -2561,7 +2700,7 @@ const handleDeleteCourseSimple = async () => {
                         <Link
                           key={slide.id}
                           to={buildSlidesWorkspaceHref({ slideId: slide.id })}
-                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3"
+                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/60 bg-white p-3"
                         >
                           <div className="min-w-0 flex items-center gap-3">
                             <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 overflow-hidden">
@@ -2581,17 +2720,16 @@ const handleDeleteCourseSimple = async () => {
 
                       <Link
                         to={"/slides"}
-                        className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:gap-3"
+                        className="mt-4 inline-flex text-sm font-semibold text-sky-700 transition hover:text-sky-800"
                       >
-                        View all slides
-                        <ChevronRight className="h-4 w-4" />
+                        See all
                       </Link>
                     </div>
                   )}
                 </div>
 
                 {/* Course Documents */}
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ">
+                <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm ">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100">
@@ -2606,7 +2744,7 @@ const handleDeleteCourseSimple = async () => {
                       <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
                         {courseFiles.length} files
                       </span>
-                      {canManageCourseActions && (
+                      {canManageCourseInstruction && (
                         <Link
                           to={`/courses/${course.code}/files`}
                           className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
@@ -2623,11 +2761,11 @@ const handleDeleteCourseSimple = async () => {
                       <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                     </div>
                   ) : courseFiles.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                    <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                       <FolderOpen className="h-12 w-12 mx-auto text-slate-400 mb-3" />
                       <p className="text-sm font-semibold text-slate-700">No documents available yet</p>
                       <p className="mt-1 text-xs text-slate-500">
-                        {canManageCourseActions
+                        {canManageCourseInstruction
                           ? "Upload your first document to share with students"
                           : "Documents will appear here when available"}
                       </p>
@@ -2693,7 +2831,7 @@ const handleDeleteCourseSimple = async () => {
                           return (
                             <div
                               key={file.id}
-                              className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3"
+                              className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/60 bg-white p-3"
                               onClick={() => window.open(file.url, "_blank")}
                             >
                               <div className="min-w-0 flex items-center gap-3">
@@ -2719,33 +2857,32 @@ const handleDeleteCourseSimple = async () => {
                       {courseFiles.length > 5 && (
                         <Link
                           to={`/courses/${course.code}/files`}
-                          className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:gap-3"
+                          className="mt-4 inline-flex text-sm font-semibold text-sky-700 transition hover:text-sky-800"
                         >
-                          View all {courseFiles.length} documents
-                          <ChevronRight className="h-4 w-4" />
+                          See all
                         </Link>
                       )}
                     </>
                   )}
-
-                  <Link
-                    to="/slides"
-                    className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:gap-3"
-                  >
-                    View all slides
-                    <ChevronRight className="h-4 w-4" />
-                  </Link>
                 </div>
-              </div>
+                </div>
+              </section>
 
-              {/* Upcoming Activities & Stats Section */}
-              <div
-                className={`grid grid-cols-1 gap-4 ${
-                  hasGradeSheetStats ? "xl:grid-cols-3" : "xl:grid-cols-2"
-                }`}
-              >
+              {!(isTeacher && isMandatoryCourse) && (
+                <section className="rounded-2xl border border-slate-200/60 bg-slate-50/70 p-3 shadow-sm sm:p-4">
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold text-slate-900">Academic Tracking</p>
+                    <p className="text-xs text-slate-500">Performance, upcoming work, and evaluations</p>
+                  </div>
+
+                  {/* Upcoming Activities & Stats Section */}
+                  <div
+                    className={`grid grid-cols-1 gap-4 ${
+                      hasGradeSheetStats ? "xl:grid-cols-3" : "xl:grid-cols-2"
+                    }`}
+                  >
                 {/* Upcoming Activities */}
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ">
+                <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm ">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-100">
@@ -2765,7 +2902,7 @@ const handleDeleteCourseSimple = async () => {
                   </div>
 
                   {calculateUpcomingActivities.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                    <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                       <CheckCircle className="h-12 w-12 mx-auto text-slate-400 mb-3" />
                       <p className="text-sm font-semibold text-slate-700">No upcoming activities</p>
                       <p className="mt-1 text-xs text-slate-500">
@@ -2813,7 +2950,7 @@ const handleDeleteCourseSimple = async () => {
                             <Link
                               key={activity.id}
                               to={`/courses/${course.code}/assessments/${activity.id}`}
-                              className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 transition hover:border-sky-200 hover:bg-sky-50/40"
+                              className="flex items-start justify-between gap-3 rounded-lg border border-slate-200/60 bg-white px-3 py-2 transition hover:border-sky-200 hover:bg-sky-50/40"
                             >
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-semibold text-slate-900">
@@ -2823,7 +2960,7 @@ const handleDeleteCourseSimple = async () => {
                                   {activityDescription || "No description provided"}
                                 </p>
                               </div>
-                              <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 ${diffDays === 0 ? "border-slate-200 bg-slate-100 text-slate-600" : ""}`}>
+                              <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200/60 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 ${diffDays === 0 ? "border-slate-200/60 bg-slate-100 text-slate-600" : ""}`}>
                                 {diffDays === 0 ? "Today" : relativeDate}
                               </span>
                             </Link>
@@ -2833,10 +2970,9 @@ const handleDeleteCourseSimple = async () => {
 
                       <Link
                         to={`/courses/${course.code}/assessments`}
-                        className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:gap-3"
+                        className="mt-4 inline-flex text-sm font-semibold text-sky-700 transition hover:text-sky-800"
                       >
-                        View all activities
-                        <ChevronRight className="h-4 w-4" />
+                        See all
                       </Link>
                     </>
                   )}
@@ -2844,7 +2980,7 @@ const handleDeleteCourseSimple = async () => {
 
                 {/* Assessment Stats */}
                 {calculateAssessmentStats && (
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ">
+                  <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm ">
                     <div className="mb-3 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100">
@@ -2864,19 +3000,19 @@ const handleDeleteCourseSimple = async () => {
                     </div>
 
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-white px-3 py-2">
                         <span className="truncate text-sm font-semibold text-slate-900">Graded</span>
                         <strong>{calculateAssessmentStats.gradedAssessments}</strong>
                       </div>
-                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-white px-3 py-2">
                         <span className="truncate text-sm font-semibold text-slate-900">Pending</span>
                         <strong>{calculateAssessmentStats.pendingAssessments}</strong>
                       </div>
-                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-white px-3 py-2">
                         <span className="truncate text-sm font-semibold text-slate-900">Overdue</span>
                         <strong>{calculateAssessmentStats.overdueAssessments}</strong>
                       </div>
-                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 pt-2 border-t border-slate-200">
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-white px-3 py-2 pt-2 border-t border-slate-200/60">
                         <span className="truncate text-sm font-semibold text-slate-900">Total</span>
                         <strong>{calculateAssessmentStats.totalAssessments}</strong>
                       </div>
@@ -2886,7 +3022,7 @@ const handleDeleteCourseSimple = async () => {
 
                 {/* Grade Sheets Stats */}
                 {hasGradeSheetStats && (
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ">
+                  <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm ">
                     <div className="mb-3 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100">
@@ -2906,21 +3042,21 @@ const handleDeleteCourseSimple = async () => {
                     </div>
 
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-white px-3 py-2">
                         <span className="truncate text-sm font-semibold text-slate-900">Published</span>
                         <strong>{calculateGradeSheetStats.publishedSheets}</strong>
                       </div>
-                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-white px-3 py-2">
                         <span className="truncate text-sm font-semibold text-slate-900">Total Sheets</span>
                         <strong>{calculateGradeSheetStats.totalSheets}</strong>
                       </div>
 
                       {calculateGradeSheetStats.gradingPeriods.length > 0 && (
-                        <div className="pt-3 border-t border-slate-200">
+                        <div className="pt-3 border-t border-slate-200/60">
                           <p className="text-sm text-slate-600 mb-2">Grading Periods</p>
                           <div className="flex flex-wrap gap-2">
                             {calculateGradeSheetStats.gradingPeriods.map((period) => (
-                              <span key={period} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700">
+                              <span key={period} className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700">
                                 {period.replace("quarter", "Q")}
                               </span>
                             ))}
@@ -2930,22 +3066,24 @@ const handleDeleteCourseSimple = async () => {
                     </div>
                   </div>
                 )}
-              </div>
-
-              {showClassroomHeader && (
-                <div className="px-1 pt-1">
-                  <p className="text-base font-bold text-slate-900">Classroom</p>
-                  <p className="text-sm text-slate-600">
-                    {isOnboardingCourseContext
-                      ? "Teachers and onboarding status"
-                      : "Students and grading detail"}
-                  </p>
-                </div>
+                  </div>
+                </section>
               )}
 
-              {/* My Grades Section - Solo para estudiantes */}
-              {isStudentView && user && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ">
+              {showClassroomHeader && (
+                <section className="rounded-2xl border border-slate-200/60 bg-slate-50/70 p-3 shadow-sm sm:p-4">
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold text-slate-900">Classroom</p>
+                    <p className="text-xs text-slate-500">
+                      {isOnboardingCourseContext
+                        ? "Teachers and onboarding status"
+                        : "Students and grading detail"}
+                    </p>
+                  </div>
+
+                  {/* My Grades Section - Solo para estudiantes */}
+                  {isStudentView && user && (
+                    <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm ">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100">
@@ -3034,7 +3172,7 @@ const handleDeleteCourseSimple = async () => {
                         };
 
                         return (
-                          <div key={sheet.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                          <div key={sheet.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-white px-3 py-2">
                             <div>
                               <p className="truncate text-sm font-semibold text-slate-900">
                                 {sheet.title}
@@ -3043,7 +3181,7 @@ const handleDeleteCourseSimple = async () => {
                                 {sheet.gradingPeriod || 'No period'} • {formatDateSafe(sheet.updatedAt)}
                               </p>
                             </div>
-                            <span className={`inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 ${isPassing ? 'inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700' : 'border-slate-200 bg-slate-100 text-slate-600'}`}>
+                            <span className={`inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 ${isPassing ? 'inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700' : 'border-slate-200/60 bg-slate-100 text-slate-600'}`}>
                               {grade > 0 ? grade.toFixed(1) : '--'}
                             </span>
                           </div>
@@ -3051,7 +3189,7 @@ const handleDeleteCourseSimple = async () => {
                       })}
 
                     {publishedGradeSheetsForCourse.length === 0 && (
-                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                      <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                         <FileText className="h-12 w-12 mx-auto text-slate-400 mb-3" />
                         <p className="text-sm font-semibold text-slate-700">No grades available yet</p>
                         <p className="mt-1 text-xs text-slate-500">
@@ -3062,22 +3200,21 @@ const handleDeleteCourseSimple = async () => {
                   </div>
 
                   {publishedGradeSheetsForCourse.length > 3 && (
-                    <div className="mt-4 pt-4 border-t border-slate-200">
+                    <div className="mt-4 pt-4 border-t border-slate-200/60">
                       <Link
                         to={`/grades?course=${id}`}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:gap-3"
+                        className="inline-flex text-sm font-semibold text-sky-700 transition hover:text-sky-800"
                       >
-                        View all {publishedGradeSheetsForCourse.length} grade sheets
-                        <ChevronRight className="h-4 w-4" />
+                        See all
                       </Link>
                     </div>
                   )}
-                </div>
-              )}
+                    </div>
+                  )}
 
-              {/* Students Section (Teacher only) */}
-              {canViewTeacherClassroomSection && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ">
+                  {/* Students Section (Teacher only) */}
+                  {canViewTeacherClassroomSection && (
+                    <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm ">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-100">
@@ -3096,13 +3233,15 @@ const handleDeleteCourseSimple = async () => {
                       <span className="rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-700">
                         {filteredStudents.length}/{enrolledStudents.length}
                       </span>
-                      <button
-                        onClick={() => setShowEnrollModal(true)}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
-                      >
-                        <UserPlus className="h-4 w-4" />
-                        Add
-                      </button>
+                      {canManageCurrentCourseRoster && (
+                        <button
+                          onClick={() => setShowEnrollModal(true)}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
+                        >
+                          <UserPlus className="h-4 w-4" />
+                          Add
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -3111,19 +3250,21 @@ const handleDeleteCourseSimple = async () => {
                       <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                     </div>
                   ) : enrolledStudents.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                    <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                       <Users className="h-12 w-12 mx-auto text-slate-400 mb-4" />
                       <p className="text-sm font-semibold text-slate-700">There are no enrolled students</p>
                       <p className="mt-1 text-xs text-slate-500 mb-4">
                         Add students to this course to get started with your classes
                       </p>
-                      <button
-                        onClick={() => setShowEnrollModal(true)}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
-                      >
-                        <UserPlus className="h-4 w-4" />
-                        Add First Student
-                      </button>
+                      {canManageCurrentCourseRoster && (
+                        <button
+                          onClick={() => setShowEnrollModal(true)}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
+                        >
+                          <UserPlus className="h-4 w-4" />
+                          Add First Student
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div>
@@ -3135,7 +3276,7 @@ const handleDeleteCourseSimple = async () => {
                               <input
                                 type="text"
                                 placeholder="Search students..."
-                                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 pl-10"
+                                className="h-10 w-full rounded-lg border border-slate-300/60 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 pl-10"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                               />
@@ -3145,17 +3286,17 @@ const handleDeleteCourseSimple = async () => {
                         <div className="flex flex-wrap gap-2">
                           <button 
                             onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-300/60 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                           >
                             <SortAsc className={`h-4 w-4 ${sortOrder === 'desc' ? 'rotate-180' : ''}`} />
                             {sortOrder === 'asc' ? 'A-Z' : 'Z-A'}
                           </button>
                           <div className="relative group">
-                            <button className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+                            <button className="inline-flex items-center gap-2 rounded-lg border border-slate-300/60 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
                               <Filter className="h-4 w-4" />
                               Filter
                             </button>
-                            <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-2 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                            <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200/60 rounded-xl shadow-lg py-2 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
                               <button
                                 onClick={() => setGradeFilter('all')}
                                 className={`flex items-center gap-2 px-4 py-2 text-sm w-full ${
@@ -3207,7 +3348,7 @@ const handleDeleteCourseSimple = async () => {
 
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {filteredStudents.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center md:col-span-2 xl:col-span-3">
+                          <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center md:col-span-2 xl:col-span-3">
                             <Search className="h-12 w-12 mx-auto text-slate-400 mb-4" />
                             <p className="text-sm font-semibold text-slate-700">No students found</p>
                             <p className="mt-1 text-xs text-slate-500">
@@ -3233,7 +3374,7 @@ const handleDeleteCourseSimple = async () => {
                             );
 
                             return (
-                              <div key={student.id} className="rounded-xl border border-slate-200 bg-white p-3 h-full">
+                              <div key={student.id} className="rounded-xl border border-slate-200/60 bg-white p-3 h-full">
                                 <div className="flex items-start gap-3">
                                   <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 overflow-hidden">
                                     {student.avatarUrl ? (
@@ -3255,13 +3396,15 @@ const handleDeleteCourseSimple = async () => {
                                     </p>
                                     
                                   </div>
-                                  <button
-                                    onClick={() => handleUnenrollStudent(student.id)}
-                                    className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
-                                    title="Remove student"
-                                  >
-                                    <UserMinus className="h-4 w-4" />
-                                  </button>
+                                  {canManageCurrentCourseRoster && (
+                                    <button
+                                      onClick={() => handleUnenrollStudent(student.id)}
+                                      className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
+                                      title="Remove student"
+                                    >
+                                      <UserMinus className="h-4 w-4" />
+                                    </button>
+                                  )}
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-2 mt-2">
@@ -3276,16 +3419,16 @@ const handleDeleteCourseSimple = async () => {
                                       <span className="text-xs font-semibold text-slate-700">
                                         {avgGrade.toFixed(1)}/5.0
                                       </span>
-                                      <span className={`inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 ${
+                                      <span className={`inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 ${
                                         gradeStatus === 'passing' ? '' : 
-                                        gradeStatus === 'at-risk' ? 'border-slate-200 bg-slate-100 text-slate-600' : 'border-slate-200 bg-slate-100 text-slate-600'
+                                        gradeStatus === 'at-risk' ? 'border-slate-200/60 bg-slate-100 text-slate-600' : 'border-slate-200/60 bg-slate-100 text-slate-600'
                                       }`}>
                                         {gradeStatus === 'passing' ? 'Passing' : 
                                          gradeStatus === 'at-risk' ? 'At Risk' : 'Failing'}
                                       </span>
                                     </>
                                   ) : (
-                                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 border-slate-200 bg-slate-100 text-slate-600">No grades</span>
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 border-slate-200/60 bg-slate-100 text-slate-600">No grades</span>
                                   )}
                                 </div>
                               </div>
@@ -3295,7 +3438,7 @@ const handleDeleteCourseSimple = async () => {
                       </div>
 
                       {filteredStudents.length > 0 && (
-                        <div className="mt-4 pt-4 border-t border-slate-200">
+                        <div className="mt-4 pt-4 border-t border-slate-200/60">
                           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
                             <span>
                               Showing {filteredStudents.length} of {enrolledStudents.length} students
@@ -3306,7 +3449,7 @@ const handleDeleteCourseSimple = async () => {
                                   setSearchTerm('');
                                   setGradeFilter('all');
                                 }}
-                                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 font-medium"
+                                className="inline-flex items-center gap-2 rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 font-medium"
                               >
                                 Clear filters
                               </button>
@@ -3316,14 +3459,17 @@ const handleDeleteCourseSimple = async () => {
                       )}
                     </div>
                   )}
-                </div>
+                    </div>
+                  )}
+                </section>
               )}
 
               {/* Enroll Modal */}
               {showEnrollModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-                  <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-                    <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 px-4 py-3">
+                <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/45 p-4 backdrop-blur-sm sm:p-6">
+                  <div className="flex min-h-full items-start justify-center sm:items-center">
+                    <div className="my-2 flex w-full max-w-lg max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)] sm:max-h-[calc(90vh-3rem)]">
+                    <div className="flex items-start justify-between gap-3 border-b border-slate-200/60 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-sky-200 bg-white/85 shadow-sm">
                           <UserPlus className="h-5 w-5 text-sky-600" />
@@ -3339,13 +3485,13 @@ const handleDeleteCourseSimple = async () => {
                           setAvailableStudents([]);
                           setSearchTerm("");
                         }}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/80 text-slate-600 transition hover:bg-white hover:text-slate-800"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-white/80 text-slate-600 transition hover:bg-white hover:text-slate-800"
                       >
                         <X className="h-5 w-5" />
                       </button>
                     </div>
 
-                    <div className="p-4">
+                    <div className="overflow-y-auto p-4">
                       <div className="mb-4">
                         <div className="relative">
                           <div className="relative">
@@ -3353,7 +3499,7 @@ const handleDeleteCourseSimple = async () => {
                             <input
                               type="text"
                               placeholder="Search students..."
-                              className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 pl-10"
+                              className="h-10 w-full rounded-lg border border-slate-300/60 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 pl-10"
                               value={searchTerm}
                               onChange={(e) => setSearchTerm(e.target.value)}
                             /> 
@@ -3366,7 +3512,7 @@ const handleDeleteCourseSimple = async () => {
                           <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
                         </div>
                       ) : filteredAvailableStudents.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                        <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                           <Users className="h-12 w-12 mx-auto text-slate-400 mb-3" />
                           <p className="text-sm font-semibold text-slate-700">
                             {availableStudents.length === 0
@@ -3382,7 +3528,7 @@ const handleDeleteCourseSimple = async () => {
                       ) : (
                         <div className="space-y-2">
                           {filteredAvailableStudents.map((student) => (
-                            <div key={student.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                            <div key={student.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/60 bg-white p-3">
                               <div className="min-w-0 flex items-center gap-3">
                                 <div className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 overflow-hidden">
                                   <span>{student.name.charAt(0)}</span>
@@ -3401,7 +3547,7 @@ const handleDeleteCourseSimple = async () => {
                               <button
                                 onClick={() => handleEnrollStudent(student.id)}
                                 disabled={!canEnrollByPlan}
-                                className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-1 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500"
+                                className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-1 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:border-slate-200/60 disabled:bg-slate-100 disabled:text-slate-500"
                                 title={
                                   canEnrollByPlan
                                     ? "Enroll student"
@@ -3419,6 +3565,7 @@ const handleDeleteCourseSimple = async () => {
                         </div>
                       )}
                     </div>
+                  </div>
                   </div>
                 </div>
               )}
@@ -3465,7 +3612,9 @@ const handleDeleteCourseSimple = async () => {
     : null;
   const canCreateCourse =
     isAdmin ||
-    (!isTeacherPlanBlocked &&
+    isInstitution ||
+    (!isInstitutionManagedTeacher &&
+      !isTeacherPlanBlocked &&
       (!teacherPlanCourseLimit || teacherManagedCourses.length < teacherPlanCourseLimit));
   const courseGradientMap = buildCourseGradientMap(userCourses);
 
@@ -3507,8 +3656,8 @@ const handleDeleteCourseSimple = async () => {
         <div className="pointer-events-none absolute rounded-full blur-[40px] -left-16 top-8 h-40 w-40 bg-white/70" />
         <div className="pointer-events-none absolute rounded-full blur-[40px] -right-10 bottom-8 h-44 w-44 bg-slate-300/50" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
-          <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
             <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
             <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
@@ -3564,7 +3713,7 @@ const handleDeleteCourseSimple = async () => {
                       Join another course
                     </button>
                   )}
-                  {(isTeacher || isAdmin) && (
+                  {(isTeacher || isAdmin || isInstitution) && (
                     canCreateCourse ? (
                       <Link to="/courses/create" className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap">
                         <Plus className="h-4 w-4" />
@@ -3574,15 +3723,21 @@ const handleDeleteCourseSimple = async () => {
                       <button
                         type="button"
                         disabled
-                        className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-500 whitespace-nowrap"
+                        className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200/60 bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-500 whitespace-nowrap"
                         title={
-                          isTeacherPlanBlocked
+                          isInstitutionManagedTeacher
+                            ? "Institution-managed teachers cannot create courses. Your institution must create them."
+                            : isTeacherPlanBlocked
                             ? "Plan expired. Renew payment to create new courses."
                             : "You reached your current course quota."
                         }
                       >
                         <Plus className="h-4 w-4" />
-                        {isTeacherPlanBlocked ? "Payment required" : "Course limit reached"}
+                        {isInstitutionManagedTeacher
+                          ? "Institution creates courses"
+                          : isTeacherPlanBlocked
+                            ? "Payment required"
+                            : "Course limit reached"}
                       </button>
                     )
                   )}
@@ -3590,7 +3745,7 @@ const handleDeleteCourseSimple = async () => {
               </div>
 
               <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-teal-100 text-teal-700">
                       <BookOpen className="h-4 w-4" />
@@ -3599,7 +3754,7 @@ const handleDeleteCourseSimple = async () => {
                   </div>
                   <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Courses</p>
                 </div>
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                       <FileBarChart className="h-4 w-4" />
@@ -3608,7 +3763,7 @@ const handleDeleteCourseSimple = async () => {
                   </div>
                   <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Assessments</p>
                 </div>
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                       <CalendarDays className="h-4 w-4" />
@@ -3617,7 +3772,7 @@ const handleDeleteCourseSimple = async () => {
                   </div>
                   <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Next 7 days</p>
                 </div>
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                       <Users className="h-4 w-4" />
@@ -3628,7 +3783,7 @@ const handleDeleteCourseSimple = async () => {
                     {isTeacherView ? "Students" : "Classmates"}
                   </p>
                 </div>
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
                       <Presentation className="h-4 w-4" />
@@ -3637,7 +3792,7 @@ const handleDeleteCourseSimple = async () => {
                   </div>
                   <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Lessons</p>
                 </div>
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-700">
                       <CreditCard className="h-4 w-4" />
@@ -3651,7 +3806,7 @@ const handleDeleteCourseSimple = async () => {
           </section>
 
           {userCourses.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+            <div className="rounded-2xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
               <div className="relative mx-auto mb-4 w-fit">
                 <div className="relative flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 shadow-sm">
                   {isTeacherView ? (
@@ -3671,7 +3826,7 @@ const handleDeleteCourseSimple = async () => {
                   : "Join your first course to access grades, activities, and study materials."}
               </p>
 
-              {isTeacher ? (
+              {(isTeacher || isInstitution) && canCreateCourse ? (
                 <Link
                   to="/courses/create"
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-5 py-2.5 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
@@ -3680,6 +3835,10 @@ const handleDeleteCourseSimple = async () => {
                   Create First Course
                   <ArrowRight className="h-4 w-4" />
                 </Link>
+              ) : isTeacher && isInstitutionManagedTeacher ? (
+                <p className="text-sm font-medium text-slate-600">
+                  Your institution creates and assigns courses for this teacher account.
+                </p>
               ) : isAdmin ? (
                 <p className="text-sm font-medium text-slate-600">
                   No courses are available yet. You can monitor all courses from this page once they are created.
@@ -3697,21 +3856,21 @@ const handleDeleteCourseSimple = async () => {
                   </div>
 
                   <div className="mx-auto mb-3 grid w-full max-w-md grid-cols-3 gap-1.5 text-xs">
-                    <div className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white/80 px-2.5 py-1.5 text-slate-600">
+                    <div className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200/60 bg-white/80 px-2.5 py-1.5 text-slate-600">
                       <Percent className="h-3.5 w-3.5" />
                       Grades
                     </div>
-                    <div className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white/80 px-2.5 py-1.5 text-slate-600">
+                    <div className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200/60 bg-white/80 px-2.5 py-1.5 text-slate-600">
                       <FileCheck className="h-3.5 w-3.5" />
                       Activities
                     </div>
-                    <div className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white/80 px-2.5 py-1.5 text-slate-600">
+                    <div className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200/60 bg-white/80 px-2.5 py-1.5 text-slate-600">
                       <BookOpen className="h-3.5 w-3.5" />
                       Materials
                     </div>
                   </div>
 
-                  <div className="space-y-3 rounded-xl border border-slate-200 bg-white/80 p-3 shadow-sm">
+                  <div className="space-y-3 rounded-xl border border-slate-200/60 bg-white/80 p-3 shadow-sm">
                     <div className="relative">
                       <div className="relative">
                         <School className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -3724,7 +3883,7 @@ const handleDeleteCourseSimple = async () => {
                             if (pendingJoinCourse) setPendingJoinCourse(null);
                           }}
                           placeholder="ENG-123"
-                          className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 pl-10"
+                          className="h-10 w-full rounded-lg border border-slate-300/60 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 pl-10"
                           autoComplete="off"
                         />
                       </div>
@@ -3779,7 +3938,7 @@ const handleDeleteCourseSimple = async () => {
                 const courseSchedule = normalizeCourseSchedule(course.classSchedule);
                 const coverUrl = course.coverUrl?.trim() || "";
                 const isMandatoryCard = isMandatoryCourseEntry(course);
-                const courseAverage = isTeacher
+                const courseAverage = isTeacherView
                   ? calculateTeacherCourseAverage(course)
                   : user?.id
                     ? calculateRealCourseGrade(course, user.id)
@@ -3835,16 +3994,16 @@ const handleDeleteCourseSimple = async () => {
                       COURSE_COVER_GRADIENTS[0];
                 const infoPillClass = isMandatoryCard
                   ? "border border-sky-100 bg-sky-50 text-sky-800"
-                  : "border border-slate-200 bg-slate-100 text-slate-700";
+                  : "border border-slate-200/60 bg-slate-100 text-slate-700";
                 const statsPillClass = isMandatoryCard
                   ? "border border-indigo-100 bg-indigo-50 text-indigo-800"
-                  : "border border-slate-200 bg-slate-100 text-slate-700";
+                  : "border border-slate-200/60 bg-slate-100 text-slate-700";
 
                 return (
                   <Link
                     key={course.id}
                     to={`/courses/view/${course.code}`}
-                    className="flex min-h-full flex-col gap-3 rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-3 text-inherit no-underline shadow-[0_10px_24px_rgba(15,23,42,0.06)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_16px_30px_rgba(30,64,175,0.14)]"
+                    className="flex min-h-full flex-col gap-3 rounded-xl border border-slate-200/60 bg-gradient-to-b from-white to-slate-50 p-3 text-inherit no-underline shadow-[0_10px_24px_rgba(15,23,42,0.06)] transition duration-200 hover:-translate-y-0.5 hover:border-slate-300/60 hover:shadow-[0_16px_30px_rgba(30,64,175,0.14)]"
                   >
                     <div className="relative h-36 overflow-hidden rounded-xl bg-slate-200">
                       {coverUrl ? (
@@ -3954,7 +4113,7 @@ const handleDeleteCourseSimple = async () => {
                         </div>
                       </div>
 
-                      <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-200 pt-2">
+                      <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-200/60 pt-2">
                         <span className="text-[11px] font-semibold text-slate-600">{creditsLabel}</span>
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-700">
                           Open course
@@ -3970,8 +4129,8 @@ const handleDeleteCourseSimple = async () => {
 
           {showJoinCodeModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-              <div className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-                <div className="flex items-start justify-between border-b border-slate-200 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 px-5 py-4">
+              <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                <div className="flex items-start justify-between border-b border-slate-200/60 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 px-5 py-4">
                   <div>
                     <p className="text-base font-semibold text-slate-900">Join another course</p>
                     <p className="mt-1 text-sm text-slate-600">
@@ -3982,7 +4141,7 @@ const handleDeleteCourseSimple = async () => {
                     type="button"
                     onClick={() => setShowJoinCodeModal(false)}
                     disabled={joinLoading}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/80 text-slate-600 transition hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-white/80 text-slate-600 transition hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label="Close join code modal"
                   >
                     <X className="h-4 w-4" />
@@ -4007,7 +4166,7 @@ const handleDeleteCourseSimple = async () => {
                           if (pendingJoinCourse) setPendingJoinCourse(null);
                         }}
                         placeholder="e.g. ENG-2024-A1"
-                        className="h-11 w-full rounded-lg border border-slate-300 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                        className="h-11 w-full rounded-lg border border-slate-300/60 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                         autoComplete="off"
                       />
                     </div>
@@ -4050,8 +4209,8 @@ const handleDeleteCourseSimple = async () => {
 
           {pendingJoinCourse && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-              <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-                <div className="flex items-start justify-between border-b border-slate-200 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 px-5 py-4">
+              <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                <div className="flex items-start justify-between border-b border-slate-200/60 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 px-5 py-4">
                   <div>
                     <p className="text-base font-semibold text-slate-900">Confirm course enrollment</p>
                     <p className="mt-1 text-sm text-slate-600">Review the course details before joining.</p>
@@ -4060,7 +4219,7 @@ const handleDeleteCourseSimple = async () => {
                     type="button"
                     onClick={() => setPendingJoinCourse(null)}
                     disabled={joinLoading}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/80 text-slate-600 transition hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-white/80 text-slate-600 transition hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label="Close confirmation modal"
                   >
                     <X className="h-4 w-4" />
@@ -4068,45 +4227,45 @@ const handleDeleteCourseSimple = async () => {
                 </div>
 
                 <div className="space-y-4 px-5 py-5">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50/70 p-4">
                     <p className="text-lg font-semibold text-slate-900">{pendingJoinCourse.name}</p>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
                         {pendingJoinCourse.code}
                       </span>
-                      <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
+                      <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
                         Group {pendingJoinCourse.group || "N/A"}
                       </span>
-                      <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
+                      <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
                         {pendingJoinCourse.status}
                       </span>
                     </div>
 
                     <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div className="rounded-lg border border-slate-200/60 bg-white px-3 py-2">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Teacher</p>
                         <p className="truncate text-sm font-semibold text-slate-800">{pendingJoinCourse.teacherName}</p>
                       </div>
-                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div className="rounded-lg border border-slate-200/60 bg-white px-3 py-2">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Semester</p>
                         <p className="truncate text-sm font-semibold text-slate-800">{pendingJoinCourse.semester || "N/A"}</p>
                       </div>
-                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div className="rounded-lg border border-slate-200/60 bg-white px-3 py-2">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Credits</p>
                         <p className="text-sm font-semibold text-slate-800">{pendingJoinCourse.credits > 0 ? pendingJoinCourse.credits : "N/A"}</p>
                       </div>
-                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                      <div className="rounded-lg border border-slate-200/60 bg-white px-3 py-2">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Students enrolled</p>
                         <p className="text-sm font-semibold text-slate-800">{pendingJoinCourse.enrolledCount}</p>
                       </div>
-                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 sm:col-span-2">
+                      <div className="rounded-lg border border-slate-200/60 bg-white px-3 py-2 sm:col-span-2">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Class schedule</p>
                         <p className="text-sm font-semibold text-slate-800">{pendingJoinCourse.scheduleSummary}</p>
                         {pendingJoinCourse.scheduleDetail && (
                           <p className="mt-1 text-xs text-slate-500">{pendingJoinCourse.scheduleDetail}</p>
                         )}
                       </div>
-                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 sm:col-span-2">
+                      <div className="rounded-lg border border-slate-200/60 bg-white px-3 py-2 sm:col-span-2">
                         <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Description</p>
                         <p className="text-sm font-semibold text-slate-800">{pendingJoinCourse.description || "No description"}</p>
                       </div>
@@ -4118,7 +4277,7 @@ const handleDeleteCourseSimple = async () => {
                       type="button"
                       onClick={() => setPendingJoinCourse(null)}
                       disabled={joinLoading}
-                      className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300/60 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Cancel
                     </button>

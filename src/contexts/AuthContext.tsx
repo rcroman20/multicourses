@@ -23,8 +23,9 @@ import {
   ensureTeacherOnboardingEnrollment,
 } from "@/lib/services/teacherOnboardingService";
 
-export type UserRole = 'docente' | 'estudiante' | 'admin';
+export type UserRole = 'docente' | 'estudiante' | 'admin' | 'institucion';
 export type TeacherApprovalStatus = "pending" | "approved" | "rejected";
+export type InstitutionPlanStatus = "active" | "inactive" | "pending_payment";
 
 export interface UserPreferences {
   notifications: boolean;
@@ -60,6 +61,15 @@ export interface User {
   teacherPlanAssignedAt?: Date;
   teacherPlanExpiresAt?: Date;
   teacherPlanStatus?: "active" | "expired" | "pending_payment";
+  institutionId?: string;
+  institutionName?: string;
+  institutionRole?: "owner" | "coordinator";
+  institutionManaged?: boolean;
+  institutionPlanStatus?: InstitutionPlanStatus;
+  institutionPlanName?: string;
+  institutionCourseLimit?: number;
+  institutionStudentLimit?: number;
+  institutionTeacherLimit?: number;
   avatarUrl?: string;
   avatarEmoji?: string;
   avatarSetupCompleted?: boolean;
@@ -123,7 +133,32 @@ const normalizeUserRole = (value: unknown): UserRole | null => {
     return "admin";
   }
 
+  if (
+    normalized === "institucion" ||
+    normalized === "institution" ||
+    normalized === "organization" ||
+    normalized === "organizacion" ||
+    normalized === "coordinator" ||
+    normalized === "coordinador" ||
+    normalized === "rector"
+  ) {
+    return "institucion";
+  }
+
   return null;
+};
+
+const rolePriority: Record<UserRole, number> = {
+  estudiante: 1,
+  docente: 2,
+  institucion: 3,
+  admin: 4,
+};
+
+const pickHigherRole = (left: UserRole | null, right: UserRole | null): UserRole | null => {
+  if (!left) return right;
+  if (!right) return left;
+  return rolePriority[left] >= rolePriority[right] ? left : right;
 };
 
 const toDate = (value: unknown): Date | undefined => {
@@ -151,6 +186,14 @@ const toNumber = (value: unknown): number | undefined => {
   if (typeof value === "string" && value.trim().length > 0) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+};
+
+const normalizeInstitutionPlanStatus = (value: unknown): InstitutionPlanStatus | undefined => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "active" || normalized === "inactive" || normalized === "pending_payment") {
+    return normalized as InstitutionPlanStatus;
   }
   return undefined;
 };
@@ -193,8 +236,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .trim()
           .toLowerCase();
 
-      let resolvedRole: UserRole | null = roleFromUserDoc || roleFromStudentDoc;
+      const institutionRoleHint =
+        (typeof userData?.institutionRole === "string" ? userData.institutionRole : "") ||
+        (typeof studentData?.institutionRole === "string" ? studentData.institutionRole : "");
+      const normalizedInstitutionRoleHint = institutionRoleHint.trim().toLowerCase();
+
+      let resolvedRole: UserRole | null = pickHigherRole(roleFromUserDoc, roleFromStudentDoc);
       const isKnownAdmin = isAdminEmail(firebaseUser.email);
+
+      if (
+        requestedRole === "institucion" ||
+        normalizedInstitutionRoleHint === "owner" ||
+        normalizedInstitutionRoleHint === "coordinator"
+      ) {
+        resolvedRole = pickHigherRole(resolvedRole, "institucion");
+      }
 
       // Fallback: if the user owns at least one course, treat as teacher.
       if (!resolvedRole) {
@@ -301,6 +357,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      if (resolvedRole === "institucion" && userDocRole !== "institucion") {
+        try {
+          const institutionPayload = {
+            id: firebaseUser.uid,
+            email: firebaseUser.email || "",
+            name:
+              userData?.name ||
+              studentData?.name ||
+              firebaseUser.displayName ||
+              "Institucion",
+            role: "institucion",
+            institutionId:
+              typeof userData?.institutionId === "string" && userData.institutionId.trim().length > 0
+                ? userData.institutionId.trim()
+                : firebaseUser.uid,
+            institutionRole: "owner",
+            updatedAt: serverTimestamp(),
+          };
+
+          await Promise.all([
+            setDoc(doc(firebaseDB, "usuarios", firebaseUser.uid), institutionPayload, { merge: true }),
+            setDoc(doc(firebaseDB, "estudiantes", firebaseUser.uid), institutionPayload, { merge: true }),
+          ]);
+        } catch {
+          // Ignore persistence issues; runtime role resolution remains correct.
+        }
+      }
+
       if (userData || studentData) {
         const finalRole = fallbackRole;
         const planIdRaw =
@@ -322,6 +406,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           planStatusRaw === "pending_payment"
             ? (planStatusRaw as "active" | "expired" | "pending_payment")
             : undefined;
+        const institutionId =
+          typeof userData?.institutionId === "string" && userData.institutionId.trim().length > 0
+            ? userData.institutionId.trim()
+            : typeof studentData?.institutionId === "string" && studentData.institutionId.trim().length > 0
+              ? studentData.institutionId.trim()
+              : finalRole === "institucion"
+                ? firebaseUser.uid
+                : undefined;
+        const institutionName =
+          typeof userData?.institutionName === "string" && userData.institutionName.trim().length > 0
+            ? userData.institutionName.trim()
+            : typeof userData?.teacherInstitutionName === "string" && userData.teacherInstitutionName.trim().length > 0
+              ? userData.teacherInstitutionName.trim()
+              : typeof studentData?.institutionName === "string" && studentData.institutionName.trim().length > 0
+                ? studentData.institutionName.trim()
+                : typeof studentData?.teacherInstitutionName === "string" && studentData.teacherInstitutionName.trim().length > 0
+                  ? studentData.teacherInstitutionName.trim()
+                  : undefined;
+        const institutionRoleRaw =
+          typeof userData?.institutionRole === "string"
+            ? userData.institutionRole
+            : typeof studentData?.institutionRole === "string"
+              ? studentData.institutionRole
+              : "";
+        const institutionRole =
+          institutionRoleRaw === "owner" || institutionRoleRaw === "coordinator"
+            ? institutionRoleRaw
+            : finalRole === "institucion"
+              ? "owner"
+              : undefined;
+        const institutionManaged =
+          Boolean(userData?.institutionManaged) || Boolean(studentData?.institutionManaged);
 
         return {
           id: firebaseUser.uid,
@@ -335,7 +451,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           requestedRole:
             finalRole === "admin"
               ? undefined
-              : requestedRole || (finalRole === "docente" ? "docente" : "estudiante"),
+              : finalRole === "institucion"
+                ? requestedRole || "institucion"
+                : requestedRole || (finalRole === "docente" ? "docente" : "estudiante"),
           teacherApprovalStatus,
           teacherRequestedAt: toDate(userData?.teacherRequestedAt) || toDate(studentData?.teacherRequestedAt),
           teacherApprovedAt: toDate(userData?.teacherApprovedAt) || toDate(studentData?.teacherApprovedAt),
@@ -415,6 +533,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             toDate(userData?.teacherPlanExpiresAt) ||
             toDate(studentData?.teacherPlanExpiresAt),
           teacherPlanStatus,
+          institutionId,
+          institutionName,
+          institutionRole,
+          institutionManaged,
+          institutionPlanStatus:
+            normalizeInstitutionPlanStatus(userData?.institutionPlanStatus) ||
+            normalizeInstitutionPlanStatus(studentData?.institutionPlanStatus),
+          institutionPlanName:
+            typeof userData?.institutionPlanName === "string"
+              ? userData.institutionPlanName
+              : typeof studentData?.institutionPlanName === "string"
+                ? studentData.institutionPlanName
+                : undefined,
+          institutionCourseLimit:
+            toNumber(userData?.institutionCourseLimit) ??
+            toNumber(studentData?.institutionCourseLimit),
+          institutionStudentLimit:
+            toNumber(userData?.institutionStudentLimit) ??
+            toNumber(studentData?.institutionStudentLimit),
+          institutionTeacherLimit:
+            toNumber(userData?.institutionTeacherLimit) ??
+            toNumber(studentData?.institutionTeacherLimit),
           avatarUrl: userData?.avatarUrl || studentData?.avatarUrl || '',
           avatarEmoji: userData?.avatarEmoji || studentData?.avatarEmoji || '',
           avatarSetupCompleted:
@@ -525,8 +665,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const paymentIsReady =
               userData.teacherPlanStatus !== "pending_payment" &&
               userData.teacherPlanStatus !== "expired";
+            const institutionManagedTeacher =
+              userData.institutionManaged || (userData.role === "docente" && Boolean(userData.institutionId));
 
-            if (teacherIsApproved && paymentIsReady) {
+            if (teacherIsApproved && (paymentIsReady || institutionManagedTeacher)) {
               void ensureTeacherOnboardingEnrollment(userData.id).catch(() => undefined);
             }
           }
@@ -602,8 +744,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       getDoc(studentRef),
     ]);
     const profilePayload: Record<string, unknown> = {
-      role: user.role,
-      email: user.email,
       updatedAt: serverTimestamp(),
     };
 
@@ -624,6 +764,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await setDoc(
         userRef,
         {
+          id: user.id,
+          role: user.role,
+          email: user.email,
           ...profilePayload,
           createdAt: serverTimestamp(),
         },
@@ -692,6 +835,7 @@ export function useRequireAuth(requiredRole?: UserRole) {
     isLoading,
     hasAccess,
     isAdmin: user?.role === 'admin',
+    isInstitution: user?.role === 'institucion',
     isTeacher: user?.role === 'docente',
     isStudent: user?.role === 'estudiante',
   };

@@ -63,6 +63,8 @@ export function AdminPermissionRoute({
         ? "/teacher"
         : user?.role === "admin"
           ? "/admin/dashboard"
+          : user?.role === "institucion"
+            ? "/institution"
           : "/student";
     return <Navigate to={fallbackPath} replace />;
   }

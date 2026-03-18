@@ -25,13 +25,52 @@ export interface TeacherPlanDefinition {
 export const DEFAULT_TEACHER_PLAN_ID: TeacherPlanId = "starter";
 export const MAX_STUDENTS_PER_COURSE = 35;
 
+// Student capacity weighs more because each active student multiplies
+// reads/writes across enrollment, submissions, grading, notifications, and progress views.
+const TEACHER_PLAN_BASE_PRICE_COP = 120000;
+const TEACHER_PLAN_PRICE_PER_COURSE_COP = 10000;
+const TEACHER_PLAN_PRICE_PER_STUDENT_COP = 1300;
+
+const roundPlanPriceCop = (value: number): number => Math.ceil(value / 10000) * 10000;
+
+const annualToMonthly = (priceCop: number): number => Math.round(priceCop / 12);
+
+export const getTeacherAnnualPriceQuote = (input: {
+  courseLimit?: number | null;
+  studentLimit?: number | null;
+}): number => {
+  const courseLimit = Math.max(0, Number(input.courseLimit) || 0);
+  const studentLimit = Math.max(0, Number(input.studentLimit) || 0);
+  const annualPrice =
+    TEACHER_PLAN_BASE_PRICE_COP +
+    courseLimit * TEACHER_PLAN_PRICE_PER_COURSE_COP +
+    studentLimit * TEACHER_PLAN_PRICE_PER_STUDENT_COP;
+
+  return roundPlanPriceCop(annualPrice);
+};
+
+const getTeacherMonthlyPriceQuote = (priceCop: number): number => annualToMonthly(priceCop);
+
+const STARTER_PRICE_COP = getTeacherAnnualPriceQuote({
+  courseLimit: 8,
+  studentLimit: 8 * MAX_STUDENTS_PER_COURSE,
+});
+const GROWTH_PRICE_COP = getTeacherAnnualPriceQuote({
+  courseLimit: 25,
+  studentLimit: 25 * MAX_STUDENTS_PER_COURSE,
+});
+const SCALE_PRICE_COP = getTeacherAnnualPriceQuote({
+  courseLimit: 70,
+  studentLimit: 70 * MAX_STUDENTS_PER_COURSE,
+});
+
 export const TEACHER_PLAN_DEFINITIONS: Record<TeacherPlanId, TeacherPlanDefinition> = {
   starter: {
     id: "starter",
     slug: "starter-annual",
     label: "Starter Annual",
-    priceCop: 990000,
-    monthlyEquivalentCop: 83000,
+    priceCop: STARTER_PRICE_COP,
+    monthlyEquivalentCop: getTeacherMonthlyPriceQuote(STARTER_PRICE_COP),
     durationMonths: 12,
     durationLabel: "12 months access",
     billingLabel: "Annual billing",
@@ -39,10 +78,10 @@ export const TEACHER_PLAN_DEFINITIONS: Record<TeacherPlanId, TeacherPlanDefiniti
     studentLimit: 8 * MAX_STUDENTS_PER_COURSE,
     analyticsLabel: "Core analytics",
     supportLabel: "Email support (48h)",
-    idealFor: "Independent teachers and small academic teams",
+    idealFor: "Independent teachers, tutors, and small teaching practices",
     summary:
-      "Annual entry plan with enough capacity to launch a professional teacher workspace.",
-    estimatedOperatingCostCopRange: "Estimated operating cost range: COP $300k - $850k/year",
+      "Annual entry plan with enough capacity to launch a professional teacher workspace without institutional overhead.",
+    estimatedOperatingCostCopRange: "",
     benefits: [
       "Up to 8 active courses",
       "Up to 280 unique students under management",
@@ -55,8 +94,8 @@ export const TEACHER_PLAN_DEFINITIONS: Record<TeacherPlanId, TeacherPlanDefiniti
     id: "growth",
     slug: "growth-annual",
     label: "Growth Annual",
-    priceCop: 1990000,
-    monthlyEquivalentCop: 166000,
+    priceCop: GROWTH_PRICE_COP,
+    monthlyEquivalentCop: getTeacherMonthlyPriceQuote(GROWTH_PRICE_COP),
     durationMonths: 12,
     durationLabel: "12 months access",
     billingLabel: "Annual billing",
@@ -64,24 +103,24 @@ export const TEACHER_PLAN_DEFINITIONS: Record<TeacherPlanId, TeacherPlanDefiniti
     studentLimit: 25 * MAX_STUDENTS_PER_COURSE,
     analyticsLabel: "Advanced analytics",
     supportLabel: "Priority support (24h)",
-    idealFor: "Schools and academies with multiple cohorts",
+    idealFor: "Experienced teachers and coordinated teaching teams with multiple groups",
     summary:
-      "Balanced annual plan for institutions that need stronger control and mid-scale growth.",
-    estimatedOperatingCostCopRange: "Estimated operating cost range: COP $850k - $2.1M/year",
+      "Balanced annual plan for teacher-led operations that need stronger capacity and faster follow-up.",
+    estimatedOperatingCostCopRange: "",
     benefits: [
       "Up to 25 active courses",
       "Up to 875 unique students",
       "Advanced analytics with operational trend visibility",
       "Priority support with 24-hour response target",
-      "Best fit for sustained multi-group delivery",
+      "Best fit for sustained multi-group delivery led by a teacher or small team",
     ],
   },
   scale: {
     id: "scale",
     slug: "scale-annual",
     label: "Scale Annual",
-    priceCop: 3990000,
-    monthlyEquivalentCop: 333000,
+    priceCop: SCALE_PRICE_COP,
+    monthlyEquivalentCop: getTeacherMonthlyPriceQuote(SCALE_PRICE_COP),
     durationMonths: 12,
     durationLabel: "12 months access",
     billingLabel: "Annual billing",
@@ -89,16 +128,16 @@ export const TEACHER_PLAN_DEFINITIONS: Record<TeacherPlanId, TeacherPlanDefiniti
     studentLimit: 70 * MAX_STUDENTS_PER_COURSE,
     analyticsLabel: "Full analytics, exports, and planning insights",
     supportLabel: "Priority support + onboarding",
-    idealFor: "High-volume institutions and network programs",
+    idealFor: "Teacher departments, academies, and high-volume educator operations",
     summary:
-      "Premium annual plan for high-throughput operations that need deep analytics and support.",
-    estimatedOperatingCostCopRange: "Estimated operating cost range: COP $2.1M - $4.8M+/year",
+      "Premium annual plan for high-throughput teacher operations that need deeper visibility and guided onboarding.",
+    estimatedOperatingCostCopRange: "",
     benefits: [
       "Up to 70 active courses",
       "Up to 2,450 unique students",
       "Complete analytics suite with export-ready reports",
       "Priority support plus onboarding guidance",
-      "Designed for high-throughput teacher operations",
+      "Designed for high-throughput teacher operations outside the institutional ownership model",
     ],
     isPopular: true,
   },

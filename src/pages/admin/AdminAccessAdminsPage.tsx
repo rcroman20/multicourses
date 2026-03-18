@@ -320,9 +320,9 @@ export default function AdminAccessAdminsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <section className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
@@ -342,7 +342,7 @@ export default function AdminAccessAdminsPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <Mail className="h-4 w-4" />
@@ -351,7 +351,7 @@ export default function AdminAccessAdminsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Total admin emails</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <Crown className="h-4 w-4" />
@@ -360,7 +360,7 @@ export default function AdminAccessAdminsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Owner admin</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                         <UserCheck className="h-4 w-4" />
@@ -369,7 +369,7 @@ export default function AdminAccessAdminsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Delegated admins</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                         <CheckCircle2 className="h-4 w-4" />
@@ -385,13 +385,13 @@ export default function AdminAccessAdminsPage() {
             </section>
 
             <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm xl:col-span-2">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Admin Directory</p>
                     <p className="text-xs text-slate-500">Review who currently has platform-level admin access.</p>
                   </div>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                     {filteredEmails.length} shown
                   </span>
                 </div>
@@ -402,12 +402,12 @@ export default function AdminAccessAdminsPage() {
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                     placeholder="Search admin email..."
-                    className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                    className="w-full rounded-xl border border-slate-200/60 bg-white py-2 pl-9 pr-3 text-sm focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
                   />
                 </div>
 
                 {filteredEmails.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                     <AlertTriangle className="mx-auto h-9 w-9 text-slate-400" />
                     <p className="mt-2 text-sm font-medium text-slate-700">No admin emails found</p>
                     <p className="text-xs text-slate-500">Try a different search or add a new admin email.</p>
@@ -425,11 +425,11 @@ export default function AdminAccessAdminsPage() {
                       return (
                         <div
                           key={email}
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                          className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex min-w-0 items-center gap-2.5">
-                              <div className="inline-flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-slate-100 text-sm font-bold text-slate-700">
+                              <div className="inline-flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200/60 bg-slate-100 text-sm font-bold text-slate-700">
                                 {avatarUrl ? (
                                   <img
                                     src={avatarUrl}
@@ -471,7 +471,7 @@ export default function AdminAccessAdminsPage() {
                               <button
                                 type="button"
                                 onClick={() => void handleCopyEmail(email)}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/60 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
                                 aria-label={`Copy ${email}`}
                               >
                                 <Copy className="h-4 w-4" />
@@ -480,7 +480,7 @@ export default function AdminAccessAdminsPage() {
                                 type="button"
                                 disabled={submitting || isOwner}
                                 onClick={() => void handleRemoveAdminEmail(email)}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:border-rose-200 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/60 bg-white text-slate-600 transition-colors hover:border-rose-200 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
                                 aria-label={`Remove ${email}`}
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -494,7 +494,7 @@ export default function AdminAccessAdminsPage() {
                 )}
               </article>
 
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-3">
                   <p className="text-sm font-semibold text-slate-900">Add Admin Email</p>
                   <p className="text-xs text-slate-500">
@@ -512,7 +512,7 @@ export default function AdminAccessAdminsPage() {
                     value={newEmail}
                     onChange={(event) => setNewEmail(event.target.value)}
                     placeholder="name@institution.edu"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                    className="w-full rounded-xl border border-slate-200/60 bg-white px-4 py-2.5 text-sm focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
                   />
 
                   <button
@@ -526,10 +526,10 @@ export default function AdminAccessAdminsPage() {
                   </button>
                 </div>
 
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="mt-3 rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Owner account</p>
                   <div className="mt-2 flex items-center gap-2">
-                    <div className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-white text-xs font-bold text-slate-700">
+                    <div className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200/60 bg-white text-xs font-bold text-slate-700">
                       {ownerProfile?.avatarUrl ? (
                         <img
                           src={ownerProfile.avatarUrl}

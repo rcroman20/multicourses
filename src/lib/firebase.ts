@@ -36,7 +36,7 @@ export const firebaseDB = shouldForceLongPolling
     })
   : getFirestore(firebaseApp);
 export const firebaseStorage = getStorage(firebaseApp); // <-- AÑADIR ESTO
-export const firebaseFunctions = getFunctions(firebaseApp);
+export const firebaseFunctions = getFunctions(firebaseApp, "us-central1");
 
 // Alias para compatibilidad
 export const auth = firebaseAuth;

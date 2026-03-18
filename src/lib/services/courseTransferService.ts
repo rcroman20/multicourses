@@ -196,6 +196,7 @@ const collectCourseContentBackfillUpdates = async (
   const updates: Array<{ ref: ReturnType<typeof doc>; payload: Record<string, unknown> }> = [];
   const touchedFileIds = new Set<string>();
   const touchedLegacyWeekIds = new Set<string>();
+  const touchedStructuredWeekIds = new Set<string>();
 
   const periodsSnap = await getDocs(
     query(collection(firebaseDB, "periods"), where("courseId", "==", courseId)),
@@ -225,6 +226,38 @@ const collectCourseContentBackfillUpdates = async (
         },
       });
     });
+
+    const weeksByPeriodSnap = await getDocs(
+      query(collection(firebaseDB, "weeks"), where("periodId", "==", periodDocSnap.id)),
+    );
+
+    for (const weekDocSnap of weeksByPeriodSnap.docs) {
+      if (touchedStructuredWeekIds.has(weekDocSnap.id)) continue;
+      touchedStructuredWeekIds.add(weekDocSnap.id);
+      updates.push({
+        ref: doc(firebaseDB, "weeks", weekDocSnap.id),
+        payload: {
+          courseId,
+          updatedAt: serverTimestamp(),
+        },
+      });
+
+      const filesByWeekSnap = await getDocs(
+        query(collection(firebaseDB, "course_files"), where("weekId", "==", weekDocSnap.id)),
+      );
+
+      filesByWeekSnap.docs.forEach((fileDocSnap) => {
+        if (touchedFileIds.has(fileDocSnap.id)) return;
+        touchedFileIds.add(fileDocSnap.id);
+        updates.push({
+          ref: doc(firebaseDB, "course_files", fileDocSnap.id),
+          payload: {
+            courseId,
+            updatedAt: serverTimestamp(),
+          },
+        });
+      });
+    }
   }
 
   const structuredWeeksSnap = await getDocs(
@@ -232,6 +265,7 @@ const collectCourseContentBackfillUpdates = async (
   );
 
   for (const weekDocSnap of structuredWeeksSnap.docs) {
+    touchedStructuredWeekIds.add(weekDocSnap.id);
     updates.push({
       ref: doc(firebaseDB, "weeks", weekDocSnap.id),
       payload: {

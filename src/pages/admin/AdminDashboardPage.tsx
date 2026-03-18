@@ -175,7 +175,7 @@ const getOnboardingStatusBadgeClassName = (status: string): string => {
   if (status === "in_progress") return "border-amber-200 bg-amber-50 text-amber-700";
   if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "closed") return "border-rose-200 bg-rose-50 text-rose-700";
-  return "border-slate-200 bg-slate-50 text-slate-700";
+  return "border-slate-200/60 bg-slate-50 text-slate-700";
 };
 
 const getOnboardingStatusLabel = (status: string): string => {
@@ -196,8 +196,8 @@ const adminModules: AdminModuleCard[] = [
   },
   {
     key: "teacherApprovals",
-    title: "Teacher Approvals",
-    description: "Teacher access review",
+    title: "Access Approvals",
+    description: "Teacher and institution access review",
     href: "/admin/teacher-approvals",
     icon: BadgeCheck,
     iconTone: "bg-violet-100 text-violet-700",
@@ -281,14 +281,6 @@ const adminModules: AdminModuleCard[] = [
     href: "/admin/audit-log",
     icon: FileText,
     iconTone: "bg-slate-100 text-slate-700",
-  },
-  {
-    key: "supportConversations",
-    title: "Support Conversations",
-    description: "Threaded request follow-up",
-    href: "/admin/support-conversations",
-    icon: MessageSquare,
-    iconTone: "bg-sky-100 text-sky-700",
   },
   {
     key: "backups",
@@ -1025,7 +1017,7 @@ export default function AdminDashboardPage() {
                 : pendingTeacherApprovalsCount > 0
                   ? "text-amber-600"
                   : "text-emerald-600",
-            description: "Teachers waiting for approval. Review Teacher Approvals.",
+            description: "Accounts waiting for approval. Review Access Approvals.",
           },
           {
             label: "Inbox new",
@@ -1123,9 +1115,6 @@ export default function AdminDashboardPage() {
       if (module.key === "auditLog") {
         return canAccessDelegatedAdminPermission("exportReports", user?.email);
       }
-      if (module.key === "supportConversations") {
-        return canAccessDelegatedAdminPermission("manageInbox", user?.email);
-      }
       if (module.key === "backups") {
         return canAccessDelegatedAdminPermission("manageBackups", user?.email);
       }
@@ -1208,9 +1197,9 @@ export default function AdminDashboardPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <section className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
@@ -1230,7 +1219,7 @@ export default function AdminDashboardPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-teal-100 text-teal-700">
                         <BookOpen className="h-4 w-4" />
@@ -1239,7 +1228,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Courses</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <Users className="h-4 w-4" />
@@ -1248,7 +1237,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Students</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                         <GraduationCap className="h-4 w-4" />
@@ -1257,7 +1246,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Teachers</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
                         <ShieldCheck className="h-4 w-4" />
@@ -1270,7 +1259,7 @@ export default function AdminDashboardPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Operational System Health</p>
@@ -1286,13 +1275,13 @@ export default function AdminDashboardPage() {
                   const resolvedValue = item.value ?? 0;
                   const isLoadingValue = item.value === null;
                   const toneClass = isLoadingValue
-                    ? "border-slate-200 bg-slate-50 text-slate-700"
+                    ? "border-slate-200/60 bg-slate-50 text-slate-700"
                     : resolvedValue > 0
                       ? "border-amber-200 bg-amber-50 text-amber-700"
                       : "border-emerald-200 bg-emerald-50 text-emerald-700";
 
                   return (
-                    <div key={item.key} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div key={item.key} className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
                         <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${toneClass}`}>
@@ -1310,14 +1299,14 @@ export default function AdminDashboardPage() {
             </section>
 
             <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-              <article className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm xl:col-span-2">
+              <article className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm xl:col-span-2">
                 <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
                 <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
                 <div className="relative space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5">
+                      <div className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5">
                         <ActiveSnapshotIcon className={`h-3.5 w-3.5 ${activeSnapshot.iconClassName}`} />
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-600">
                           {activeSnapshot.title}
@@ -1330,7 +1319,7 @@ export default function AdminDashboardPage() {
                       <button
                         type="button"
                         onClick={goPreviousSnapshot}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/60 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
                         aria-label="Previous snapshot"
                       >
                         <ChevronLeft className="h-4 w-4" />
@@ -1338,7 +1327,7 @@ export default function AdminDashboardPage() {
                       <button
                         type="button"
                         onClick={goNextSnapshot}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/60 bg-white text-slate-600 transition-colors hover:border-sky-200 hover:text-sky-700"
                         aria-label="Next snapshot"
                       >
                         <ChevronRight className="h-4 w-4" />
@@ -1355,7 +1344,7 @@ export default function AdminDashboardPage() {
 
                   <div className="grid grid-cols-2 gap-2">
                     {activeSnapshot.metrics.map((metric) => (
-                      <div key={metric.label} className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                      <div key={metric.label} className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                         <div className="flex items-center justify-between gap-2">
                           <div className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ${getMetricChipClassName(metric.iconClassName)}`}>
                             <metric.icon className="h-4 w-4" />
@@ -1386,7 +1375,7 @@ export default function AdminDashboardPage() {
                 </div>
               </article>
 
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Data Integrity</p>
@@ -1405,7 +1394,7 @@ export default function AdminDashboardPage() {
                   {integrityChecks.map((check) => (
                     <div
                       key={check.key}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                      className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex min-w-0 items-center gap-2">
@@ -1424,7 +1413,7 @@ export default function AdminDashboardPage() {
 
             <section className="space-y-4">
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Critical Alerts Center</p>
@@ -1436,7 +1425,7 @@ export default function AdminDashboardPage() {
                   </div>
 
                   {visibleAlerts.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                    <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                       <CheckCircle2 className="mx-auto h-9 w-9 text-emerald-500" />
                       <p className="mt-2 text-sm font-medium text-slate-700">No critical alerts</p>
                       <p className="text-xs text-slate-500">Current workspace checks are healthy.</p>
@@ -1446,7 +1435,7 @@ export default function AdminDashboardPage() {
                       {visibleAlerts.slice(0, 5).map((alert) => (
                         <div
                           key={alert.key}
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                          className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -1466,7 +1455,7 @@ export default function AdminDashboardPage() {
                       ))}
 
                       {lowHealthTeacherAlerts.length > 0 ? (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50/70 p-3">
                           <div className="mb-2 flex items-center justify-between gap-2">
                             <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                               Low Health Course Alerts
@@ -1479,7 +1468,7 @@ export default function AdminDashboardPage() {
                             {lowHealthTeacherAlerts.map((item) => (
                               <div
                                 key={item.id}
-                                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5"
+                                className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5"
                               >
                                 <div className="flex items-start gap-2">
                                   <div className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-amber-100">
@@ -1512,13 +1501,13 @@ export default function AdminDashboardPage() {
                   )}
                 </article>
 
-                <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Quick Admin Actions</p>
                       <p className="text-xs text-slate-500">Shortcuts for operations and diagnostics.</p>
                     </div>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                       4 actions
                     </span>
                   </div>
@@ -1533,7 +1522,7 @@ export default function AdminDashboardPage() {
                     <button
                       type="button"
                       onClick={exportIntegrityReport}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                      className="rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                     >
                       <Download className="mr-1.5 inline h-3.5 w-3.5" />
                       Export report
@@ -1541,7 +1530,7 @@ export default function AdminDashboardPage() {
                     <button
                       type="button"
                       onClick={() => void copyHealthSummary()}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                      className="rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                     >
                       <ClipboardCheck className="mr-1.5 inline h-3.5 w-3.5" />
                       Copy summary
@@ -1549,7 +1538,7 @@ export default function AdminDashboardPage() {
                     <button
                       type="button"
                       onClick={() => window.location.reload()}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                      className="rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                     >
                       <RefreshCw className="mr-1.5 inline h-3.5 w-3.5" />
                       Refresh view
@@ -1562,7 +1551,7 @@ export default function AdminDashboardPage() {
                 </article>
               </div>
 
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Mandatory Teacher Onboarding</p>
@@ -1570,7 +1559,7 @@ export default function AdminDashboardPage() {
                       Teacher progress against {TEACHER_ONBOARDING_COURSE_CODE} and due-date follow-up.
                     </p>
                   </div>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                     {onboardingTeachers.length} teachers
                   </span>
                 </div>
@@ -1582,7 +1571,7 @@ export default function AdminDashboardPage() {
                 ) : null}
 
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <Users className="h-4 w-4" />
@@ -1591,7 +1580,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">In progress</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                         <CheckCircle2 className="h-4 w-4" />
@@ -1600,7 +1589,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Completed</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-700">
                         <AlertTriangle className="h-4 w-4" />
@@ -1609,7 +1598,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Overdue</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <School className="h-4 w-4" />
@@ -1627,7 +1616,7 @@ export default function AdminDashboardPage() {
                 <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
                   <div className="xl:col-span-2">
                     {onboardingPriorityTeachers.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                      <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                         <CheckCircle2 className="mx-auto h-9 w-9 text-slate-400" />
                         <p className="mt-2 text-sm font-medium text-slate-700">No onboarding records found</p>
                         <p className="text-xs text-slate-500">Teacher onboarding data will appear here once generated.</p>
@@ -1637,7 +1626,7 @@ export default function AdminDashboardPage() {
                         {onboardingPriorityTeachers.map((teacher) => (
                           <article
                             key={teacher.userId}
-                            className="rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                            className="rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                           >
                             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                               <div className="min-w-0">
@@ -1649,7 +1638,7 @@ export default function AdminDashboardPage() {
                                     {getOnboardingStatusLabel(teacher.onboardingStatus)}
                                   </span>
                                   {teacher.teacherApprovalStatus ? (
-                                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                                    <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
                                       approval {teacher.teacherApprovalStatus}
                                     </span>
                                   ) : null}
@@ -1661,11 +1650,11 @@ export default function AdminDashboardPage() {
                               </div>
 
                               <div className="grid grid-cols-2 gap-2 sm:min-w-[240px]">
-                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                                <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                                   <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Due</p>
                                   <p className="text-sm font-bold text-slate-900">{formatShortDate(teacher.dueAt)}</p>
                                 </div>
-                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                                <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                                   <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Closed</p>
                                   <p className="text-sm font-bold text-slate-900">{formatShortDate(teacher.closedAt)}</p>
                                 </div>
@@ -1677,7 +1666,7 @@ export default function AdminDashboardPage() {
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+                  <div className="rounded-2xl border border-slate-200/60 bg-slate-50/70 p-4 shadow-sm">
                     <div className="mb-3 flex items-center justify-between gap-2">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">Onboarding Summary</p>
@@ -1686,33 +1675,33 @@ export default function AdminDashboardPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Completed</p>
                         <p className="mt-1 text-lg font-extrabold text-emerald-700">{onboardingCompletedCount}</p>
                         <p className="mt-0.5 text-[10px] leading-4 text-slate-500">Teachers who finished the mandatory onboarding path.</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Closed</p>
                         <p className="mt-1 text-lg font-extrabold text-rose-700">{onboardingClosedCount}</p>
                         <p className="mt-0.5 text-[10px] leading-4 text-slate-500">Expired or closed onboarding cases requiring admin review.</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Action</p>
                         <p className="mt-1 text-sm font-semibold text-slate-900">Focus on overdue teachers first</p>
-                        <p className="mt-0.5 text-[10px] leading-4 text-slate-500">Use Teacher Approvals or Teacher Ops if a teacher still needs plan or access follow-up.</p>
+                        <p className="mt-0.5 text-[10px] leading-4 text-slate-500">Use Access Approvals or Teacher Ops if an account still needs plan or access follow-up.</p>
                       </div>
                     </div>
                   </div>
                 </div>
               </article>
 
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Admin Modules</p>
                     <p className="text-xs text-slate-500">Navigate to each operational area.</p>
                   </div>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                     {visibleAdminModules.length} total
                   </span>
                 </div>
@@ -1724,7 +1713,7 @@ export default function AdminDashboardPage() {
                       <Link
                         key={module.key}
                         to={module.href}
-                        className="group rounded-xl border border-slate-200 bg-white p-3 text-left transition-colors hover:border-sky-300 hover:bg-sky-50/50"
+                        className="group rounded-xl border border-slate-200/60 bg-white p-3 text-left transition-colors hover:border-sky-300 hover:bg-sky-50/50"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">

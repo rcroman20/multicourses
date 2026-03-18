@@ -1,12 +1,14 @@
 type CourseLike = {
   id: string;
   teacherId?: string;
+  institutionId?: string;
   enrolledStudents?: unknown[];
 };
 
 type UserLike = {
   id: string;
   role?: string;
+  institutionId?: string;
 };
 
 const normalizeEnrollmentUserId = (entry: unknown): string => {
@@ -73,6 +75,19 @@ export const getAccessibleCoursesForUser = <TCourse extends CourseLike>(
       ...owned,
       ...courses.filter((course) => isUserEnrolledInCourse(course, user.id)),
     ]);
+  }
+
+  if (user.role === "institucion") {
+    const normalizedInstitutionId = typeof user.institutionId === "string"
+      ? user.institutionId.trim()
+      : "";
+    if (!normalizedInstitutionId) return [];
+
+    return dedupeCoursesById(
+      courses.filter(
+        (course) => String(course.institutionId || "").trim() === normalizedInstitutionId,
+      ),
+    );
   }
 
   return dedupeCoursesById(

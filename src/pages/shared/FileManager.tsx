@@ -71,10 +71,10 @@ interface Week {
 }
 
 const modalInputClass =
-  'w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100';
+  'w-full rounded-xl border border-slate-200/60 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100';
 const modalLabelClass = 'mb-2 block text-sm font-semibold text-slate-700';
 const modalSecondaryButtonClass =
-  'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50';
+  'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200/60 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50';
 const modalPrimaryButtonClass =
   'inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60';
 const modalDangerButtonClass =
@@ -972,7 +972,7 @@ const getUnassignedFiles = () => {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="space-y-2 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
@@ -992,9 +992,9 @@ const getUnassignedFiles = () => {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
               <div className="relative z-10">
@@ -1033,7 +1033,7 @@ const getUnassignedFiles = () => {
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <FileText className="h-4 w-4" />
@@ -1042,7 +1042,7 @@ const getUnassignedFiles = () => {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Files</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                         <Layers className="h-4 w-4" />
@@ -1051,7 +1051,7 @@ const getUnassignedFiles = () => {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Periods</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                         <Calendar className="h-4 w-4" />
@@ -1060,7 +1060,7 @@ const getUnassignedFiles = () => {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Weeks</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <Clock className="h-4 w-4" />
@@ -1073,7 +1073,7 @@ const getUnassignedFiles = () => {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="space-y-3">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                   <div className="md:col-span-2 xl:col-span-1">
@@ -1082,7 +1082,7 @@ const getUnassignedFiles = () => {
                       <input
                         type="text"
                         placeholder="Search files, descriptions, authors..."
-                        className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium text-slate-700 transition-all focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                        className="w-full rounded-xl border border-slate-200/60 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium text-slate-700 transition-all focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                       />
@@ -1103,7 +1103,7 @@ const getUnassignedFiles = () => {
                         setSelectedPeriodFilter(e.target.value);
                         setSelectedWeekFilter('');
                       }}
-                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     >
                       <option value="">All periods</option>
                       {periodFilterOptions.map((period) => (
@@ -1118,7 +1118,7 @@ const getUnassignedFiles = () => {
                     <select
                       value={selectedWeekFilter}
                       onChange={(e) => setSelectedWeekFilter(e.target.value)}
-                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     >
                       <option value="">All weeks</option>
                       {weekFilterOptions.map((week) => (
@@ -1133,7 +1133,7 @@ const getUnassignedFiles = () => {
                     <select
                       value={selectedCourseId}
                       onChange={(e) => handleCourseChange(e.target.value)}
-                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     >
                       {userCourses.length === 0 ? (
                         <option value="">No courses available</option>
@@ -1158,7 +1158,7 @@ const getUnassignedFiles = () => {
                     <button
                       type="button"
                       onClick={() => setShowCourseStructure((prev) => !prev)}
-                      className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                      className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300/60 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                     >
                       {showCourseStructure ? 'Hide structure' : 'Show structure'}
                     </button>
@@ -1168,7 +1168,7 @@ const getUnassignedFiles = () => {
                       <button
                         type="button"
                         onClick={() => setShowPeriodModal(true)}
-                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                       >
                         <Layers className="h-4 w-4" />
                         New period
@@ -1191,7 +1191,7 @@ const getUnassignedFiles = () => {
               </div>
 
               {(searchTerm || selectedPeriodFilter || selectedWeekFilter) && (
-                <div className="mt-4 border-t border-slate-200 pt-4">
+                <div className="mt-4 border-t border-slate-200/60 pt-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-sky-600">
                       Showing {visibleFiles.length} file{visibleFiles.length !== 1 ? 's' : ''}
@@ -1212,7 +1212,7 @@ const getUnassignedFiles = () => {
               )}
 
               {(searchTerm || selectedPeriodFilter || selectedWeekFilter) && visibleFiles.length === 0 && files.length > 0 && (
-                <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3">
+                <div className="mt-4 rounded-xl border border-dashed border-slate-300/60 bg-slate-50 px-4 py-3">
                   <p className="text-sm font-semibold text-slate-700">No matching files</p>
                   <p className="text-xs text-slate-500">Try another filter combination or clear filters.</p>
                 </div>
@@ -1281,7 +1281,7 @@ const getUnassignedFiles = () => {
                     </div>
                   ) : (
                     periods.map(period => (
-                      <div key={period.id} className="overflow-hidden rounded-xl border border-gray-200">
+                      <div key={period.id} className="overflow-hidden rounded-xl border border-gray-200/60">
                        <div className="flex items-center justify-between bg-blue-50 px-2.5 py-2">
   <button
     onClick={() => togglePeriod(period.id)}
@@ -1335,7 +1335,7 @@ const getUnassignedFiles = () => {
   )}
 </div>
                         {expandedPeriods.includes(period.id) && (
-                          <div className="space-y-1.5 border-t border-gray-200 bg-gray-50/30 p-2">
+                          <div className="space-y-1.5 border-t border-gray-200/60 bg-gray-50/30 p-2">
                             {getWeeksByPeriod(period.id).length === 0 ? (
                               <div className="flex items-center gap-2 rounded-lg border border-gray-100 bg-white px-2.5 py-1.5">
                                 <Calendar className="h-3.5 w-3.5 text-gray-400" />
@@ -1393,7 +1393,7 @@ const getUnassignedFiles = () => {
   )}
 </div>
                                   {expandedWeeks.includes(week.id) && (
-                                    <div className="space-y-1 border-l border-gray-200 pl-5">
+                                    <div className="space-y-1 border-l border-gray-200/60 pl-5">
                                       {getFilesByWeek(week.id).length === 0 ? (
                                         <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-2.5 py-1">
                                           <FileText className="h-3.5 w-3.5 text-gray-400" />
@@ -1446,11 +1446,11 @@ const getUnassignedFiles = () => {
                     ))
                   )}
                   {files.length > 0 && getUnassignedFiles().length > 0 && (
-                    <div className="mt-3 border-t border-gray-200 pt-3">
+                    <div className="mt-3 border-t border-gray-200/60 pt-3">
                       <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-700">Unassigned Files</h4>
                       <div className="space-y-1.5">
                         {getUnassignedFiles().map(file => (
-                          <div key={file.id} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-100 p-1.5">
+                          <div key={file.id} className="flex items-center gap-2 rounded-lg border border-gray-200/60 bg-gray-100 p-1.5">
                             <button
                               onClick={() => setSelectedFile(file)}
                               className={cn(
@@ -1521,7 +1521,7 @@ const getUnassignedFiles = () => {
                         {selectedFile.type.includes('pdf') && (
                           <button
                             onClick={() => setIsFullscreen(!isFullscreen)}
-                            className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 hover:shadow-md transition-all duration-300 font-medium"
+                            className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300/60 text-gray-700 rounded-xl hover:bg-gray-50 hover:shadow-md transition-all duration-300 font-medium"
                           >
                             <Maximize2 className="h-4 w-4" />
                           </button>
@@ -1530,14 +1530,14 @@ const getUnassignedFiles = () => {
                           <div className="flex gap-1">
                             <button
                               onClick={() => handleEditFile(selectedFile.id)}
-                              className="p-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 hover:shadow-md transition-all duration-300"
+                              className="p-2.5 border border-gray-300/60 text-gray-700 rounded-xl hover:bg-gray-50 hover:shadow-md transition-all duration-300"
                               title="Edit file"
                             >
                               <Edit className="h-4 w-4" />
                             </button>
                             <button
                               onClick={() => setShowDeleteConfirm(selectedFile.id)}
-                              className="p-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-red-50 hover:shadow-md transition-all duration-300"
+                              className="p-2.5 border border-gray-300/60 text-gray-700 rounded-xl hover:bg-red-50 hover:shadow-md transition-all duration-300"
                               title="Delete file"
                             >
                               <Trash2 className="h-4 w-4 text-red-600" />
@@ -1550,7 +1550,7 @@ const getUnassignedFiles = () => {
                   <div className="p-6">
                     {selectedFile.type.includes('pdf') ? (
                       <div className={cn(
-                        "rounded-xl overflow-hidden border-2 border-gray-200 shadow-lg bg-white",
+                        "rounded-xl overflow-hidden border-2 border-gray-200/60 shadow-lg bg-white",
                         isFullscreen ? "fixed inset-0 z-50" : ""
                       )}>
                         {isFullscreen && (
@@ -1582,7 +1582,7 @@ const getUnassignedFiles = () => {
                         />
                       </div>
                     ) : (
-                      <div className="aspect-video bg-white rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300">
+                      <div className="aspect-video bg-white rounded-2xl flex items-center justify-center border-2 border-dashed border-gray-300/60">
                         <div className="text-center p-6 max-w-md">
                           <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-blue-100 flex items-center justify-center">
                             {getFileIcon(selectedFile.type)}
@@ -1608,7 +1608,7 @@ const getUnassignedFiles = () => {
                       </div>
                     )}
  {selectedFile.description && (
-                        <div className="mt-4 pt-4 border-t border-gray-200">
+                        <div className="mt-4 pt-4 border-t border-gray-200/60">
                           <h4 className="text-sm font-semibold text-gray-700 mb-2">Description</h4>
                           <p className="text-gray-600">{selectedFile.description}</p>
                         </div>
@@ -1694,7 +1694,7 @@ const getUnassignedFiles = () => {
                           <button
                             key={file.id}
                             onClick={() => setSelectedFile(file)}
-                            className="flex items-center gap-3 p-4 rounded-xl bg-white border border-gray-200 hover:border-blue-200 hover:shadow-md transition-all duration-300 group text-left"
+                            className="flex items-center gap-3 p-4 rounded-xl bg-white border border-gray-200/60 hover:border-blue-200 hover:shadow-md transition-all duration-300 group text-left"
                           >
                             <div className={`h-8 w-8 rounded-lg ${getFileColor(file.type)} flex items-center justify-center text-white`}>
                               {getFileIcon(file.type)}
@@ -1723,8 +1723,8 @@ const getUnassignedFiles = () => {
           </div>
             )}
 
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="border-b border-slate-200 bg-white px-5 py-4">
+            <div className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm">
+              <div className="border-b border-slate-200/60 bg-white px-5 py-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="text-base font-bold text-slate-900">Files Library</h3>
@@ -1738,7 +1738,7 @@ const getUnassignedFiles = () => {
 
               <div className="p-4">
                 {visibleFiles.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-8 text-center">
                     <h4 className="text-base font-semibold text-slate-900">No files to display</h4>
                     <p className="mt-1 text-sm text-slate-500">{emptyFilesMessage}</p>
                   </div>
@@ -1746,11 +1746,11 @@ const getUnassignedFiles = () => {
                   <div className="space-y-6">
                     {filesGroupedByPeriod.map((group) => (
                       <section key={group.periodId} className="space-y-3">
-                        <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-2">
+                        <div className="flex items-center justify-between gap-3 border-b border-slate-200/60 pb-2">
                           <h4 className="text-sm font-bold uppercase tracking-wide text-slate-700">
                             {group.periodName}
                           </h4>
-                          <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                          <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
                             {group.files.length} file{group.files.length !== 1 ? 's' : ''}
                           </span>
                         </div>
@@ -1764,7 +1764,7 @@ const getUnassignedFiles = () => {
                             return (
                               <article
                                 key={file.id}
-                                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-200 hover:shadow-md"
+                                className="rounded-xl border border-slate-200/60 bg-white p-4 shadow-sm transition hover:border-sky-200 hover:shadow-md"
                               >
                                 <div className="mb-2 flex flex-wrap items-center gap-2">
                                   <span className={cn('inline-flex h-6 w-6 items-center justify-center rounded text-white', getFileColor(file.type))}>
@@ -1773,7 +1773,7 @@ const getUnassignedFiles = () => {
                                   <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
                                     {file.size ? formatFileSize(file.size) : 'Link'}
                                   </span>
-                                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                                  <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
                                     {formatTimeAgo(file.uploadedAt)}
                                   </span>
                                 </div>
@@ -1830,7 +1830,7 @@ const getUnassignedFiles = () => {
                                           .then(() => alert('Link copied to clipboard!'))
                                           .catch(() => alert('Could not copy the link.'));
                                       }}
-                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-white text-slate-700 transition hover:bg-slate-50"
                                       title="Copy link"
                                       aria-label="Copy link"
                                     >
@@ -1843,7 +1843,7 @@ const getUnassignedFiles = () => {
                                       <button
                                         type="button"
                                         onClick={() => handleEditFile(file.id)}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-white text-slate-700 transition hover:bg-slate-50"
                                         title="Edit file"
                                         aria-label="Edit file"
                                       >
@@ -1875,8 +1875,8 @@ const getUnassignedFiles = () => {
         )}
             {showPeriodModal && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-                <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                <div className="w-full max-w-2xl rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200/60 px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
                         <Layers className="h-5 w-5" />
@@ -1889,7 +1889,7 @@ const getUnassignedFiles = () => {
                     <button
                       type="button"
                       onClick={closePeriodModal}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -1941,8 +1941,8 @@ const getUnassignedFiles = () => {
 
             {showDeletePeriodConfirm && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-                <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                <div className="w-full max-w-xl rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200/60 px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
                         <AlertTriangle className="h-5 w-5" />
@@ -1955,7 +1955,7 @@ const getUnassignedFiles = () => {
                     <button
                       type="button"
                       onClick={() => setShowDeletePeriodConfirm(null)}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -1999,8 +1999,8 @@ const getUnassignedFiles = () => {
 
             {showDeleteWeekConfirm && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-                <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                <div className="w-full max-w-xl rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200/60 px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
                         <AlertTriangle className="h-5 w-5" />
@@ -2013,7 +2013,7 @@ const getUnassignedFiles = () => {
                     <button
                       type="button"
                       onClick={() => setShowDeleteWeekConfirm(null)}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -2056,8 +2056,8 @@ const getUnassignedFiles = () => {
 
             {showWeekModal && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-                <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                <div className="w-full max-w-2xl rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200/60 px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
                         <Calendar className="h-5 w-5" />
@@ -2070,7 +2070,7 @@ const getUnassignedFiles = () => {
                     <button
                       type="button"
                       onClick={closeWeekModal}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -2120,8 +2120,8 @@ const getUnassignedFiles = () => {
 
             {showFileModal && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-                <div className="w-full max-w-3xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                <div className="w-full max-w-3xl rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200/60 px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
                         <LinkIcon className="h-5 w-5" />
@@ -2138,7 +2138,7 @@ const getUnassignedFiles = () => {
                     <button
                       type="button"
                       onClick={closeFileModal}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -2283,8 +2283,8 @@ const getUnassignedFiles = () => {
 
             {showDeleteConfirm && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-                <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-                  <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                <div className="w-full max-w-xl rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+                  <div className="flex items-center justify-between border-b border-slate-200/60 px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
                         <AlertTriangle className="h-5 w-5" />
@@ -2297,7 +2297,7 @@ const getUnassignedFiles = () => {
                     <button
                       type="button"
                       onClick={() => setShowDeleteConfirm(null)}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                     >
                       <X className="h-4 w-4" />
                     </button>

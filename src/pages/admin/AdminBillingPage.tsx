@@ -98,7 +98,7 @@ const getPaymentStatusClassName = (status: BillingTeacherRow["planStatus"]): str
   if (status === "payment_pending") return "border-amber-200 bg-amber-50 text-amber-700";
   if (status === "expired") return "border-rose-200 bg-rose-50 text-rose-700";
   if (status === "active") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  return "border-slate-200 bg-slate-50 text-slate-700";
+  return "border-slate-200/60 bg-slate-50 text-slate-700";
 };
 
 const getPaymentStatusLabel = (status: BillingTeacherRow["planStatus"]): string => {
@@ -305,9 +305,9 @@ export default function AdminBillingPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <section className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
@@ -327,7 +327,7 @@ export default function AdminBillingPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <Clock3 className="h-4 w-4" />
@@ -336,7 +336,7 @@ export default function AdminBillingPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Payment pending</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                         <BadgeCheck className="h-4 w-4" />
@@ -345,7 +345,7 @@ export default function AdminBillingPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Active plans</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
                         <Sparkles className="h-4 w-4" />
@@ -354,7 +354,7 @@ export default function AdminBillingPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Collection pipeline</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-100 text-cyan-700">
                         <Mail className="h-4 w-4" />
@@ -368,7 +368,7 @@ export default function AdminBillingPage() {
             </section>
 
             <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm lg:col-span-2">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Payment Queue</p>
@@ -391,7 +391,7 @@ export default function AdminBillingPage() {
                     </div>
                   </div>
                 ) : paymentPendingRequests.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                     <CheckCircle2 className="mx-auto h-9 w-9 text-emerald-500" />
                     <p className="mt-2 text-sm font-medium text-slate-700">No pending payments</p>
                     <p className="text-xs text-slate-500">All teacher plan requests are clear right now.</p>
@@ -407,7 +407,7 @@ export default function AdminBillingPage() {
                       return (
                         <article
                           key={request.userId}
-                          className="rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                          className="rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                         >
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                             <div className="min-w-0">
@@ -435,7 +435,7 @@ export default function AdminBillingPage() {
                 )}
               </article>
 
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Plan Mix</p>
@@ -446,7 +446,7 @@ export default function AdminBillingPage() {
                   {TEACHER_PLAN_OPTIONS.map((plan) => (
                     <div
                       key={plan.id}
-                      className="rounded-xl border border-slate-200 bg-slate-50 p-2.5"
+                      className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">{plan.label}</p>
@@ -457,7 +457,7 @@ export default function AdminBillingPage() {
                       </p>
                     </div>
                   ))}
-                  <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-white p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Expiring in 30d</p>
                       <p className="text-sm font-bold text-slate-900">{expiringSoonCount}</p>
@@ -471,7 +471,7 @@ export default function AdminBillingPage() {
             </section>
 
             <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Pricing Intake</p>
@@ -480,7 +480,7 @@ export default function AdminBillingPage() {
                 </div>
 
                 {pricingRequests.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5 text-center">
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-5 text-center">
                     <CheckCircle2 className="mx-auto h-9 w-9 text-emerald-500" />
                     <p className="mt-2 text-sm font-medium text-slate-700">No pricing requests</p>
                     <p className="text-xs text-slate-500">New inbound pricing messages will appear here.</p>
@@ -492,7 +492,7 @@ export default function AdminBillingPage() {
                       return (
                         <article
                           key={request.id}
-                          className="rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                          className="rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                         >
                           <div className="flex flex-col gap-2">
                             <div className="flex items-center justify-between gap-2">
@@ -526,7 +526,7 @@ export default function AdminBillingPage() {
                                 </button>
                                 <a
                                   href={`mailto:${request.email}`}
-                                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                                  className="rounded-lg border border-slate-200/60 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                                 >
                                   Reply
                                 </a>
@@ -540,7 +540,7 @@ export default function AdminBillingPage() {
                 )}
               </article>
 
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Plan Registry</p>
@@ -549,7 +549,7 @@ export default function AdminBillingPage() {
                 </div>
 
                 {teacherBillingRows.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5 text-center">
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-5 text-center">
                     <AlertTriangle className="mx-auto h-9 w-9 text-slate-400" />
                     <p className="mt-2 text-sm font-medium text-slate-700">No teacher billing records found</p>
                     <p className="text-xs text-slate-500">Approved teacher plan records will appear in this panel.</p>
@@ -559,7 +559,7 @@ export default function AdminBillingPage() {
                     {teacherBillingRows.slice(0, 8).map((row) => (
                       <article
                         key={row.userId}
-                        className="rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                        className="rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
@@ -589,7 +589,7 @@ export default function AdminBillingPage() {
             ) : null}
 
             <Link to="/admin/teacher-approvals" className="block">
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition-colors hover:border-sky-300 hover:bg-sky-50/50">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 transition-colors hover:border-sky-300 hover:bg-sky-50/50">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-100">

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Settings, ShieldCheck, X } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export type CookieConsent = {
   version: string;
@@ -12,7 +13,7 @@ export type CookieConsent = {
 };
 
 const COOKIE_CONSENT_VERSION = "2026-02-20";
-const COOKIE_CONSENT_KEY = "multicourses.cookieConsent";
+const COOKIE_CONSENT_KEY = "socrattica.cookieConsent";
 
 const defaultOptionalState = {
   preferences: true,
@@ -257,6 +258,19 @@ export function CookieConsentBanner() {
           <p className="text-[10px] text-gray-500">
             You can change this anytime from the Cookies button.
           </p>
+          <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold text-gray-600">
+            <Link to="/privacy-policy" className="hover:text-blue-700">
+              Privacy Policy
+            </Link>
+            <span aria-hidden>•</span>
+            <Link to="/terms-and-conditions" className="hover:text-blue-700">
+              Terms & Conditions
+            </Link>
+            <span aria-hidden>•</span>
+            <Link to="/cookies-policy" className="hover:text-blue-700">
+              Cookies Policy
+            </Link>
+          </div>
         </div>
       </div>
     </div>

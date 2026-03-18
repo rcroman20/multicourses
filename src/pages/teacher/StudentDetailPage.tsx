@@ -38,7 +38,8 @@ import {
   FileText,
   BarChart3,
   X,
-  User
+  User,
+  School,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { changeCourseEnrollmentWithPlan } from '@/lib/services/teacherPlanEnforcementService';
@@ -49,7 +50,7 @@ interface Student {
   idNumber: string;
   email: string;
   name: string;
-  role: 'estudiante' | 'docente' | 'admin';
+  role: 'estudiante' | 'docente' | 'admin' | 'institucion';
   requestedRole?: 'estudiante' | 'docente';
   teacherApprovalStatus?: 'pending' | 'approved' | 'rejected';
   whatsApp: string;
@@ -76,14 +77,15 @@ interface Course {
   status: string;
 } 
 
-type UserRole = "estudiante" | "docente" | "admin";
+type UserRole = "estudiante" | "docente" | "admin" | "institucion";
 type RequestedRole = "estudiante" | "docente";
 type StudentRoleDisplay =
   | "student"
   | "teacher"
   | "teacher_pending"
   | "teacher_rejected"
-  | "admin";
+  | "admin"
+  | "institution";
 
 const normalizeUserRole = (
   value: unknown,
@@ -118,6 +120,14 @@ const normalizeUserRole = (
     return "admin";
   }
 
+  if (
+    normalized === "institucion" ||
+    normalized === "institución" ||
+    normalized === "institution"
+  ) {
+    return "institucion";
+  }
+
   return null;
 };
 
@@ -146,6 +156,7 @@ const getStudentRoleDisplay = (
   student: Pick<Student, "role" | "requestedRole" | "teacherApprovalStatus">,
 ): StudentRoleDisplay => {
   if (student.role === "admin") return "admin";
+  if (student.role === "institucion") return "institution";
   if (student.role === "docente") return "teacher";
   if (student.requestedRole !== "docente") return "student";
   if (student.teacherApprovalStatus === "pending") return "teacher_pending";
@@ -181,9 +192,12 @@ export default function StudentDetailPage() {
 
   const isTeacher = user?.role === 'docente';
   const studentRoleDisplay = student ? getStudentRoleDisplay(student) : "student";
+  const isInstitutionAccount = studentRoleDisplay === "institution";
   const detailTitle =
     studentRoleDisplay === "admin"
       ? "Admin Detail"
+      : studentRoleDisplay === "institution"
+        ? "Institution Detail"
       : studentRoleDisplay === "teacher" ||
           studentRoleDisplay === "teacher_pending" ||
           studentRoleDisplay === "teacher_rejected"
@@ -192,6 +206,8 @@ export default function StudentDetailPage() {
   const detailSubtitle =
     studentRoleDisplay === "admin"
       ? "Account detail and enrollment status"
+      : studentRoleDisplay === "institution"
+        ? "Institution account detail and workspace status"
       : studentRoleDisplay === "teacher_pending"
         ? "Teacher request pending admin approval"
         : studentRoleDisplay === "teacher_rejected"
@@ -233,6 +249,15 @@ export default function StudentDetailPage() {
         <span className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700">
           <XCircle className="h-3 w-3" />
           Teacher Rejected
+        </span>
+      );
+    }
+
+    if (studentRoleDisplay === "institution") {
+      return (
+        <span className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-0.5 text-xs font-semibold text-cyan-700">
+          <School className="h-3 w-3" />
+          Institution
         </span>
       );
     }
@@ -459,6 +484,10 @@ export default function StudentDetailPage() {
   // Función para guardar los cambios del estudiante
   const handleSaveChanges = async () => {
     if (!student) return;
+    if (isInstitutionAccount) {
+      setError("Institution accounts cannot be edited from this workspace.");
+      return;
+    }
 
     // Validaciones básicas
     if (!editForm.name.trim()) {
@@ -679,7 +708,7 @@ export default function StudentDetailPage() {
         <div className="relative overflow-x-clip">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[360px] items-center justify-center">
               <div className="space-y-2 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
@@ -701,7 +730,7 @@ export default function StudentDetailPage() {
         <div className="relative overflow-x-clip">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[360px] items-center justify-center">
               <div className="text-center">
                 <AlertCircle className="mx-auto mb-3 h-10 w-10 text-slate-400" />
@@ -709,7 +738,7 @@ export default function StudentDetailPage() {
                 <p className="mb-5 text-xs text-slate-500">The student you're looking for doesn't exist.</p>
                 <button
                   onClick={() => navigate('/students/list')}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200/60 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" />
                   Back to Students List
@@ -727,10 +756,10 @@ export default function StudentDetailPage() {
       <div className="relative overflow-x-clip">
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
       <div className="space-y-3">
         {/* Back button */}
-        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2">
+        <div className="flex items-center justify-between rounded-xl border border-slate-200/60 bg-slate-50/70 px-3 py-2">
           <button
             onClick={() => navigate('/students/list')}
             className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 transition hover:text-sky-700"
@@ -739,7 +768,7 @@ export default function StudentDetailPage() {
             Back to Students List
           </button>
           
-          {isTeacher && !isEditing && (
+          {isTeacher && !isEditing && !isInstitutionAccount && (
             <button
               onClick={() => setIsEditing(true)}
               className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
@@ -770,8 +799,8 @@ export default function StudentDetailPage() {
         )}
 
         {/* Student Information Card */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+        <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-start justify-between gap-3 border-b border-slate-200/60 pb-3">
             <div>
               <h2 className="text-lg font-bold text-slate-900">{detailTitle}</h2>
               <p className="text-sm text-slate-500">{detailSubtitle}</p>
@@ -833,7 +862,7 @@ export default function StudentDetailPage() {
                 {/* Columna izquierda */}
                 <div className="space-y-2">
                   {/* ID Number */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50/60 p-2.5">
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-100">
                         <Hash className="h-4 w-4 text-sky-700" />
@@ -856,7 +885,7 @@ export default function StudentDetailPage() {
                   </div>
 
                   {/* Email */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50/60 p-2.5">
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100">
                         <Mail className="h-4 w-4 text-emerald-700" />
@@ -878,7 +907,7 @@ export default function StudentDetailPage() {
                     </div>
                   </div>
                                     {/* Phone / WhatsApp */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50/60 p-2.5">
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-100">
                         <Phone className="h-4 w-4 text-indigo-700" />
@@ -901,7 +930,7 @@ export default function StudentDetailPage() {
                   </div>
 
                   {/* Location */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50/60 p-2.5">
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-100">
                         <Calendar className="h-4 w-4 text-cyan-700" />
@@ -919,7 +948,7 @@ export default function StudentDetailPage() {
                 {/* Columna derecha */}
                 <div className="space-y-2">
     {/* Enrolled Courses */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50/60 p-2.5">
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100">
                         <BookOpen className="h-4 w-4 text-amber-700" />
@@ -934,7 +963,7 @@ export default function StudentDetailPage() {
                   </div>
 
                   {/* Bio */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50/60 p-2.5">
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-100">
                         <FileText className="h-4 w-4 text-sky-700" />
@@ -951,7 +980,7 @@ export default function StudentDetailPage() {
               
 
                   {/* Social Links */}
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50/60 p-2.5">
                     <div className="flex items-start gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-100">
                         <ExternalLink className="h-4 w-4 text-indigo-700" />
@@ -994,10 +1023,10 @@ export default function StudentDetailPage() {
 
               {/* Botones de acción para edición */}
               {isEditing && (
-                <div className="mt-4 flex justify-end gap-2 border-t border-slate-200 pt-3">
+                <div className="mt-4 flex justify-end gap-2 border-t border-slate-200/60 pt-3">
                   <button
                     onClick={cancelEdit}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200/60 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     <X className="h-3.5 w-3.5" />
                     Cancel
@@ -1029,7 +1058,7 @@ export default function StudentDetailPage() {
         {isTeacher && (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {/* Enrolled Courses */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100">
@@ -1042,33 +1071,56 @@ export default function StudentDetailPage() {
                     </p>
                   </div>
                 </div>
-                <Link
-                  to={`/students/${student.id}/enroll`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
-                >
-                  Manage Enrollment
-                </Link>
+                {isInstitutionAccount ? (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500"
+                    title="Institution accounts cannot be enrolled in courses."
+                  >
+                    Manage Enrollment
+                  </button>
+                ) : (
+                  <Link
+                    to={`/students/${student.id}/enroll`}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
+                  >
+                    Manage Enrollment
+                  </Link>
+                )}
               </div>
 
               {enrolledCourses.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-8 text-center">
                   <BookOpen className="mx-auto mb-3 h-10 w-10 text-slate-400" />
                   <p className="mb-1 text-sm font-semibold text-slate-900">No enrolled courses</p>
                   <p className="text-xs text-slate-600">This student is not enrolled in any of your courses</p>
-                  <Link
-                    to={`/students/${student.id}/enroll`}
-                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Enroll in Courses
-                  </Link>
+                  {isInstitutionAccount ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500"
+                      title="Institution accounts cannot be enrolled in courses."
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Enrollment Unavailable
+                    </button>
+                  ) : (
+                    <Link
+                      to={`/students/${student.id}/enroll`}
+                      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Enroll in Courses
+                    </Link>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-2">
                   {enrolledCourses.map((course) => (
                     <div
                       key={course.id}
-                      className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/40 p-3 transition hover:border-slate-300"
+                      className="flex items-center justify-between rounded-xl border border-slate-200/60 bg-slate-50/40 p-3 transition hover:border-slate-300/60"
                     >
                       <div className="flex-1">
                         <div className="mb-1.5 flex items-center gap-2.5">
@@ -1092,7 +1144,7 @@ export default function StudentDetailPage() {
                             <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
                               course.status === 'active' 
                                 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' 
-                                : 'border-slate-200 bg-slate-100 text-slate-600'
+                                : 'border-slate-200/60 bg-slate-100 text-slate-600'
                             }`}>
                               {course.status}
                             </span>
@@ -1101,9 +1153,13 @@ export default function StudentDetailPage() {
                       </div>
                       <button
                         onClick={() => unenrollStudentFromCourse(course.id)}
-                        disabled={isUpdating}
+                        disabled={isUpdating || isInstitutionAccount}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
-                        title="Unenroll from course"
+                        title={
+                          isInstitutionAccount
+                            ? "Institution accounts cannot be enrolled in courses."
+                            : "Unenroll from course"
+                        }
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -1114,7 +1170,7 @@ export default function StudentDetailPage() {
             </div>
 
             {/* Available Courses */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100">
@@ -1127,13 +1183,13 @@ export default function StudentDetailPage() {
                     </p>
                   </div>
                 </div>
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                   {availableCourses.length} available
                 </span>
               </div>
 
               {availableCourses.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-8 text-center">
                   <CheckCircle className="mx-auto mb-3 h-10 w-10 text-emerald-400" />
                   <p className="mb-1 text-sm font-semibold text-slate-900">All courses enrolled</p>
                   <p className="text-xs text-slate-600">Student is enrolled in all your available courses</p>
@@ -1143,7 +1199,7 @@ export default function StudentDetailPage() {
                   {availableCourses.map((course) => (
                     <div
                       key={course.id}
-                      className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/40 p-3 transition hover:border-slate-300"
+                      className="flex items-center justify-between rounded-xl border border-slate-200/60 bg-slate-50/40 p-3 transition hover:border-slate-300/60"
                     >
                       <div className="flex-1">
                         <div className="mb-1.5 flex items-center gap-2.5">
@@ -1166,9 +1222,13 @@ export default function StudentDetailPage() {
                       </div>
                       <button
                         onClick={() => enrollStudentInCourse(course.id)}
-                        disabled={isUpdating}
+                        disabled={isUpdating || isInstitutionAccount}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
-                        title="Enroll in course"
+                        title={
+                          isInstitutionAccount
+                            ? "Institution accounts cannot be enrolled in courses."
+                            : "Enroll in course"
+                        }
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </button>

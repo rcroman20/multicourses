@@ -22,6 +22,7 @@ import {
 } from "@/lib/services/adminDirectoryService";
 import {
   getInstitutionSuggestions,
+  replacePublicInstitutionSuggestions,
   saveUserInstitution,
 } from "@/lib/services/institutionProfileService";
 
@@ -41,8 +42,12 @@ type InstitutionSummary = {
 const getRoleLabel = (role: AdminDirectoryUserRecord["role"]): string => {
   if (role === "docente") return "Teacher";
   if (role === "admin") return "Admin";
+  if (role === "institucion") return "Institution";
   return "Student";
 };
+
+const getEffectiveRole = (user: AdminDirectoryUserRecord): AdminDirectoryUserRecord["role"] =>
+  user.requestedRole === "docente" ? "docente" : user.role;
 
 const getApprovalBadgeClassName = (
   status: AdminDirectoryUserRecord["teacherApprovalStatus"],
@@ -50,7 +55,7 @@ const getApprovalBadgeClassName = (
   if (status === "pending") return "border-amber-200 bg-amber-50 text-amber-700";
   if (status === "rejected") return "border-rose-200 bg-rose-50 text-rose-700";
   if (status === "approved") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  return "border-slate-200 bg-slate-50 text-slate-700";
+  return "border-slate-200/60 bg-slate-50 text-slate-700";
 };
 
 const getInitials = (name: string): string => {
@@ -83,6 +88,27 @@ export default function AdminInstitutionsPage() {
     if (datasetResult.status === "fulfilled") {
       setUsers(datasetResult.value.users);
       setWarnings(datasetResult.value.warnings);
+      const institutionsWithUsers = Array.from(
+        datasetResult.value.users.reduce((collector, entry) => {
+          const label = String(entry.institutionName || "").trim();
+          if (!label || entry.institutionMissing) return collector;
+          const key = getInstitutionKey(label);
+          if (!collector.has(key)) {
+            collector.set(key, label);
+          }
+          return collector;
+        }, new Map<string, string>()),
+      ).map(([, label]) => label);
+
+      await replacePublicInstitutionSuggestions(institutionsWithUsers).catch(
+        () => {
+          setWarnings((prev) =>
+            prev.includes("Could not sync public institution catalog.")
+              ? prev
+              : [...prev, "Could not sync public institution catalog."],
+          );
+        },
+      );
     } else {
       setUsers([]);
       setWarnings(["Could not load institution directory data."]);
@@ -127,8 +153,9 @@ export default function AdminInstitutionsPage() {
 
       existing.users.push(user);
       existing.totalUsers += 1;
-      if (user.role === "docente") existing.teachers += 1;
-      if (user.role === "estudiante") existing.students += 1;
+      const effectiveRole = getEffectiveRole(user);
+      if (effectiveRole === "docente") existing.teachers += 1;
+      if (effectiveRole === "estudiante") existing.students += 1;
       if (user.teacherApprovalStatus === "pending") existing.pendingApprovals += 1;
       existing.activeCourses += user.activeCoursesCount;
       if (user.institutionOwnership && !existing.ownership.includes(user.institutionOwnership)) {
@@ -202,9 +229,9 @@ export default function AdminInstitutionsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <section className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
@@ -224,7 +251,7 @@ export default function AdminInstitutionsPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-100 text-cyan-700">
                         <School className="h-4 w-4" />
@@ -233,7 +260,7 @@ export default function AdminInstitutionsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Organizations</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <Users className="h-4 w-4" />
@@ -242,7 +269,7 @@ export default function AdminInstitutionsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Users linked</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <AlertTriangle className="h-4 w-4" />
@@ -251,7 +278,7 @@ export default function AdminInstitutionsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Missing institution</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
                         <BadgeCheck className="h-4 w-4" />
@@ -281,20 +308,20 @@ export default function AdminInstitutionsPage() {
                 </div>
               </div>
             ) : institutions.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+              <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                 <CheckCircle2 className="mx-auto h-9 w-9 text-slate-400" />
                 <p className="mt-2 text-sm font-medium text-slate-700">No institutions detected</p>
                 <p className="text-xs text-slate-500">Link users to an institution to populate this module.</p>
               </div>
             ) : (
               <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Organizations</p>
                       <p className="text-xs text-slate-500">Institution groups detected across profiles.</p>
                     </div>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                       {institutions.length} total
                     </span>
                   </div>
@@ -308,7 +335,7 @@ export default function AdminInstitutionsPage() {
                         className={`w-full rounded-xl border p-3 text-left transition-colors ${
                           institution.key === selectedInstitutionKey
                             ? "border-sky-300 bg-sky-50 shadow-sm"
-                            : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                            : "border-slate-200/60 bg-white hover:border-slate-300/60 hover:bg-slate-50"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
@@ -326,15 +353,15 @@ export default function AdminInstitutionsPage() {
                         </div>
 
                         <div className="mt-3 grid grid-cols-3 gap-1.5">
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Teachers</p>
                             <p className="text-sm font-bold text-slate-900">{institution.teachers}</p>
                           </div>
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Students</p>
                             <p className="text-sm font-bold text-slate-900">{institution.students}</p>
                           </div>
-                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Courses</p>
                             <p className="text-sm font-bold text-slate-900">{institution.activeCourses}</p>
                           </div>
@@ -346,14 +373,14 @@ export default function AdminInstitutionsPage() {
 
                 <div className="space-y-4 lg:col-span-2">
                   {selectedInstitution ? (
-                    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                       <div className="mb-3 flex items-center justify-between gap-2">
                         <div>
                           <p className="text-sm font-semibold text-slate-900">{selectedInstitution.label}</p>
                           <p className="text-xs text-slate-500">Institution detail, descriptors, and member routing.</p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                          <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                             {selectedInstitution.totalUsers} users
                           </span>
                           <Link
@@ -366,19 +393,19 @@ export default function AdminInstitutionsPage() {
                       </div>
 
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3 text-center">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Teachers</p>
                           <p className="text-lg font-bold text-slate-900">{selectedInstitution.teachers}</p>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3 text-center">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Students</p>
                           <p className="text-lg font-bold text-slate-900">{selectedInstitution.students}</p>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3 text-center">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pending</p>
                           <p className="text-lg font-bold text-slate-900">{selectedInstitution.pendingApprovals}</p>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3 text-center">
                           <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Courses</p>
                           <p className="text-lg font-bold text-slate-900">{selectedInstitution.activeCourses}</p>
                         </div>
@@ -407,7 +434,7 @@ export default function AdminInstitutionsPage() {
                         {selectedInstitution.users.map((user) => (
                           <div
                             key={user.userId}
-                            className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
+                            className="flex flex-col gap-3 rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
                           >
                             <div className="min-w-0 flex items-center gap-3">
                               <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-sm font-semibold text-slate-700">
@@ -422,7 +449,7 @@ export default function AdminInstitutionsPage() {
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-semibold text-slate-900">{user.name}</p>
                                 <p className="truncate text-xs text-slate-500">
-                                  {user.email || "No email"} • {getRoleLabel(user.role)}
+                                  {user.email || "No email"} • {getRoleLabel(getEffectiveRole(user))}
                                 </p>
                               </div>
                             </div>
@@ -453,19 +480,19 @@ export default function AdminInstitutionsPage() {
                     </article>
                   ) : null}
 
-                  <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                     <div className="mb-3 flex items-center justify-between gap-2">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">Missing Institution</p>
                         <p className="text-xs text-slate-500">Users that still need an organization assignment.</p>
                       </div>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                      <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                         {missingInstitutionUsers.length} open
                       </span>
                     </div>
 
                     {missingInstitutionUsers.length === 0 ? (
-                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5 text-center">
+                      <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-5 text-center">
                         <CheckCircle2 className="mx-auto h-9 w-9 text-emerald-500" />
                         <p className="mt-2 text-sm font-medium text-slate-700">All users have an institution</p>
                         <p className="text-xs text-slate-500">No assignment gaps detected in the current directory.</p>
@@ -475,12 +502,12 @@ export default function AdminInstitutionsPage() {
                         {missingInstitutionUsers.slice(0, 8).map((user) => (
                           <div
                             key={user.userId}
-                            className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
+                            className="flex flex-col gap-3 rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
                           >
                             <div className="min-w-0">
                               <p className="truncate text-sm font-semibold text-slate-900">{user.name}</p>
                               <p className="truncate text-xs text-slate-500">
-                                {user.email || "No email"} • {getRoleLabel(user.role)}
+                                {user.email || "No email"} • {getRoleLabel(getEffectiveRole(user))}
                               </p>
                             </div>
                             <button

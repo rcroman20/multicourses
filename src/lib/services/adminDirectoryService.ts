@@ -9,7 +9,7 @@ import {
   type TeacherPlanId,
 } from "@/lib/services/teacherPlanService";
 
-export type AdminDirectoryRole = "docente" | "estudiante" | "admin";
+export type AdminDirectoryRole = "docente" | "estudiante" | "admin" | "institucion";
 export type AdminDirectoryApprovalStatus = "pending" | "approved" | "rejected" | null;
 
 export interface AdminDirectoryUserRecord {
@@ -137,6 +137,15 @@ const normalizeRole = (value: unknown): AdminDirectoryRole | null => {
     normalized === "administrator"
   ) {
     return "admin";
+  }
+
+  if (
+    normalized === "institucion" ||
+    normalized === "institution" ||
+    normalized === "organization" ||
+    normalized === "organizacion"
+  ) {
+    return "institucion";
   }
 
   return null;
@@ -410,6 +419,8 @@ export async function getAdminDirectoryDataset(): Promise<AdminDirectoryDataset>
       const institutionWriteRole: AdminDirectoryRole =
         role === "admin"
           ? "admin"
+          : role === "institucion"
+            ? "institucion"
           : role === "docente" || requestedRole === "docente"
             ? "docente"
             : "estudiante";

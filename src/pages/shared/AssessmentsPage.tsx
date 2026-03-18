@@ -82,11 +82,11 @@ const FORUM_PRESETS: Record<Exclude<ForumPresetKey, "custom">, {
 };
 
 const modalInputClass =
-  "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-800 shadow-sm transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100";
+  "w-full rounded-xl border border-slate-200/60 bg-white px-4 py-3 text-sm font-medium text-slate-800 shadow-sm transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100";
 const modalInputDisabledClass = `${modalInputClass} disabled:bg-slate-100 disabled:text-slate-500`;
 const modalLabelClass = "mb-2 block text-sm font-semibold text-slate-700";
 const modalSecondaryButtonClass =
-  "inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50";
+  "inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200/60 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50";
 const modalPrimaryButtonClass =
   "inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 hover:shadow-md";
 
@@ -204,6 +204,33 @@ function resolveForumRequirementsFromAssessment(assessment: any) {
   };
 }
 
+function isMandatoryTeacherCourse(course: any): boolean {
+  const courseRecord = course as Record<string, unknown> | null;
+  const normalizedCode = String(course?.code || "")
+    .trim()
+    .toUpperCase();
+
+  return (
+    normalizedCode === TEACHER_ONBOARDING_COURSE_CODE ||
+    Boolean(
+      courseRecord?.isMandatory ||
+        courseRecord?.mandatory ||
+        courseRecord?.required ||
+        courseRecord?.isRequired ||
+        courseRecord?.isMandatoryForTeachers ||
+        courseRecord?.mandatoryForTeachers ||
+        courseRecord?.mandatoryTeacherCourse ||
+        courseRecord?.requiredForTeachers ||
+        courseRecord?.requiredForDocentes ||
+        courseRecord?.obligatorio ||
+        courseRecord?.obligatorioDocentes ||
+        courseRecord?.obligatorioParaDocentes ||
+        courseRecord?.onboarding ||
+        courseRecord?.isOnboarding,
+    )
+  );
+}
+
 export default function AssessmentsPage() {
   const { courseCode } = useParams<{ courseCode: string }>();
   const navigate = useNavigate();
@@ -274,24 +301,7 @@ export default function AssessmentsPage() {
     String(selectedCourse?.code || "")
       .trim()
       .toUpperCase() === TEACHER_ONBOARDING_COURSE_CODE;
-  const isMandatoryCourse =
-    isOnboardingCourse ||
-    Boolean(
-      selectedCourseRecord?.isMandatory ||
-        selectedCourseRecord?.mandatory ||
-        selectedCourseRecord?.required ||
-        selectedCourseRecord?.isRequired ||
-        selectedCourseRecord?.isMandatoryForTeachers ||
-        selectedCourseRecord?.mandatoryForTeachers ||
-        selectedCourseRecord?.mandatoryTeacherCourse ||
-        selectedCourseRecord?.requiredForTeachers ||
-        selectedCourseRecord?.requiredForDocentes ||
-        selectedCourseRecord?.obligatorio ||
-        selectedCourseRecord?.obligatorioDocentes ||
-        selectedCourseRecord?.obligatorioParaDocentes ||
-        selectedCourseRecord?.onboarding ||
-        selectedCourseRecord?.isOnboarding,
-    );
+  const isMandatoryCourse = isMandatoryTeacherCourse(selectedCourse);
   const canManageAssessments =
     isAdmin || (isTeacher && selectedCourseRecord?.teacherId === user?.id && !isMandatoryCourse);
 
@@ -964,8 +974,8 @@ const categorizedAssessments = useMemo(() => {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
-            <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
               <div className="space-y-2">
                 <AlertCircle className="mx-auto h-10 w-10 text-slate-400" />
                 <p className="text-xl font-bold text-slate-900">Please log in</p>
@@ -984,8 +994,8 @@ const categorizedAssessments = useMemo(() => {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
-            <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <div className="flex min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
               <div className="space-y-3">
                 <Book className="mx-auto h-10 w-10 text-slate-400" />
                 <p className="text-xl font-bold text-slate-900">
@@ -1017,7 +1027,7 @@ const categorizedAssessments = useMemo(() => {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="text-center space-y-2">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
@@ -1038,9 +1048,9 @@ const categorizedAssessments = useMemo(() => {
       <div className="relative overflow-x-hidden">
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
@@ -1073,7 +1083,7 @@ const categorizedAssessments = useMemo(() => {
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <CalendarDays className="h-4 w-4" />
@@ -1082,7 +1092,7 @@ const categorizedAssessments = useMemo(() => {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Today</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                         <CalendarClock className="h-4 w-4" />
@@ -1091,7 +1101,7 @@ const categorizedAssessments = useMemo(() => {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Upcoming</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 text-slate-700">
                         <CalendarOff className="h-4 w-4" />
@@ -1100,7 +1110,7 @@ const categorizedAssessments = useMemo(() => {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Past</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
                         <Calendar className="h-4 w-4" />
@@ -1113,14 +1123,14 @@ const categorizedAssessments = useMemo(() => {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.8fr_1fr_1fr]">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
                     placeholder="Search assessments..."
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
@@ -1134,7 +1144,7 @@ const categorizedAssessments = useMemo(() => {
                       const course = availableCourses.find((c) => c.id === e.target.value);
                       if (course) handleCourseChange(course);
                     }}
-                    className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                   >
                     <option value="">Select course...</option>
                     {availableCourses.map((course) => (
@@ -1149,7 +1159,7 @@ const categorizedAssessments = useMemo(() => {
                 <div className="relative">
                   <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <select
-                    className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     value={filterType}
                     onChange={(e) => setFilterType(e.target.value)}
                   >
@@ -1172,7 +1182,7 @@ const categorizedAssessments = useMemo(() => {
             </section>
 
             {assessments.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+              <div className="rounded-2xl border border-dashed border-slate-300/60 bg-slate-50 p-8 text-center">
                 <FileText className="mx-auto h-10 w-10 text-slate-400" />
                 <p className="mt-3 text-lg font-bold text-slate-900">No assessments available</p>
                 <p className="mt-1 text-sm text-slate-600">
@@ -1276,16 +1286,16 @@ const categorizedAssessments = useMemo(() => {
                     )}
 
                     {filteredPast.length > 0 && (
-                      <section className="rounded-2xl border border-slate-200 bg-slate-50/40 p-4 shadow-sm">
+                      <section className="rounded-2xl border border-slate-200/60 bg-slate-50/40 p-4 shadow-sm">
                         <button
                           type="button"
                           onClick={() => setShowCompletedAssessments((prev) => !prev)}
-                          className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-slate-300"
+                          className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-left transition hover:border-slate-300/60"
                           aria-expanded={showCompletedAssessments}
                         >
                           <div className="flex items-center gap-2">
                             <h3 className="text-base font-bold text-slate-900">Completed Assessments</h3>
-                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                            <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
                               {filteredPast.length}
                             </span>
                           </div>
@@ -1369,7 +1379,7 @@ const categorizedAssessments = useMemo(() => {
                   filteredUpcoming.length === 0 &&
                   filteredPast.length === 0 &&
                   filteredNoDueDate.length === 0 && (
-                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                    <div className="rounded-2xl border border-dashed border-slate-300/60 bg-slate-50 p-8 text-center">
                       <Search className="mx-auto h-9 w-9 text-slate-400" />
                       <p className="mt-2 text-lg font-bold text-slate-900">No matching assessments</p>
                       <p className="text-sm text-slate-600">Try different search terms or filters.</p>
@@ -1378,7 +1388,7 @@ const categorizedAssessments = useMemo(() => {
                           setSearchTerm("");
                           setFilterType("all");
                         }}
-                        className="mt-4 inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                        className="mt-4 inline-flex items-center rounded-xl border border-slate-300/60 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
                       >
                         Clear filters
                       </button>
@@ -1467,7 +1477,7 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
     if (assessment.type === "forum") {
       return "border-violet-200 bg-violet-50 text-violet-700";
     }
-    return "border-slate-200 bg-white text-slate-700";
+    return "border-slate-200/60 bg-white text-slate-700";
   };
 
   const cardToneClass = isToday
@@ -1475,10 +1485,10 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
     : isUpcoming
       ? "border-sky-200 bg-white"
       : isPast
-        ? "border-slate-200 bg-slate-50/70"
+        ? "border-slate-200/60 bg-slate-50/70"
         : noDueDate
           ? "border-violet-200 bg-violet-50/30"
-          : "border-slate-200 bg-white";
+          : "border-slate-200/60 bg-white";
 
   return (
     <div className={cn("rounded-xl border p-3 shadow-sm transition hover:shadow-md", cardToneClass)}>
@@ -1503,7 +1513,7 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
 
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 {assessment.assessmentType === "delivery" && startDate && (
-                  <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600">
+                  <div className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-white px-2 py-1 text-[11px] font-medium text-slate-600">
                     <Calendar className="h-3 w-3" />
                     <span>Starts: {format(parseISO(assessment.startDate), "MMM dd", { locale: enUS })}</span>
                   </div>
@@ -1518,7 +1528,7 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
                   </p>
                 )}
                 {assessment.percentage > 0 && (
-                  <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600">
+                  <div className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-white px-2 py-1 text-[11px] font-medium text-slate-600">
                     <Percent className="h-3 w-3" />
                     <span>{assessment.percentage}% of grade</span>
                   </div>
@@ -1532,7 +1542,7 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
         <div className="flex items-center gap-2 self-end xl:self-start">
           <Link
             to={`/courses/${courseCode}/assessments/${assessment.id}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200/60 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50"
           >
             <Eye className="h-4 w-4" />
             <span>View details</span>
@@ -1542,7 +1552,7 @@ function AssessmentCard({ assessment, courseCode, isTeacher, onEdit, onDelete, i
             <div className="inline-flex items-center gap-1">
               <button
                 onClick={onEdit}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-white text-slate-600 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
                 title="Edit"
               >
                 <Edit className="h-4 w-4" />
@@ -1599,7 +1609,7 @@ function RichTextEditor({
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/60 bg-slate-50 p-2">
         <button
           type="button"
           className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100"
@@ -1674,7 +1684,7 @@ function RichTextEditor({
         <textarea
           name={name}
           rows={5}
-          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+          className="w-full rounded-xl border border-slate-200/60 bg-slate-50 px-4 py-3 text-sm font-medium focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
           placeholder={placeholder}
           value={value}
           onChange={(event) => emitValue(event.target.value)}
@@ -1684,7 +1694,7 @@ function RichTextEditor({
           ref={editorRef}
           contentEditable
           onInput={(event) => emitValue((event.target as HTMLDivElement).innerHTML)}
-          className="min-h-[120px] w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
+          className="min-h-[120px] w-full rounded-xl border border-slate-200/60 bg-slate-50 px-4 py-3 text-sm font-medium focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100"
           data-placeholder={placeholder}
           suppressContentEditableWarning
         />
@@ -1695,8 +1705,16 @@ function RichTextEditor({
 }
 
 function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmit, onClose }: any) {
+  const assignableCourses = useMemo(
+    () => (availableCourses || []).filter((course: any) => !isMandatoryTeacherCourse(course)),
+    [availableCourses],
+  );
   const [formData, setFormData] = useState({
-    targetCourseIds: [courseId],
+    targetCourseIds: isMandatoryTeacherCourse(
+      (availableCourses || []).find((course: any) => course.id === courseId),
+    )
+      ? []
+      : [courseId],
     name: "",
     description: "",
     type: "exam",
@@ -1752,12 +1770,20 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
   useEffect(() => {
     setFormData((prev) => ({
       ...prev,
-      targetCourseIds:
-        Array.isArray(prev.targetCourseIds) && prev.targetCourseIds.length > 0
-          ? prev.targetCourseIds
-          : [courseId],
+      targetCourseIds: (() => {
+        const current = Array.isArray(prev.targetCourseIds)
+          ? prev.targetCourseIds.filter((targetId) =>
+              assignableCourses.some((course: any) => course.id === targetId),
+            )
+          : [];
+
+        if (current.length > 0) return current;
+        if (assignableCourses.some((course: any) => course.id === courseId)) return [courseId];
+        if (assignableCourses[0]?.id) return [assignableCourses[0].id];
+        return [];
+      })(),
     }));
-  }, [courseId]);
+  }, [assignableCourses, courseId]);
 
   useEffect(() => {
     const loadGradeSheets = async () => {
@@ -1878,8 +1904,8 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-        <div className="relative border-b border-slate-200 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 p-6">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+        <div className="relative border-b border-slate-200/60 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 p-6">
           <div className="pointer-events-none absolute -left-10 -top-16 h-28 w-28 rounded-full bg-sky-200/45 blur-2xl" />
           <div className="pointer-events-none absolute -bottom-12 right-0 h-24 w-24 rounded-full bg-indigo-200/40 blur-xl" />
           <div className="relative flex items-center justify-between">
@@ -1933,17 +1959,17 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
 
             <div className="lg:col-span-2">
               <label className={modalLabelClass}>Assign To Courses *</label>
-              <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-2">
-                {(availableCourses || []).map((course: any) => (
+              <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto rounded-xl border border-slate-200/60 bg-slate-50 p-3 md:grid-cols-2">
+                {assignableCourses.map((course: any) => (
                   <label
                     key={course.id}
-                    className="flex items-start gap-2 p-2 rounded-lg hover:bg-white cursor-pointer border border-transparent hover:border-slate-200"
+                    className="flex items-start gap-2 p-2 rounded-lg hover:bg-white cursor-pointer border border-transparent hover:border-slate-200/60"
                   >
                     <input
                       type="checkbox"
                       checked={selectedTargetCourseIds.includes(course.id)}
                       onChange={() => handleToggleTargetCourse(course.id)}
-                      className="mt-1 h-4 w-4 rounded border-slate-300 text-sky-600"
+                      className="mt-1 h-4 w-4 rounded border-slate-300/60 text-sky-600"
                     />
                     <span className="text-sm text-slate-700">
                       <span className="font-semibold text-slate-900">{course.name}</span>
@@ -2146,7 +2172,7 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
                         name="mapGradeSheetByTitle"
                         checked={Boolean(formData.mapGradeSheetByTitle)}
                         onChange={handleChange}
-                        className="h-4 w-4 rounded border-slate-300 text-sky-600"
+                        className="h-4 w-4 rounded border-slate-300/60 text-sky-600"
                       />
                       Link grade sheet by the same title in each selected course
                     </label>
@@ -2266,7 +2292,7 @@ function CreateAssessmentModal({ courseId, courseName, availableCourses, onSubmi
 
           </div>
 
-          <div className="mt-6 flex gap-3 border-t border-slate-200 pt-6">
+          <div className="mt-6 flex gap-3 border-t border-slate-200/60 pt-6">
             <button
               type="button"
               onClick={onClose}
@@ -2421,8 +2447,8 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-        <div className="relative border-b border-slate-200 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 p-6">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+        <div className="relative border-b border-slate-200/60 bg-gradient-to-r from-sky-50 via-indigo-50/70 to-violet-50 p-6">
           <div className="pointer-events-none absolute -left-10 -top-16 h-28 w-28 rounded-full bg-sky-200/45 blur-2xl" />
           <div className="pointer-events-none absolute -bottom-12 right-0 h-24 w-24 rounded-full bg-indigo-200/40 blur-xl" />
           <div className="relative flex items-center justify-between">
@@ -2735,7 +2761,7 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 
           </div>
 
-          <div className="mt-6 flex gap-3 border-t border-slate-200 pt-6">
+          <div className="mt-6 flex gap-3 border-t border-slate-200/60 pt-6">
             <button
               type="button"
               onClick={onClose}
@@ -2774,7 +2800,7 @@ function EditAssessmentModal({ assessment, courseId, onSubmit, onClose }: any) {
 function DeleteConfirmationModal({ title, message, onConfirm, onCancel }: any) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+      <div className="w-full max-w-md rounded-3xl border border-slate-200/60 bg-white p-6 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
         <div className="text-center">
           <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-2xl border border-red-100 bg-red-50">
             <AlertCircle className="h-10 w-10 text-red-500" />

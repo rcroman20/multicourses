@@ -182,6 +182,43 @@ const toFiniteNumber = (value: unknown): number | null => {
   return null;
 };
 
+const normalizeText = (value: unknown): string =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+const getActivityGradeValue = (
+  grades: Record<string, { value?: number | null }> = {},
+  activity: Activity,
+): number | null => {
+  const directCandidates = [activity.id, activity.name]
+    .map((key) => String(key || "").trim())
+    .filter(Boolean);
+
+  for (const key of directCandidates) {
+    const parsed = toFiniteNumber(grades?.[key]?.value);
+    if (parsed !== null) return parsed;
+  }
+
+  const normalizedEntries = new Map<string, { value?: number | null }>();
+  Object.entries(grades).forEach(([key, value]) => {
+    const normalizedKey = normalizeText(key).replace(/\s+/g, " ");
+    if (normalizedKey) normalizedEntries.set(normalizedKey, value);
+  });
+
+  for (const candidate of directCandidates) {
+    const normalizedCandidate = normalizeText(candidate).replace(/\s+/g, " ");
+    if (!normalizedCandidate) continue;
+    const matched = normalizedEntries.get(normalizedCandidate);
+    const parsed = toFiniteNumber(matched?.value);
+    if (parsed !== null) return parsed;
+  }
+
+  return null;
+};
+
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
@@ -308,7 +345,7 @@ const calculateNormalizedTotal = (
   let gradedActivities = 0;
 
   for (const activity of activities) {
-    const rawValue = toFiniteNumber(grades?.[activity.id]?.value);
+    const rawValue = getActivityGradeValue(grades, activity);
     if (rawValue === null) continue;
 
     const activityMax = toFiniteNumber(activity.maxScore);
@@ -329,7 +366,7 @@ const determineStudentStatus = (
   activities: Activity[]
 ): StudentGrade["status"] => {
   const gradedActivities = activities.filter((activity) => {
-    const gradeValue = toFiniteNumber(grades?.[activity.id]?.value);
+    const gradeValue = getActivityGradeValue(grades, activity);
     return gradeValue !== null;
   }).length;
 
@@ -991,6 +1028,10 @@ export default function GradeSheetsPage() {
       let firstTermSimpleCount = 0;
       let secondTermSimpleSum = 0;
       let secondTermSimpleCount = 0;
+      let firstTermAggregateSum = 0;
+      let firstTermAggregateUnits = 0;
+      let secondTermAggregateSum = 0;
+      let secondTermAggregateUnits = 0;
       let firstTermWeightedSum = 0;
       let firstTermWeight = 0;
       let secondTermWeightedSum = 0;
@@ -1002,14 +1043,25 @@ export default function GradeSheetsPage() {
         );
 
         if (studentInSheet) {
-          const hasAtLeastOneGrade = Object.values(studentInSheet.grades || {}).some(
-            (grade: any) => toFiniteNumber(grade?.value) !== null
+          const hasAtLeastOneGrade = (sheet.activities || []).some(
+            (activity) =>
+              getActivityGradeValue(studentInSheet.grades || {}, activity) !== null
           );
 
           const normalizedTotal = calculateNormalizedTotal(
             studentInSheet.grades || {},
             sheet.activities || []
           );
+          const gradedActivityCount = (sheet.activities || []).filter(
+            (activity) =>
+              getActivityGradeValue(studentInSheet.grades || {}, activity) !== null
+          ).length;
+          const aggregationUnits =
+            gradedActivityCount > 0
+              ? gradedActivityCount
+              : Array.isArray(sheet.activities) && sheet.activities.length > 0
+                ? sheet.activities.length
+                : 1;
 
           studentAvg.averages[sheet.id] = normalizedTotal;
 
@@ -1023,6 +1075,8 @@ export default function GradeSheetsPage() {
             if (supportedTerm === "1st Term") {
               firstTermSimpleSum += normalizedTotal;
               firstTermSimpleCount += 1;
+              firstTermAggregateSum += normalizedTotal * aggregationUnits;
+              firstTermAggregateUnits += aggregationUnits;
               if (sheetWeightFactor > 0) {
                 firstTermWeightedSum += normalizedTotal * sheetWeightFactor;
                 firstTermWeight += sheetWeightFactor;
@@ -1032,6 +1086,8 @@ export default function GradeSheetsPage() {
             if (supportedTerm === "2nd Term") {
               secondTermSimpleSum += normalizedTotal;
               secondTermSimpleCount += 1;
+              secondTermAggregateSum += normalizedTotal * aggregationUnits;
+              secondTermAggregateUnits += aggregationUnits;
               if (sheetWeightFactor > 0) {
                 secondTermWeightedSum += normalizedTotal * sheetWeightFactor;
                 secondTermWeight += sheetWeightFactor;
@@ -1047,9 +1103,13 @@ export default function GradeSheetsPage() {
       studentAvg.firstTermAverage = hasWeightedSheets
         ? firstTermWeight > 0
           ? firstTermWeightedSum / firstTermWeight
+          : firstTermAggregateUnits > 0
+          ? firstTermAggregateSum / firstTermAggregateUnits
           : firstTermSimpleCount > 0
           ? firstTermSimpleSum / firstTermSimpleCount
           : 0
+        : firstTermAggregateUnits > 0
+        ? firstTermAggregateSum / firstTermAggregateUnits
         : firstTermSimpleCount > 0
         ? firstTermSimpleSum / firstTermSimpleCount
         : 0;
@@ -1057,9 +1117,13 @@ export default function GradeSheetsPage() {
       studentAvg.secondTermAverage = hasWeightedSheets
         ? secondTermWeight > 0
           ? secondTermWeightedSum / secondTermWeight
+          : secondTermAggregateUnits > 0
+          ? secondTermAggregateSum / secondTermAggregateUnits
           : secondTermSimpleCount > 0
           ? secondTermSimpleSum / secondTermSimpleCount
           : 0
+        : secondTermAggregateUnits > 0
+        ? secondTermAggregateSum / secondTermAggregateUnits
         : secondTermSimpleCount > 0
         ? secondTermSimpleSum / secondTermSimpleCount
         : 0;
@@ -1767,9 +1831,9 @@ export default function GradeSheetsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="flex flex-col gap-3">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
               <div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1811,9 +1875,9 @@ export default function GradeSheetsPage() {
               </div>
             )}
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
               <div className="grid grid-cols-2 gap-2 md:gap-2.5 lg:grid-cols-5">
-                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                <div className="rounded-xl border border-slate-200/60 bg-white p-2.5">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="mb-1 text-center text-xs font-semibold tracking-wide text-slate-500 md:text-left">
@@ -1829,7 +1893,7 @@ export default function GradeSheetsPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                <div className="rounded-xl border border-slate-200/60 bg-white p-2.5">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="mb-1 text-center text-xs font-semibold tracking-wide text-slate-500 md:text-left">
@@ -1845,7 +1909,7 @@ export default function GradeSheetsPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                <div className="rounded-xl border border-slate-200/60 bg-white p-2.5">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="mb-1 text-center text-xs font-semibold tracking-wide text-slate-500 md:text-left">
@@ -1861,7 +1925,7 @@ export default function GradeSheetsPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                <div className="rounded-xl border border-slate-200/60 bg-white p-2.5">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="mb-1 text-center text-xs font-semibold tracking-wide text-slate-500 md:text-left">
@@ -1877,7 +1941,7 @@ export default function GradeSheetsPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                <div className="rounded-xl border border-slate-200/60 bg-white p-2.5">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="mb-1 text-center text-xs font-semibold tracking-wide text-slate-500 md:text-left">
@@ -1895,7 +1959,7 @@ export default function GradeSheetsPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex flex-1 flex-col gap-3 sm:flex-row">
                   <div className="flex-1">
@@ -1906,7 +1970,7 @@ export default function GradeSheetsPage() {
                         placeholder="Search sheets by title, course, or teacher..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium text-slate-700 transition-all focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                        className="w-full rounded-xl border border-slate-200/60 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium text-slate-700 transition-all focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                       />
                     </div>
                   </div>
@@ -1916,7 +1980,7 @@ export default function GradeSheetsPage() {
                     <select
                       value={selectedCourseFilter}
                       onChange={(e) => setSelectedCourseFilter(e.target.value)}
-                      className="h-12 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-10 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-12 w-full appearance-none rounded-xl border border-slate-300/60 bg-white pl-10 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     >
                       <option value="all">All courses</option>
                       {courses.map((course) => (
@@ -1933,7 +1997,7 @@ export default function GradeSheetsPage() {
                   <button
                     onClick={() => setShowAveragesSection(!showAveragesSection)}
                     className={cn(
-                      "inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50",
+                      "inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50",
                       showAveragesSection &&
                         "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100",
                     )}
@@ -1966,7 +2030,7 @@ export default function GradeSheetsPage() {
           </div>
         )}
         {showAveragesSection && studentAverages.length > 0 && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center">
@@ -1994,7 +2058,7 @@ export default function GradeSheetsPage() {
                         e.target.value as "term" | "sheet" | "both",
                       )
                     }
-                    className="h-9 rounded-xl border border-slate-200 bg-white px-3 pr-8 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-9 rounded-xl border border-slate-200/60 bg-white px-3 pr-8 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                   >
                     <option value="term">Average by term</option>
                     <option value="sheet">Grades by sheet</option>
@@ -2006,7 +2070,7 @@ export default function GradeSheetsPage() {
                   <select
                     value={selectedAveragesTerm}
                     onChange={(e) => setSelectedAveragesTerm(e.target.value)}
-                    className="h-9 rounded-xl border border-slate-200 bg-white px-3 pr-8 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-9 rounded-xl border border-slate-200/60 bg-white px-3 pr-8 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                   >
                     <option value="all">All terms</option>
                     {averagesTermOptions.map((term) => (
@@ -2019,7 +2083,7 @@ export default function GradeSheetsPage() {
                 </div>
                 <button
                   onClick={exportAveragesToExcel}
-                  className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <Download className="h-4 w-4" />
                   Export Excel
@@ -2027,8 +2091,8 @@ export default function GradeSheetsPage() {
               </div>
             </div>
 
-            <div className="overflow-x-auto border border-gray-200 rounded-xl gs-table-scroll">
-              <table className="w-full table-modern gs-table gs-averages-table">
+            <div className="overflow-x-auto rounded-xl border border-gray-200/60 [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar]:h-2">
+              <table className="w-full table-modern">
                 <thead>
                   <tr className="bg-slate-50/80">
                     <th className="py-3 px-4 text-left font-bold text-gray-900 tracking-wide">
@@ -2174,7 +2238,7 @@ export default function GradeSheetsPage() {
               </table>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3 gs-metric-grid">
+            <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4 [&>*]:min-w-0">
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
                 <div className="text-xs font-semibold text-blue-600 mb-1">
                   Students Passeds
@@ -2206,7 +2270,7 @@ export default function GradeSheetsPage() {
                 </div>
               </div>
 
-              <div className="bg-gray-100 border border-gray-200 rounded-xl p-3">
+              <div className="bg-gray-100 border border-gray-200/60 rounded-xl p-3">
                 <div className="text-xs font-semibold text-gray-700 mb-1">
                   Lowest average
                 </div>
@@ -2245,10 +2309,10 @@ export default function GradeSheetsPage() {
         {currentSheet && (
           <div
             ref={currentSheetSectionRef}
-            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+            className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm"
           >
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-200 gs-sheet-head">
-              <div className="flex items-center gap-4 gs-sheet-title-wrap">
+            <div className="mb-4 flex items-start justify-between gap-2 border-b border-gray-200/60 pb-3">
+              <div className="flex min-w-0 flex-1 items-center gap-4">
                 <div className="h-8 w-8 rounded-xl bg-emerald-100 flex items-center justify-center">
                   <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
                 </div>
@@ -2256,7 +2320,7 @@ export default function GradeSheetsPage() {
                   <h3 className="font-bold text-xl text-gray-900">
                     {currentSheet.title}
                   </h3>
-                  <div className="flex items-center gap-3 mt-1 gs-sheet-meta">
+                  <div className="mt-1 flex flex-wrap items-center gap-3">
                     <span className="text-sm text-gray-600">
                       {currentSheet.courseName}
                     </span>
@@ -2278,10 +2342,10 @@ export default function GradeSheetsPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 gs-sheet-actions">
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
                 <button
                   onClick={() => setShowAddActivityModal(true)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   title={
                     currentSheet.isPublished
                       ? "This sheet is published. New activities will remain unpublished until you publish again."
@@ -2295,7 +2359,7 @@ export default function GradeSheetsPage() {
                 {!currentSheet.isPublished && (
                   <button
                     onClick={publishGradeSheet}
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     <Eye className="h-4 w-4" />
                     Publish
@@ -2304,7 +2368,7 @@ export default function GradeSheetsPage() {
 
                 <button
                   onClick={exportToCSV}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <Download className="h-4 w-4" />
                   CSV
@@ -2318,11 +2382,11 @@ export default function GradeSheetsPage() {
               </div>
             </div>
 
-            <div className="overflow-x-auto border border-gray-200 rounded-xl gs-table-scroll gs-sheet-table-scroll">
-              <table className="w-full min-w-[800px] gs-sheet-table">
+            <div className="overflow-x-auto rounded-xl border border-gray-200/60 [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar]:h-2">
+              <table className="w-full min-w-[760px]">
                 <thead>
                   <tr className="bg-slate-50/80">
-                    <th className="sticky left-0 z-20 bg-blue-50 border-r border-gray-200 px-3 py-3 text-left font-bold text-gray-900 tracking-wide min-w-[200px]">
+                    <th className="sticky left-0 z-20 bg-blue-50 border-r border-gray-200/60 px-3 py-3 text-left font-bold text-gray-900 tracking-wide min-w-[200px]">
                       <div className="flex items-center justify-between">
                         <span>Student</span>
                         <span className="text-xs font-medium text-gray-500">
@@ -2338,7 +2402,7 @@ export default function GradeSheetsPage() {
                       return (
                         <th
                           key={activity.id}
-                          className="px-3 py-3 text-left font-bold text-gray-900 tracking-wide border-b border-gray-200 min-w-[140px]"
+                          className="px-3 py-3 text-left font-bold text-gray-900 tracking-wide border-b border-gray-200/60 min-w-[140px]"
                         >
                           <div className="flex flex-col gap-1">
                             <div className="flex items-start justify-between">
@@ -2398,13 +2462,13 @@ export default function GradeSheetsPage() {
                       );
                     })}
 
-                    <th className="px-3 py-3 text-left font-bold text-gray-900 tracking-wide border-b border-gray-200 bg-blue-50 min-w-[100px]">
+                    <th className="px-3 py-3 text-left font-bold text-gray-900 tracking-wide border-b border-gray-200/60 bg-blue-50 min-w-[100px]">
                       <div className="text-center">
                         <div className="text-sm font-bold">Total</div>
                         <div className="text-xs text-gray-500">0-5.0</div>
                       </div>
                     </th>
-                    <th className="px-3 py-3 text-left font-bold text-gray-900 tracking-wide border-b border-gray-200 bg-blue-50 min-w-[100px]">
+                    <th className="px-3 py-3 text-left font-bold text-gray-900 tracking-wide border-b border-gray-200/60 bg-blue-50 min-w-[100px]">
                       <div className="text-center">
                         <div className="text-sm font-bold">Status</div>
                       </div>
@@ -2693,7 +2757,7 @@ const StudentGradeCell = ({
                       return (
                       <td
       key={activity.id}
-      className="px-3 py-2 border-b border-gray-200"
+      className="px-3 py-2 border-b border-gray-200/60"
     >
       <div className="flex flex-col gap-1">
         <div className="relative" onDoubleClick={handleDoubleClick}>
@@ -2713,11 +2777,11 @@ const StudentGradeCell = ({
                 ? "bg-blue-50 border-blue-200 text-blue-700 font-semibold cursor-pointer"
                 : hasGrade
                 ? "bg-blue-50 border-blue-200 text-blue-700"
-                : "border-gray-200 hover:border-blue-500",
+                : "border-gray-200/60 hover:border-blue-500",
               isEditing && canEditValue
                 ? "ring-2 ring-blue-500 ring-opacity-50"
                 : "",
-              currentSheet.isPublished ? "border-gray-200" : ""
+              currentSheet.isPublished ? "border-gray-200/60" : ""
             )}
             placeholder={`0-${activity.maxScore}`}
             readOnly={!canEditValue}
@@ -2816,8 +2880,8 @@ const StudentGradeCell = ({
             className={cn(
               "w-full px-2 py-1.5 text-xs border rounded-lg transition-all",
               currentSheet.isPublished
-                ? "border-gray-200 bg-gray-100"
-                : "border-gray-200 focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                ? "border-gray-200/60 bg-gray-100"
+                : "border-gray-200/60 focus:ring-1 focus:ring-blue-500 focus:border-transparent"
             )}
             placeholder="Comment..."
             maxLength={100}
@@ -2846,7 +2910,7 @@ const StudentGradeCell = ({
 
                     return (
                       <tr key={student.studentId} className="hover:bg-slate-50/80">
-                        <td className="sticky left-0 z-10 bg-white border-r border-gray-200 px-3 py-3">
+                        <td className="sticky left-0 z-10 bg-white border-r border-gray-200/60 px-3 py-3">
                           <div className="flex items-center gap-3">
                             <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
                               <span className="text-sm font-bold text-blue-600">
@@ -2871,7 +2935,7 @@ const StudentGradeCell = ({
                           />
                         ))}
 
-                        <td className="px-3 py-2 border-b border-gray-200 bg-blue-50">
+                        <td className="px-3 py-2 border-b border-gray-200/60 bg-blue-50">
                           <div className="text-center">
                             <span
                               className={cn(
@@ -2891,7 +2955,7 @@ const StudentGradeCell = ({
                           </div>
                         </td>
 
-                        <td className="px-3 py-2 border-b border-gray-200 bg-blue-50">
+                        <td className="px-3 py-2 border-b border-gray-200/60 bg-blue-50">
                           <div className="flex justify-center">
                             <span
                               className={cn(
@@ -2925,7 +2989,7 @@ const StudentGradeCell = ({
               </table>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 gs-metric-grid">
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3 [&>*]:min-w-0">
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
                 <div className="text-xs font-semibold text-blue-600 mb-1">
                   Overall average
@@ -2955,7 +3019,7 @@ const StudentGradeCell = ({
                 </div>
               </div>
 
-              <div className="bg-gray-100 border border-gray-200 rounded-xl p-3">
+              <div className="bg-gray-100 border border-gray-200/60 rounded-xl p-3">
                 <div className="text-xs font-semibold text-gray-700 mb-1">
                   Activities to grade
                 </div>
@@ -2986,7 +3050,7 @@ const StudentGradeCell = ({
             </div>
           </div>
         )}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
           {isLoading ? (
             <div className="text-center py-8">
               <div className="inline-block animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mb-2"></div>
@@ -3016,8 +3080,8 @@ const StudentGradeCell = ({
               </button>
             </div>
           ) : (
-            <div className="overflow-x-auto gs-table-scroll">
-              <table className="w-full table-modern gs-table">
+            <div className="overflow-x-auto [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar]:h-2">
+              <table className="w-full table-modern">
                 <thead>
                   <tr className="bg-slate-50/80">
                     <th className="py-3 px-4 text-left font-bold text-gray-900 tracking-wide">
@@ -3050,7 +3114,7 @@ const StudentGradeCell = ({
                             <button
                               type="button"
                               onClick={() => toggleTermDropdown(group.term)}
-                              className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-left transition hover:bg-slate-50"
+                              className="flex w-full items-center justify-between rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-left transition hover:bg-slate-50"
                             >
                               <div className="flex items-center gap-2">
                                 <ChevronDown
@@ -3182,14 +3246,14 @@ const StudentGradeCell = ({
         </div>
         {showNewSheetModal && (
           <div
-            className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px] gs-modal-overlay"
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px]"
             onClick={() => setShowNewSheetModal(false)}
           >
             <div
-              className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)] gs-modal gs-modal-lg"
+              className="max-h-[90vh] w-full max-w-[54rem] overflow-y-auto rounded-2xl border border-slate-200/60 bg-white p-4 shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)]"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="mb-4 flex items-center justify-between border-b border-slate-200/60 pb-3">
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100">
                     <Plus className="h-4 w-4 text-sky-600" />
@@ -3205,7 +3269,7 @@ const StudentGradeCell = ({
                 </div>
                 <button
                   onClick={() => setShowNewSheetModal(false)}
-                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                  className="rounded-lg border border-slate-200/60 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -3223,7 +3287,7 @@ const StudentGradeCell = ({
                       setNewSheet({ ...newSheet, title: e.target.value })
                     }
                     placeholder="Ex: Math grades Q1"
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-10 w-full rounded-xl border border-slate-300/60 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     required
                   />
                 </div>
@@ -3244,7 +3308,7 @@ const StudentGradeCell = ({
                           courseName: course?.name || "",
                         });
                       }}
-                      className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full rounded-xl border border-slate-300/60 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                       required
                     >
                       <option value="">Select a course</option>
@@ -3268,7 +3332,7 @@ const StudentGradeCell = ({
                           gradingPeriod: e.target.value as any,
                         })
                       }
-                      className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full rounded-xl border border-slate-300/60 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                       required
                     >
                       <option value="1st Term">First Term</option>
@@ -3295,7 +3359,7 @@ const StudentGradeCell = ({
                     </span>
                   </div>
 
-                  <div className="mb-3 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-5">
+                  <div className="mb-3 grid grid-cols-1 gap-3 rounded-xl border border-slate-200/60 bg-slate-50 p-3 md:grid-cols-5">
                     <div className="md:col-span-3">
                       <label className="mb-1.5 block text-xs font-semibold text-slate-700">
                         Name *
@@ -3310,7 +3374,7 @@ const StudentGradeCell = ({
                         })
                       }
                       placeholder="Midterm exam"
-                      className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full rounded-xl border border-slate-300/60 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                       required
                     />
                     </div>
@@ -3327,7 +3391,7 @@ const StudentGradeCell = ({
                           type: e.target.value as any,
                         })
                       }
-                      className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full rounded-xl border border-slate-300/60 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                       required
                     >
                         <option value="exam">Exam</option>
@@ -3392,11 +3456,11 @@ const StudentGradeCell = ({
                   )}
                 </div>
 
-                <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
+                <div className="flex items-center justify-end gap-2 border-t border-slate-200/60 pt-3">
                   <button
                     type="button"
                     onClick={() => setShowNewSheetModal(false)}
-                    className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="inline-flex items-center rounded-lg border border-slate-200/60 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     Cancel
                   </button>
@@ -3424,7 +3488,7 @@ const StudentGradeCell = ({
         )}
         {showAddActivityModal && currentSheet && (
           <div
-            className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px] gs-modal-overlay"
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px]"
             onClick={() => {
               setShowAddActivityModal(false);
               setNewActivityForCurrentSheet({
@@ -3436,10 +3500,10 @@ const StudentGradeCell = ({
             }}
           >
             <div
-              className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)] gs-modal"
+              className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200/60 bg-white p-4 shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)]"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="mb-4 flex items-center justify-between border-b border-slate-200/60 pb-3">
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100">
                     <Plus className="h-4 w-4 text-sky-600" />
@@ -3463,7 +3527,7 @@ const StudentGradeCell = ({
                       description: "",
                     });
                   }}
-                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                  className="rounded-lg border border-slate-200/60 bg-white p-1.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -3484,7 +3548,7 @@ const StudentGradeCell = ({
                       })
                     }
                     placeholder="Ex: Final presentation"
-                    className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                    className="h-10 w-full rounded-xl border border-slate-300/60 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     required
                   />
                 </div>
@@ -3502,7 +3566,7 @@ const StudentGradeCell = ({
                         type: e.target.value as any,
                       })
                     }
-                      className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full rounded-xl border border-slate-300/60 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     >
                       <option value="exam">Exam</option>
                       <option value="quiz">Quiz</option>
@@ -3533,7 +3597,7 @@ const StudentGradeCell = ({
                             maxScore: parseFloat(e.target.value) || 5.0,
                           })
                         }
-                        className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-3 pr-12 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                        className="h-10 w-full rounded-xl border border-slate-300/60 bg-white pl-3 pr-12 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                       />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">
                         /5.0
@@ -3576,7 +3640,7 @@ const StudentGradeCell = ({
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-3">
+                <div className="flex items-center justify-end gap-2 border-t border-slate-200/60 pt-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -3588,7 +3652,7 @@ const StudentGradeCell = ({
                         description: "",
                       }); 
                     }}
-                    className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="inline-flex items-center rounded-lg border border-slate-200/60 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     Cancel
                   </button> 

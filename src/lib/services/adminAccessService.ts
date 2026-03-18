@@ -2,7 +2,7 @@ import { collection, doc, getDoc, getDocs, limit, query, setDoc, where } from "f
 import { firebaseDB } from "@/lib/firebase";
 
 const OWNER_ADMIN_EMAIL = "rcroman20@gmail.com";
-const ADMIN_EMAILS_STORAGE_KEY = "multicourses:extra-admin-emails";
+const ADMIN_EMAILS_STORAGE_KEY = "socrattica:extra-admin-emails";
 const ADMIN_ACCESS_DOC_PATH = ["adminConfig", "access"] as const;
 export const ADMIN_EMAILS_CHANGED_EVENT = "admin-emails-changed";
 

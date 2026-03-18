@@ -1022,7 +1022,7 @@ export default function StatsPage() {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[400px] items-center justify-center">
               <div className="text-center">
                 <div className="h-20 w-20 mx-auto mb-4 rounded-2xl bg-slate-100 flex items-center justify-center">
@@ -1048,7 +1048,7 @@ export default function StatsPage() {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[400px] items-center justify-center">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-500 mx-auto"></div>
@@ -1075,10 +1075,10 @@ export default function StatsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative flex flex-col gap-3 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
 
           <div className="flex flex-col gap-3">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-3 sm:p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-3 sm:p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-[70px] -top-[90px] h-[180px] w-[180px] rounded-full bg-sky-300/25" />
               <div className="pointer-events-none absolute -right-[90px] -bottom-[90px] h-[200px] w-[200px] rounded-full bg-violet-300/20" />
 
@@ -1100,7 +1100,7 @@ export default function StatsPage() {
                   </p>
 
                   <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
-                    <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                       <p className="text-[11px] font-semibold leading-4 text-slate-500">Students</p>
                       <div className="mt-1 flex items-center gap-1.5">
                         <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
@@ -1109,7 +1109,7 @@ export default function StatsPage() {
                         <p className="text-lg font-extrabold leading-5 text-slate-900">{scopedStudents}</p>
                       </div>
                     </div>
-                    <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                       <p className="text-[11px] font-semibold leading-4 text-slate-500">Average</p>
                       <div className="mt-1 flex items-center gap-1.5">
                         <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
@@ -1120,7 +1120,7 @@ export default function StatsPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                       <p className="text-[11px] font-semibold leading-4 text-slate-500">Assessments</p>
                       <div className="mt-1 flex items-center gap-1.5">
                         <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
@@ -1129,7 +1129,7 @@ export default function StatsPage() {
                         <p className="text-lg font-extrabold leading-5 text-slate-900">{scopedAssessments}</p>
                       </div>
                     </div>
-                    <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5">
+                    <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                       <p className="text-[11px] font-semibold leading-4 text-slate-500">Grade Sheets</p>
                       <div className="mt-1 flex items-center gap-1.5">
                         <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
@@ -1141,10 +1141,10 @@ export default function StatsPage() {
                   </div>
                 </div>
 
-                <aside className="rounded-2xl border border-slate-200 bg-white/90 p-3 shadow-sm">
+                <aside className="rounded-2xl border border-slate-200/60 bg-white/90 p-3 shadow-sm">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-slate-900">Scope</p>
-                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                    <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                       {selectedCourse === "all"
                         ? `${courseStats.length} courses`
                         : selectedCourseStats?.courseCode || selectedCourseMeta?.code || "Course"}
@@ -1161,7 +1161,7 @@ export default function StatsPage() {
                           setSelectedCourseId(nextCourse);
                         }
                       }}
-                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     >
                       <option value="all">All courses</option>
                       {courseStats.map((course) => (
@@ -1174,13 +1174,13 @@ export default function StatsPage() {
                   </div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                    <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Passing</p>
                       <p className="mt-1 text-base font-extrabold leading-none text-emerald-700">
                         {selectedCourseStats ? selectedCourseStats.passingCount : totalPassing}
                       </p>
                     </div>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                    <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Approval</p>
                       <p className="mt-1 text-base font-extrabold leading-none text-sky-700">
                         {(selectedCourseStats ? selectedCourseApprovalRate : approvalRate).toFixed(0)}%
@@ -1194,7 +1194,7 @@ export default function StatsPage() {
         {selectedCourse !== "all" && selectedCourseStats && (
           <>
             <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-5">
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Code</p>
@@ -1256,7 +1256,7 @@ export default function StatsPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center">
@@ -1337,7 +1337,7 @@ export default function StatsPage() {
                 )}
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-xl bg-violet-100 flex items-center justify-center">
@@ -1412,7 +1412,7 @@ export default function StatsPage() {
               </div>
             </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-xl bg-indigo-100 flex items-center justify-center">
@@ -1516,9 +1516,9 @@ export default function StatsPage() {
               )}
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] xl:gap-5">
-                <section className="space-y-3 xl:border-r xl:border-slate-200 xl:pr-5">
+                <section className="space-y-3 xl:border-r xl:border-slate-200/60 xl:pr-5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-3">
                       <div className="h-9 w-9 rounded-xl bg-cyan-100 flex items-center justify-center">
@@ -1536,7 +1536,7 @@ export default function StatsPage() {
                     <select
                       value={selectedStudentId}
                       onChange={(e) => setSelectedStudentId(e.target.value)}
-                      className="min-h-[2.25rem] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 sm:w-auto"
+                      className="min-h-[2.25rem] w-full rounded-lg border border-slate-300/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 sm:w-auto"
                     >
                       {selectedCourseStudents.map((student) => (
                         <option key={student.studentId} value={student.studentId}>
@@ -1550,19 +1550,19 @@ export default function StatsPage() {
                   {gradeTrendData.length > 0 ? (
                     <div className="space-y-3">
                       <div className="grid grid-cols-2 gap-2">
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Items</p>
                           <p className="mt-1 text-base font-bold text-slate-900">{gradeTrendSummary.items}</p>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Student Avg</p>
                           <p className="mt-1 text-base font-bold text-cyan-700">{gradeTrendSummary.studentAvg.toFixed(2)}</p>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Course Avg</p>
                           <p className="mt-1 text-base font-bold text-indigo-700">{gradeTrendSummary.courseAvg.toFixed(2)}</p>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Delta</p>
                           <p
                             className={cn(
@@ -1650,7 +1650,7 @@ export default function StatsPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5 text-center">
+                    <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-5 text-center">
                       <p className="text-sm font-semibold text-slate-700">No trend data available yet.</p>
                       <p className="mt-1 text-xs text-slate-500">
                         Add graded submissions to compare student and course performance.
@@ -1679,23 +1679,23 @@ export default function StatsPage() {
                         <p className="font-bold text-slate-900">{selectedStudentProfile.name}</p>
                       </div>
                       <div className="grid grid-cols-2 gap-2.5">
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                           <p className="text-xs text-slate-500">Average</p>
                           <p className="text-[1.7rem] leading-tight font-bold">{selectedStudentProfile.average.toFixed(2)}</p>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                           <p className="text-xs text-slate-500">On-time Rate</p>
                           <p className="text-[1.7rem] leading-tight font-bold">{selectedStudentProfile.onTimeRate.toFixed(0)}%</p>
                         </div>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                      <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                         <p className="text-xs text-slate-500">Submissions</p>
                         <p className="text-[1.7rem] leading-tight font-bold">
                           {selectedStudentProfile.gradedSubmissions}/{selectedStudentProfile.submissions}
                         </p>
                       </div>
                       <div className="grid grid-cols-2 gap-2.5">
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                           <p className="text-xs text-slate-500">Last Submission</p>
                           <p className="text-sm font-semibold text-slate-900">
                             {selectedStudentProfile.latestSubmissionDate
@@ -1710,7 +1710,7 @@ export default function StatsPage() {
                               : "No submissions"}
                           </p>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
                           <p className="text-xs text-slate-500">Latest Grade</p>
                           <p className="text-sm font-semibold text-slate-900">
                             {typeof selectedStudentProfile.latestGrade === "number"
@@ -1727,7 +1727,7 @@ export default function StatsPage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center">
@@ -1748,7 +1748,7 @@ export default function StatsPage() {
               </div>
 
               {selectedCourseStudents.length > 0 ? (
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <div className="overflow-x-auto rounded-xl border border-slate-200/60">
                   <table className="min-w-[740px] w-full border-collapse text-sm">
                     <thead>
                       <tr className="bg-slate-50">
@@ -1834,7 +1834,7 @@ export default function StatsPage() {
         {selectedCourse === "all" && (
           <>
             <div className="grid grid-cols-2 gap-3 md:gap-4 lg:grid-cols-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold mb-1 text-center md:text-left text-slate-500 tracking-wide">
@@ -1855,7 +1855,7 @@ export default function StatsPage() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold mb-1 text-center md:text-left text-slate-500 tracking-wide">
@@ -1876,7 +1876,7 @@ export default function StatsPage() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold mb-1 text-center md:text-left text-slate-500 tracking-wide">
@@ -1895,7 +1895,7 @@ export default function StatsPage() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs font-semibold mb-1 text-center md:text-left text-slate-500 tracking-wide">
@@ -1920,7 +1920,7 @@ export default function StatsPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center">
@@ -2017,7 +2017,7 @@ export default function StatsPage() {
                 )}
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center">
@@ -2101,7 +2101,7 @@ export default function StatsPage() {
         )}
 
         {selectedCourse === "all" && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+          <div className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:p-4">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center">
@@ -2119,7 +2119,7 @@ export default function StatsPage() {
               <Rocket className="h-5 w-5 text-slate-500 hidden lg:block" />
             </div>
 
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <div className="overflow-x-auto rounded-xl border border-slate-200/60">
               <table className="min-w-[980px] w-full border-collapse text-sm">
                 <thead>
                   <tr className="bg-slate-50">
@@ -2284,7 +2284,7 @@ export default function StatsPage() {
                               setSelectedCourse(stat.courseId);
                               setSelectedCourseId(stat.courseId);
                             }}
-                            className="whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                            className="whitespace-nowrap rounded-lg border border-slate-300/60 bg-white px-3 py-1 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
                           >
                             View Details
                           </button>

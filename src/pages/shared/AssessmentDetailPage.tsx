@@ -2293,7 +2293,7 @@ const handleSaveSelfEvaluation = async () => {
       },
       amber: {
         bg: 'bg-amber-100',
-        border: 'border-slate-200',
+        border: 'border-slate-200/60',
         text: 'text-slate-600',
         ring: 'ring-amber-500'
       },
@@ -2323,7 +2323,7 @@ const handleSaveSelfEvaluation = async () => {
       },
       gray: {
         bg: 'bg-slate-100',
-        border: 'border-slate-200',
+        border: 'border-slate-200/60',
         text: 'text-slate-600',
         ring: 'ring-slate-400'
       }
@@ -2555,7 +2555,7 @@ const calculateStats = (gradesData: any[]) => {
     switch (status) {
       case 'draft':
         return { 
-          color: 'bg-amber-100 text-slate-800 border-slate-200', 
+          color: 'bg-amber-100 text-slate-800 border-slate-200/60', 
           icon: <AlertCircle className="h-4 w-4" />, 
           label: 'Draft',
           description: 'This assessment is in draft and not visible to students'
@@ -2583,7 +2583,7 @@ const calculateStats = (gradesData: any[]) => {
         };
       default:
         return { 
-          color: 'bg-slate-100 text-slate-800 border-slate-200', 
+          color: 'bg-slate-100 text-slate-800 border-slate-200/60', 
           icon: <AlertCircle className="h-4 w-4" />, 
           label: status,
           description: 'Unknown status'
@@ -2814,12 +2814,12 @@ const getSubmissionStatusInfo = () => {
       case 'quiz': return 'bg-sky-100 text-sky-700 border border-sky-200';
       case 'homework': return 'bg-sky-100 text-sky-700 border border-sky-200';
       case 'project': return 'bg-sky-100 text-sky-700 border border-sky-200';
-      case 'participation': return 'bg-slate-100 text-slate-700 border border-slate-200';
+      case 'participation': return 'bg-slate-100 text-slate-700 border border-slate-200/60';
       case 'forum': return 'bg-sky-100 text-sky-700 border border-sky-200';
       case 'self_evaluation': return 'bg-emerald-100 text-emerald-700 border border-emerald-200';
       case 'delivery': return 'bg-sky-100 text-sky-700 border border-sky-200';
-      case 'announcement': return 'bg-slate-100 text-slate-700 border border-slate-200';
-      default: return 'bg-slate-100 text-slate-700 border border-slate-200';
+      case 'announcement': return 'bg-slate-100 text-slate-700 border border-slate-200/60';
+      default: return 'bg-slate-100 text-slate-700 border border-slate-200/60';
     }
   };
 
@@ -2845,7 +2845,7 @@ const getSubmissionStatusInfo = () => {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="space-y-2 text-center">
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100">
@@ -2867,7 +2867,7 @@ const getSubmissionStatusInfo = () => {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="max-w-md space-y-2 text-center">
                 <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl border border-red-200 bg-red-100">
@@ -2941,9 +2941,9 @@ const getSubmissionStatusInfo = () => {
       <div className="relative overflow-x-hidden">
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
               <div className="relative z-10">
@@ -2964,13 +2964,13 @@ const getSubmissionStatusInfo = () => {
                     {statusInfo.label}
                   </span>
                   {dueDate && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
                       <Calendar className="h-3.5 w-3.5" />
                       Due {safeFormatDate(assessment.dueDate, "MMM dd, yyyy", "-")}
                     </span>
                   )}
                   {dueDate && timeRemaining && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200/60 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">
                       <Clock className="h-3.5 w-3.5" />
                       {timeRemaining}
                     </span>
@@ -2979,7 +2979,7 @@ const getSubmissionStatusInfo = () => {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-3">
                 <p className="text-sm font-semibold text-slate-900">Workspace</p>
                 <p className="text-xs text-slate-500">Choose the section you want to work on.</p>
@@ -2992,7 +2992,7 @@ const getSubmissionStatusInfo = () => {
                 "group inline-flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition",
                 activeTab === "overview"
                   ? "border-sky-300 bg-sky-50 text-sky-700"
-                  : "border-slate-200 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
+                  : "border-slate-200/60 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
               )}
             >
               <span className="inline-flex items-center gap-1.5">
@@ -3008,14 +3008,14 @@ const getSubmissionStatusInfo = () => {
                   "group inline-flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition",
                   activeTab === "forum"
                     ? "border-sky-300 bg-sky-50 text-sky-700"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
+                    : "border-slate-200/60 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
                 )}
               >
                 <span className="inline-flex items-center gap-1.5">
                   <MessageSquare className="h-4 w-4" />
                   <span>Forum</span>
                 </span>
-                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{visibleForumComments.length}</span>
+                <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{visibleForumComments.length}</span>
               </button>
             )}
 
@@ -3026,14 +3026,14 @@ const getSubmissionStatusInfo = () => {
                   "group inline-flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition",
                   activeTab === "grades"
                     ? "border-sky-300 bg-sky-50 text-sky-700"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
+                    : "border-slate-200/60 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
                 )}
               >
                 <span className="inline-flex items-center gap-1.5">
                   <Award className="h-4 w-4" />
                   <span>Grades</span>
                 </span>
-                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{grades.length}</span>
+                <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">{grades.length}</span>
               </button>
             )}
 
@@ -3044,7 +3044,7 @@ const getSubmissionStatusInfo = () => {
                   "group inline-flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition",
                   activeTab === "analytics"
                     ? "border-sky-300 bg-sky-50 text-sky-700"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
+                    : "border-slate-200/60 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
                 )}
               >
                 <span className="inline-flex items-center gap-1.5">
@@ -3061,7 +3061,7 @@ const getSubmissionStatusInfo = () => {
                   "group inline-flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition",
                   activeTab === "submission"
                     ? "border-sky-300 bg-sky-50 text-sky-700"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
+                    : "border-slate-200/60 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
                 )}
               >
                 <span className="inline-flex items-center gap-1.5">
@@ -3069,7 +3069,7 @@ const getSubmissionStatusInfo = () => {
                   <span>My Submission</span>
                 </span>
                 {studentSubmission && (
-                  <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                  <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
                     {studentSubmission.status === 'submitted' ? 'Sent' : 'Saved'}
                   </span>
                 )}
@@ -3083,7 +3083,7 @@ const getSubmissionStatusInfo = () => {
                   "group inline-flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition",
                   activeTab === "selfEvaluation"
                     ? "border-sky-300 bg-sky-50 text-sky-700"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
+                    : "border-slate-200/60 bg-white text-slate-700 hover:border-sky-200 hover:bg-sky-50/40",
                 )}
               >
                 <span className="inline-flex items-center gap-1.5">
@@ -3091,7 +3091,7 @@ const getSubmissionStatusInfo = () => {
                   <span>My Self-Evaluation</span>
                 </span>
                 {selfEvaluationSubmittedAt && (
-                  <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">Saved</span>
+                  <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">Saved</span>
                 )}
               </button>
             )}
@@ -3105,7 +3105,7 @@ const getSubmissionStatusInfo = () => {
             <div >
                  {/* Hoja de calificaciones (profesores) */}
             {isTeacher && assessment.gradeSheetId && gradeSheet && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm mb-2">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm mb-2">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-2">
                   <div>
                     <h3 className="text-xl font-bold text-slate-900 mb-2 flex items-center gap-2">
@@ -3164,40 +3164,40 @@ const getSubmissionStatusInfo = () => {
                 {/* Columna izquierda */}
 
                 <div className="lg:col-span-2 space-y-2">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                     <h3 className="mb-3 flex items-center gap-2 text-xl font-bold text-slate-900">
                       <FileBox className="h-5 w-5 text-sky-600" />
                       Overview Summary
                     </h3>
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</p>
                         <p className="mt-1 text-sm font-bold text-slate-900">{overviewStatusLabel}</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Type</p>
                         <p className="mt-1 text-sm font-bold text-slate-900">{typeName}</p>
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Due Date</p>
                         <p className="mt-1 text-sm font-bold text-slate-900">{overviewDueDateLabel}</p>
                         {assessment.dueDate && (
                           <p className="mt-0.5 text-xs text-slate-500">{timeRemaining}</p>
                         )}
                       </div>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Course Weight</p>
                         <p className="mt-1 text-sm font-bold text-slate-900">{overviewWeightLabel}</p>
                       </div>
                       {assessment.assessmentType !== "announcement" && (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Max Points</p>
                           <p className="mt-1 text-sm font-bold text-slate-900">{maxPointsLabel}</p>
                         </div>
                       )}
                       {isStudent && assessment.assessmentType !== "announcement" && (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Your Grade</p>
                           <p className="mt-1 text-sm font-bold text-slate-900">
                             {studentGradeScore !== null ? `${studentGradeScore} / ${studentGradeMaxScore}.0` : "Not graded yet"}
@@ -3207,7 +3207,7 @@ const getSubmissionStatusInfo = () => {
                     </div>
 
                     {overviewDescriptionPreview && (
-                      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="mt-3 rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Activity Brief</p>
                         <p className="mt-1 text-sm text-slate-700">{overviewDescriptionPreview}</p>
                       </div>
@@ -3229,7 +3229,7 @@ const getSubmissionStatusInfo = () => {
 
                   {/* Estado de entrega para estudiantes */}
                   {isStudent && assessment.assessmentType === 'delivery' && (
-                    <div className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm ${submissionStatusInfo.status === 'closed' ? 'border-red-200' : submissionStatusInfo.status === 'not_started' ? 'border-slate-200' : 'border-sky-200'}`}>
+                    <div className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm ${submissionStatusInfo.status === 'closed' ? 'border-red-200' : submissionStatusInfo.status === 'not_started' ? 'border-slate-200/60' : 'border-sky-200'}`}>
                       <h3 className="text-xl font-bold text-slate-900 mb-2 flex items-center gap-2">
                         <ClipboardCheck className="h-5 w-5 text-sky-600" />
                         Submission Instructions
@@ -3278,7 +3278,7 @@ const getSubmissionStatusInfo = () => {
                   )}
 
                   {isStudentSelfEvaluation && (
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm border-emerald-200">
+                    <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm border-emerald-200">
                       <h3 className="text-xl font-bold text-slate-900 mb-2 flex items-center gap-2">
                         <ClipboardCheck className="h-5 w-5 text-emerald-600" />
                         Self Evaluation
@@ -3345,7 +3345,7 @@ const getSubmissionStatusInfo = () => {
   )}
                                     {/* Fechas importantes */}
                  
-<div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+<div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
   <h3 className="mb-3 flex items-center gap-2 text-base font-bold text-slate-900">
     <CalendarDays className="h-4 w-4 text-sky-600" />
    Important Dates
@@ -3406,7 +3406,7 @@ const getSubmissionStatusInfo = () => {
 </div>
                  
                  {/* Información General */}
-<div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+<div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
   <h3 className="mb-3 text-base font-bold text-slate-900">General Information</h3>
   <div className="space-y-2">
     <div className="flex items-center justify-between">
@@ -3419,8 +3419,8 @@ const getSubmissionStatusInfo = () => {
             : submissionStatus === 'graded'
             ? 'bg-sky-100 text-sky-800 border border-sky-200'
             : submissionStatus === 'draft'
-            ? 'bg-slate-100 text-slate-800 border border-slate-200'
-            : 'bg-slate-100 text-slate-800 border border-slate-200'
+            ? 'bg-slate-100 text-slate-800 border border-slate-200/60'
+            : 'bg-slate-100 text-slate-800 border border-slate-200/60'
         }`}>
           <span className="flex items-center gap-1.5">
             {submissionStatus === 'submitted' || submissionStatus === 'sent' ? (
@@ -3500,7 +3500,7 @@ const getSubmissionStatusInfo = () => {
 
             {/* Archivos adjuntos */}
             {attachments.length > 0 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <h3 className="text-xl font-bold text-slate-900 mb-2 flex items-center gap-2">
                   <Paperclip className="h-5 w-5 text-sky-600" />
                   Attached Files
@@ -3512,7 +3512,7 @@ const getSubmissionStatusInfo = () => {
                       href={attachment.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="group bg-white border border-slate-200 rounded-xl p-4 hover:bg-sky-50 hover:border-sky-200 transition-all duration-300 hover:shadow-sm"
+                      className="group bg-white border border-slate-200/60 rounded-xl p-4 hover:bg-sky-50 hover:border-sky-200 transition-all duration-300 hover:shadow-sm"
                     >
                       <div className="flex items-center gap-4">
                         <div className="h-12 w-12 rounded-lg bg-sky-100 flex items-center justify-center transition-all">
@@ -3544,7 +3544,7 @@ const getSubmissionStatusInfo = () => {
 
         {activeTab === 'forum' && assessment.type === 'forum' && (
           <div className="space-y-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
@@ -3611,7 +3611,7 @@ const getSubmissionStatusInfo = () => {
               )}
 
               {isStudent && (
-                <div className="mb-4 border border-slate-200 rounded-xl p-4 bg-white">
+                <div className="mb-4 border border-slate-200/60 rounded-xl p-4 bg-white">
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <h3 className="text-base font-bold text-slate-900">Forum Requirements</h3>
                     <span
@@ -3635,7 +3635,7 @@ const getSubmissionStatusInfo = () => {
               )}
 
               {isTeacher && forumComplianceStats && (
-                <div className="mb-4 border border-slate-200 rounded-xl p-4 bg-white">
+                <div className="mb-4 border border-slate-200/60 rounded-xl p-4 bg-white">
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <h3 className="text-base font-bold text-slate-900">Forum Preset Compliance</h3>
                     <span className="text-xs text-slate-500">
@@ -3644,7 +3644,7 @@ const getSubmissionStatusInfo = () => {
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 mb-3">
-                    <div className="rounded-lg border border-slate-200 px-3 py-2">
+                    <div className="rounded-lg border border-slate-200/60 px-3 py-2">
                       <p className="text-xs text-slate-500">Students</p>
                       <p className="text-lg font-bold text-slate-900">{forumComplianceStats.totals.totalStudents}</p>
                     </div>
@@ -3658,7 +3658,7 @@ const getSubmissionStatusInfo = () => {
                     </div>
                   </div>
 
-                  <div className="max-h-64 overflow-auto border border-slate-200 rounded-lg">
+                  <div className="max-h-64 overflow-auto border border-slate-200/60 rounded-lg">
                     {forumComplianceStats.students.map((item) => (
                       <div key={item.studentId} className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100 last:border-b-0">
                         <div>
@@ -3685,21 +3685,21 @@ const getSubmissionStatusInfo = () => {
               )}
 
               {isForumClosed && (
-                <div className="mb-4 border border-slate-300 rounded-xl p-3 bg-slate-100">
+                <div className="mb-4 border border-slate-300/60 rounded-xl p-3 bg-slate-100">
                   <p className="text-sm font-semibold text-slate-800">
                     Forum closed. New comments and replies are disabled.
                   </p>
                 </div>
               )}
 
-              <div className="mb-4 border border-slate-200 rounded-xl p-3 bg-slate-50">
+              <div className="mb-4 border border-slate-200/60 rounded-xl p-3 bg-slate-50">
                 <textarea
                   value={forumMessage}
                   onChange={(event) => setForumMessage(event.target.value)}
                   placeholder="Write your comment..."
                   rows={3}
                   disabled={isForumClosed}
-                  className="w-full bg-white border border-slate-200 rounded-lg p-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                  className="w-full bg-white border border-slate-200/60 rounded-lg p-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                 />
                 <div className="mt-3 flex justify-end">
                   <button
@@ -3715,7 +3715,7 @@ const getSubmissionStatusInfo = () => {
               </div>
 
               {visibleForumComments.length === 0 ? (
-                <div className="text-center py-10 border border-dashed border-slate-300 rounded-xl bg-slate-50">
+                <div className="text-center py-10 border border-dashed border-slate-300/60 rounded-xl bg-slate-50">
                   <MessageSquare className="h-10 w-10 mx-auto text-slate-400 mb-3" />
                   <p className="font-semibold text-slate-700">No comments yet</p>
                   <p className="text-sm text-slate-500">Be the first to start the conversation.</p>
@@ -3723,7 +3723,7 @@ const getSubmissionStatusInfo = () => {
               ) : (
                 <div className="space-y-3">
                   {topLevelForumComments.map((comment) => (
-                    <div key={comment.id} className="border border-slate-200 rounded-xl p-3 bg-white">
+                    <div key={comment.id} className="border border-slate-200/60 rounded-xl p-3 bg-white">
                       {(() => {
                         const profile = commentUserProfiles[comment.userId];
                         const avatarUrl = comment.userAvatarUrl || profile?.avatarUrl || '';
@@ -3777,7 +3777,7 @@ const getSubmissionStatusInfo = () => {
                           className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border ${
                             (comment.likedBy || []).includes(user?.id || '')
                               ? 'bg-sky-50 border-sky-200 text-sky-700'
-                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                              : 'bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50'
                           }`}
                         >
                           👍 {comment.likedBy?.length || 0}
@@ -3787,8 +3787,8 @@ const getSubmissionStatusInfo = () => {
                           onClick={() => handleToggleDislike(comment)}
                           className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border ${
                             (comment.dislikedBy || []).includes(user?.id || '')
-                              ? 'bg-slate-100 border-slate-300 text-slate-800'
-                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                              ? 'bg-slate-100 border-slate-300/60 text-slate-800'
+                              : 'bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50'
                           }`}
                         >
                           👎 {comment.dislikedBy?.length || 0}
@@ -3799,14 +3799,14 @@ const getSubmissionStatusInfo = () => {
                             setReplyingToCommentId((prev) => (prev === comment.id ? null : comment.id))
                           }
                           disabled={isForumClosed}
-                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-slate-200/60 text-slate-600 hover:bg-slate-50"
                         >
                           Reply
                         </button>
                       </div>
 
                       {replyingToCommentId === comment.id && (
-                        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="mt-3 rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                           <textarea
                             rows={2}
                             value={replyDrafts[comment.id] || ''}
@@ -3815,7 +3815,7 @@ const getSubmissionStatusInfo = () => {
                             }
                             placeholder="Write a reply..."
                             disabled={isForumClosed}
-                            className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                            className="w-full bg-white border border-slate-200/60 rounded-lg p-2.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                           />
                           <div className="mt-2 flex justify-end">
                             <button
@@ -3887,7 +3887,7 @@ const getSubmissionStatusInfo = () => {
                                   className={`px-2 py-1 rounded-md text-[11px] font-medium border ${
                                     (reply.likedBy || []).includes(user?.id || '')
                                       ? 'bg-sky-50 border-sky-200 text-sky-700'
-                                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                      : 'bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50'
                                   }`}
                                 >
                                   👍 {reply.likedBy?.length || 0}
@@ -3897,8 +3897,8 @@ const getSubmissionStatusInfo = () => {
                                   onClick={() => handleToggleDislike(reply)}
                                   className={`px-2 py-1 rounded-md text-[11px] font-medium border ${
                                     (reply.dislikedBy || []).includes(user?.id || '')
-                                      ? 'bg-slate-100 border-slate-300 text-slate-800'
-                                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                      ? 'bg-slate-100 border-slate-300/60 text-slate-800'
+                                      : 'bg-white border-slate-200/60 text-slate-600 hover:bg-slate-50'
                                   }`}
                                 >
                                   👎 {reply.dislikedBy?.length || 0}
@@ -3909,14 +3909,14 @@ const getSubmissionStatusInfo = () => {
                                     setReplyingToCommentId((prev) => (prev === reply.id ? null : reply.id))
                                   }
                                   disabled={isForumClosed}
-                                  className="px-2 py-1 rounded-md text-[11px] font-medium border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                  className="px-2 py-1 rounded-md text-[11px] font-medium border border-slate-200/60 text-slate-600 hover:bg-slate-50"
                                 >
                                   Reply
                                 </button>
                               </div>
 
                               {replyingToCommentId === reply.id && (
-                                <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2.5">
+                                <div className="mt-2 rounded-lg border border-slate-200/60 bg-white p-2.5">
                                   <textarea
                                     rows={2}
                                     value={replyDrafts[reply.id] || ''}
@@ -3925,7 +3925,7 @@ const getSubmissionStatusInfo = () => {
                                     }
                                     placeholder="Write a reply comment..."
                                     disabled={isForumClosed}
-                                    className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                                    className="w-full bg-white border border-slate-200/60 rounded-lg p-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                                   />
                                   <div className="mt-2 flex justify-end">
                                     <button
@@ -3942,9 +3942,9 @@ const getSubmissionStatusInfo = () => {
                               )}
 
                               {(forumRepliesByParent[reply.id] || []).length > 0 && (
-                                <div className="mt-2 pl-3 border-l border-slate-200 space-y-2">
+                                <div className="mt-2 pl-3 border-l border-slate-200/60 space-y-2">
                                   {(forumRepliesByParent[reply.id] || []).map((replyComment) => (
-                                    <div key={replyComment.id} className="rounded-lg border border-slate-200 bg-white p-2">
+                                    <div key={replyComment.id} className="rounded-lg border border-slate-200/60 bg-white p-2">
                                       <div className="flex items-start justify-between gap-2">
                                         <div>
                                           <p className="text-[11px] font-semibold text-slate-900">
@@ -3990,7 +3990,7 @@ const getSubmissionStatusInfo = () => {
 
         {activeTab === 'selfEvaluation' && isStudentSelfEvaluation && (
           <div className="space-y-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-2">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
@@ -4005,7 +4005,7 @@ const getSubmissionStatusInfo = () => {
                   className={`px-3 py-1.5 rounded-lg text-sm font-bold ${
                     selfEvaluationSubmittedAt
                       ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                      : 'bg-slate-100 text-slate-700 border border-slate-200'
+                      : 'bg-slate-100 text-slate-700 border border-slate-200/60'
                   }`}
                 >
                   {selfEvaluationSubmittedAt ? 'Saved' : 'Pending'}
@@ -4031,7 +4031,7 @@ const getSubmissionStatusInfo = () => {
                     value={selfEvaluationScoreInput}
                     onChange={(event) => setSelfEvaluationScoreInput(event.target.value)}
                     disabled={isSelfEvaluationLocked}
-                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm font-medium"
+                    className="w-full px-4 py-3 bg-white border border-slate-200/60 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm font-medium"
                   >
                     <option value="">Select your grade</option>
                     <option value="1.0">1.0</option>
@@ -4050,7 +4050,7 @@ const getSubmissionStatusInfo = () => {
                     rows={4}
                     placeholder="Explain why you chose this grade..."
                     disabled={isSelfEvaluationLocked}
-                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm text-slate-700"
+                    className="w-full px-4 py-3 bg-white border border-slate-200/60 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm text-slate-700"
                   />
                   <p className="text-xs text-slate-500 mt-2">
                     {isSelfEvaluationLocked
@@ -4060,7 +4060,7 @@ const getSubmissionStatusInfo = () => {
                 </div>
               </div>
 
-              <div className="mt-5 border-t border-slate-200 pt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="mt-5 border-t border-slate-200/60 pt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="text-sm text-slate-500">
                   {selfEvaluationSubmittedAt
                     ? `Last saved: ${safeFormatDateTime(selfEvaluationSubmittedAt, "dd/MM/yyyy HH:mm", "-")}`
@@ -4097,7 +4097,7 @@ const getSubmissionStatusInfo = () => {
         {/* Tab de entrega para estudiantes - DISEÑO MODERNO */}
         {activeTab === 'submission' && isStudent && assessment.assessmentType === 'delivery' && (
           <div className="space-y-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-2">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
@@ -4117,7 +4117,7 @@ const getSubmissionStatusInfo = () => {
     submissionStatusInfo.status === 'closed' 
       ? 'bg-red-100 text-red-700 border border-red-200'
       : submissionStatusInfo.status === 'not_started'
-      ? 'bg-slate-100 text-slate-700 border border-slate-200'
+      ? 'bg-slate-100 text-slate-700 border border-slate-200/60'
       : submissionStatus === 'submitted'
       ? 'bg-sky-100 text-sky-700 border border-sky-200'
       : submissionStatus === 'graded'
@@ -4164,7 +4164,7 @@ const getSubmissionStatusInfo = () => {
               )}
               
               {submissionStatusInfo.status === 'not_started' && (
-                <div className="mb-6 bg-slate-50 border border-slate-200 rounded-xl p-5">
+                <div className="mb-6 bg-slate-50 border border-slate-200/60 rounded-xl p-5">
                   <div className="flex items-center gap-3">
                     <CalendarClock className="h-5 w-5 text-slate-600 flex-shrink-0" />
                     <div>
@@ -4229,7 +4229,7 @@ const getSubmissionStatusInfo = () => {
         )}
       </div>
     </div>
-  <div className="border border-slate-300 rounded-xl overflow-hidden hover:border-sky-300 transition-colors">
+  <div className="border border-slate-300/60 rounded-xl overflow-hidden hover:border-sky-300 transition-colors">
       {isEditingSubmission || !studentSubmission ? (
         <>
           <div className="relative">
@@ -4270,7 +4270,7 @@ const getSubmissionStatusInfo = () => {
             </div>
           </div>
           
-          <div className="border-t border-slate-300 bg-slate-50 p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+          <div className="border-t border-slate-300/60 bg-slate-50 p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
             <div className="text-sm text-slate-500">
               {submissionStatusInfo.canSubmit 
                 ? 'Write your response and choose to save as draft or submit definitively.'
@@ -4293,7 +4293,7 @@ const getSubmissionStatusInfo = () => {
                   <button
                     onClick={handleSaveDraft}
                     disabled={isSubmitting || !submissionText.trim()}
-                    className="px-5 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    className="px-5 py-2 border border-slate-300/60 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
                     <Save className="h-4 w-4" />
                     {isSubmitting ? 'Saving...' : 'Save Draft'}
@@ -4324,7 +4324,7 @@ const getSubmissionStatusInfo = () => {
 
 {/* MOSTRAR FEEDBACK DEL PROFESOR - NUEVA SECCIÓN */}
           {studentTeacherComment && (
-            <div className="border-t border-slate-300 bg-sky-50 p-5">
+            <div className="border-t border-slate-300/60 bg-sky-50 p-5">
               <div className="flex items-start gap-3">
                 <div className="h-10 w-10 rounded-xl bg-sky-100 flex items-center justify-center flex-shrink-0">
                   <MessageSquare className="h-5 w-5 text-sky-600" />
@@ -4352,7 +4352,7 @@ const getSubmissionStatusInfo = () => {
             </div>
           )}
           
-          <div className="border-t border-slate-300 bg-slate-50 p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+          <div className="border-t border-slate-300/60 bg-slate-50 p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
             <div className="text-sm text-slate-500">
               {submissionStatus === 'submitted' 
                 ? 'Submitted on ' + safeFormatDateTime(studentSubmission.submittedAt, "dd/MM/yyyy HH:mm", "-")
@@ -4440,7 +4440,7 @@ const getSubmissionStatusInfo = () => {
         {/* Tab de calificaciones (profesores) - DISEÑO MODERNO */}
         {activeTab === 'grades' && isTeacher && assessment.assessmentType !== 'announcement' && (
           <div className="space-y-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-2">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
@@ -4482,7 +4482,7 @@ const getSubmissionStatusInfo = () => {
               )}
               
               {/* Tabla de calificaciones */}
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <div className="overflow-x-auto rounded-xl border border-slate-200/60">
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead>
                     <tr className="bg-slate-50">
@@ -4607,7 +4607,7 @@ const getSubmissionStatusInfo = () => {
                                     event.target.value,
                                   )
                                 }
-                                className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                                className="w-24 rounded-lg border border-slate-300/60 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                                 disabled={isSavingRow}
                               />
                               <span className="text-sm text-slate-500 whitespace-nowrap">/ {maxPointsLabel}</span>
@@ -4716,7 +4716,7 @@ const getSubmissionStatusInfo = () => {
                                   )
                                 }
                                 placeholder="Optional feedback"
-                                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                                className="w-full rounded-lg border border-slate-300/60 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                                 disabled={isSavingRow}
                               />
                             </div>
@@ -4735,7 +4735,7 @@ const getSubmissionStatusInfo = () => {
                 </table>
                 
                 {grades.length > 50 && (
-                  <div className="border-t border-slate-200 px-6 py-4">
+                  <div className="border-t border-slate-200/60 px-6 py-4">
                     <button
                       onClick={() => setShowAllGrades(!showAllGrades)}
                       className="inline-flex items-center gap-2 px-4 py-2 text-sky-600 hover:text-sky-700 font-bold"
@@ -4819,7 +4819,7 @@ const getSubmissionStatusInfo = () => {
         {/* Tab de análisis (solo profesores) - DISEÑO MODERNO */}
         {activeTab === 'analytics' && isTeacher && assessment.assessmentType !== 'announcement' && stats && (
           <div className="space-y-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-2 flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
                 <div>
                   <h2 className="flex items-center gap-2 text-2xl font-bold text-slate-900">
@@ -4837,7 +4837,7 @@ const getSubmissionStatusInfo = () => {
                   </span>
                   <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
                     stats.pending > 0
-                      ? "border border-slate-200 bg-slate-100 text-slate-700"
+                      ? "border border-slate-200/60 bg-slate-100 text-slate-700"
                       : "border border-emerald-200 bg-emerald-50 text-emerald-700"
                   }`}>
                     {stats.pending > 0
@@ -4849,7 +4849,7 @@ const getSubmissionStatusInfo = () => {
 
               {/* Main stats cards (same compact style as grades tab) */}
               <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                       <Users className="h-4 w-4" />
@@ -4860,7 +4860,7 @@ const getSubmissionStatusInfo = () => {
                   <p className="mt-0.5 text-[11px] leading-4 text-slate-600">{stats.graded} graded • {stats.pending} pending</p>
                 </div>
 
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                       <BarChart3 className="h-4 w-4" />
@@ -4871,7 +4871,7 @@ const getSubmissionStatusInfo = () => {
                   <p className="mt-0.5 text-[11px] leading-4 text-slate-600">Out of {assessment.maxPoints} points</p>
                 </div>
 
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                       <Percent className="h-4 w-4" />
@@ -4882,7 +4882,7 @@ const getSubmissionStatusInfo = () => {
                   <p className="mt-0.5 text-[11px] leading-4 text-slate-600">{stats.passingCount} passed • {stats.failingCount} failed</p>
                 </div>
 
-                <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
                       <TrendingUp className="h-4 w-4" />
@@ -4982,7 +4982,7 @@ const getSubmissionStatusInfo = () => {
       
             {/* No graded students yet */}
             {assessment.assessmentType !== 'announcement' && stats.graded === 0 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="text-center py-12">
                   <BarChart3 className="mx-auto mb-4 h-16 w-16 text-slate-300" />
                   <h3 className="mb-2 text-lg font-bold text-slate-900">No data available for analysis</h3>

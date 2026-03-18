@@ -60,6 +60,83 @@ service cloud.firestore {
       return userDocExists(uid) && get(userPath(uid)).data.role == 'docente';
     }
 
+    function userHasInstitutionPrivileges(uid) {
+      return (
+        userDocExists(uid)
+        && (
+          get(userPath(uid)).data.role == 'institucion'
+          || get(userPath(uid)).data.requestedRole == 'institucion'
+          || get(userPath(uid)).data.institutionRole in ['owner', 'coordinator']
+        )
+      )
+      || (
+        studentDocExists(uid)
+        && (
+          get(studentPath(uid)).data.role == 'institucion'
+          || get(studentPath(uid)).data.requestedRole == 'institucion'
+          || get(studentPath(uid)).data.institutionRole in ['owner', 'coordinator']
+        )
+      );
+    }
+
+    function userIsInstitution(uid) {
+      return userHasInstitutionPrivileges(uid);
+    }
+
+    function currentInstitutionId() {
+      return userDocExists(request.auth.uid)
+        && get(userPath(request.auth.uid)).data.institutionId is string
+          ? get(userPath(request.auth.uid)).data.institutionId
+          : (
+              studentDocExists(request.auth.uid)
+              && get(studentPath(request.auth.uid)).data.institutionId is string
+                ? get(studentPath(request.auth.uid)).data.institutionId
+                : (
+                    userHasInstitutionPrivileges(request.auth.uid)
+                      ? request.auth.uid
+                      : ""
+                  )
+            );
+    }
+
+    function canManageInstitutionById(institutionId) {
+      return signedIn()
+        && institutionId is string
+        && institutionId.size() > 0
+        && (
+          isOwnerAdminEmail()
+          || (
+            userHasInstitutionPrivileges(request.auth.uid)
+            && currentInstitutionId() == institutionId
+          )
+        );
+    }
+
+    function userBelongsToInstitution(uid, institutionId) {
+      return institutionId is string
+        && institutionId.size() > 0
+        && (
+          (userDocExists(uid) && get(userPath(uid)).data.institutionId == institutionId)
+          || (studentDocExists(uid) && get(studentPath(uid)).data.institutionId == institutionId)
+        );
+    }
+
+    function teacherBelongsToInstitution(uid, institutionId) {
+      return userBelongsToInstitution(uid, institutionId)
+        && (
+          (userDocExists(uid) && get(userPath(uid)).data.role == 'docente')
+          || (studentDocExists(uid) && get(studentPath(uid)).data.role == 'docente')
+          || (userDocExists(uid) && get(userPath(uid)).data.requestedRole == 'docente')
+          || (studentDocExists(uid) && get(studentPath(uid)).data.requestedRole == 'docente')
+        );
+    }
+
+    function canManageInstitutionCourse(courseId) {
+      return courseExists(courseId)
+        && hasInstitutionId(courseDoc(courseId).data)
+        && canManageInstitutionById(courseDoc(courseId).data.institutionId);
+    }
+
     function targetUserIsStudent(uid) {
       return userDocExists(uid) && get(userPath(uid)).data.role == 'estudiante';
     }
@@ -131,15 +208,6 @@ service cloud.firestore {
           isDelegatedAdminUid()
           && adminPermissionsDocExists()
           && adminPermissionsDoc().data.manageTeacherApprovals == true
-        );
-    }
-
-    function canManageTeacherOps() {
-      return isOwnerAdminEmail()
-        || (
-          isDelegatedAdminUid()
-          && adminPermissionsDocExists()
-          && adminPermissionsDoc().data.manageTeacherOps == true
         );
     }
 
@@ -227,6 +295,12 @@ service cloud.firestore {
         && data.teacherId.size() > 0;
     }
 
+    function hasInstitutionId(data) {
+      return ("institutionId" in data)
+        && data.institutionId is string
+        && data.institutionId.size() > 0;
+    }
+
     function hasStudentId(data) {
       return ("studentId" in data)
         && data.studentId is string
@@ -259,14 +333,28 @@ service cloud.firestore {
       return /databases/$(database)/documents/unidades/$(unitId);
     }
 
+    function periodPath(periodId) {
+      return /databases/$(database)/documents/periods/$(periodId);
+    }
+
     function weekPath(weekId) {
       return /databases/$(database)/documents/semanas/$(weekId);
+    }
+
+    function structuredWeekPath(weekId) {
+      return /databases/$(database)/documents/weeks/$(weekId);
     }
 
     function hasUnitId(data) {
       return ("unitId" in data)
         && data.unitId is string
         && data.unitId.size() > 0;
+    }
+
+    function hasPeriodId(data) {
+      return ("periodId" in data)
+        && data.periodId is string
+        && data.periodId.size() > 0;
     }
 
     function hasWeekId(data) {
@@ -356,6 +444,51 @@ service cloud.firestore {
         );
     }
 
+    function fileCourseIdFromData(data) {
+      return hasCourseId(data)
+        ? data.courseId
+        : (
+            hasPeriodId(data)
+            && exists(periodPath(data.periodId))
+            && hasCourseId(get(periodPath(data.periodId)).data)
+              ? get(periodPath(data.periodId)).data.courseId
+              : (
+                  hasWeekId(data)
+                  && exists(structuredWeekPath(data.weekId))
+                  && hasCourseId(get(structuredWeekPath(data.weekId)).data)
+                    ? get(structuredWeekPath(data.weekId)).data.courseId
+                    : (
+                        hasWeekId(data)
+                        && exists(weekPath(data.weekId))
+                          ? (
+                              hasCourseId(get(weekPath(data.weekId)).data)
+                                ? get(weekPath(data.weekId)).data.courseId
+                                : (
+                                    hasUnitId(get(weekPath(data.weekId)).data)
+                                    && exists(unitPath(get(weekPath(data.weekId)).data.unitId))
+                                    && hasCourseId(get(unitPath(get(weekPath(data.weekId)).data.unitId)).data)
+                                      ? get(unitPath(get(weekPath(data.weekId)).data.unitId)).data.courseId
+                                      : null
+                                  )
+                            )
+                          : null
+                      )
+                )
+          );
+    }
+
+    function canReadCourseFileBound(data) {
+      return signedIn()
+        && (
+          canReadAdminAcademicData()
+          || (
+            fileCourseIdFromData(data) is string
+            && fileCourseIdFromData(data).size() > 0
+            && canAccessCourse(fileCourseIdFromData(data))
+          )
+        );
+    }
+
     function canReadTeacherOrCourseBound(data) {
       return signedIn()
         && (
@@ -393,8 +526,40 @@ service cloud.firestore {
         );
     }
 
+    // Función específica para permitir transferencia de curso (profesor actual o admin)
+    function canTransferCourse(courseId) {
+      return signedIn()
+        && courseExists(courseId)
+        && (
+          isOwnerAdminEmail()  // Admin siempre puede
+          || (
+            courseDoc(courseId).data.teacherId == request.auth.uid  // Profesor actual
+            && courseDoc(courseId).data.code != 'TEACHER-ONBOARDING-001'  // No es curso obligatorio
+          )
+        );
+    }
+
+    // Función para verificar si es una operación de transferencia en curso
+    function isCourseTransfer(resourceData, requestData) {
+      return requestData.diff(resourceData).affectedKeys().hasOnly([
+        'teacherId', 'teacherName', 'updatedAt'
+      ])
+      && requestData.teacherId is string
+      && requestData.teacherName is string;
+    }
+
+    // Función para verificar si es una operación de backfill de contenido
+    function isContentBackfill(resourceData, requestData) {
+      return requestData.diff(resourceData).affectedKeys().hasOnly(['courseId', 'updatedAt'])
+      && requestData.courseId is string
+      && requestData.courseId.size() > 0;
+    }
+
     match /adminConfig/{configId} {
       allow read: if (
+          configId == "platformSettings"
+        )
+        || (
           configId == "access"
           && signedIn()
           && (
@@ -409,19 +574,71 @@ service cloud.firestore {
           configId == "delegatedPermissions"
           && isAdminAccessUser()
         );
-      allow create, update, delete: if isOwnerAdminEmail();
+      allow create, update, delete: if (
+          configId == "platformSettings"
+          && canManageSettings()
+        )
+        || isOwnerAdminEmail();
+    }
+
+    match /publicDirectory/{docId} {
+      allow read: if docId == "institutions";
+      allow create, update: if signedIn() && docId == "institutions";
+      allow delete: if isOwnerAdminEmail() && docId == "institutions";
+    }
+
+    match /instituciones/{institutionId} {
+      allow read: if canManageInstitutionById(institutionId);
+      allow create: if signedIn()
+        && (
+          isOwnerAdminEmail()
+          || (
+            userHasInstitutionPrivileges(request.auth.uid)
+            && institutionId == request.auth.uid
+          )
+        );
+      allow update, delete: if canManageInstitutionById(institutionId);
     }
 
     match /usuarios/{userId} {
       allow read: if signedIn();
       allow create: if isOwner(userId)
         && (
-          request.resource.data.role in ['docente', 'estudiante']
+          request.resource.data.role in ['docente', 'estudiante', 'institucion']
           || (isOwnerAdminEmail() && request.resource.data.role == 'admin')
         )
         || (
           (canManageTeacherApprovals() || canManageInstitutions() || canManageUsersDirectory())
-          && request.resource.data.role in ['docente', 'estudiante', 'admin']
+          && request.resource.data.role in ['docente', 'estudiante', 'admin', 'institucion']
+        )
+        || (
+          canManageInstitutionById(currentInstitutionId())
+          && request.resource.data.keys().hasOnly([
+            "id",
+            "email",
+            "name",
+            "role",
+            "requestedRole",
+            "teacherApprovalStatus",
+            "teacherInstitutionName",
+            "institutionId",
+            "institutionName",
+            "institution",
+            "institutionManaged",
+            "updatedAt"
+          ])
+          && request.resource.data.role in ['docente', 'estudiante']
+          && request.resource.data.institutionId == currentInstitutionId()
+          && request.resource.data.email is string
+          && request.resource.data.name is string
+          && (
+            !("requestedRole" in request.resource.data)
+            || request.resource.data.requestedRole in ['docente', 'estudiante']
+          )
+          && (
+            !("teacherApprovalStatus" in request.resource.data)
+            || request.resource.data.teacherApprovalStatus in ['pending', 'approved', 'rejected']
+          )
         );
       allow update: if (
           isOwner(userId)
@@ -456,6 +673,7 @@ service cloud.firestore {
             "teacherRejectedAt",
             "teacherRejectedBy",
             "teacherRejectionReason",
+            "institutionId",
             "teacherPlanId",
             "teacherPlanName",
             "teacherPlanPriceCop",
@@ -471,10 +689,34 @@ service cloud.firestore {
             "teacherPaymentInstructions",
             "teacherPaymentRequestedAt",
             "teacherPaymentRequestedBy",
+            "institutionName",
+            "institution",
+            "teacherInstitutionName",
+            "institutionRole",
+            "institutionManaged",
+            "institutionApprovalStatus",
+            "institutionPlanStatus",
+            "institutionPlanName",
+            "institutionRequestedPlanId",
+            "institutionRequestedCourseLimit",
+            "institutionRequestedStudentLimit",
+            "institutionRequestedTeacherLimit",
+            "institutionRequestedPriceCop",
+            "institutionRequestedMonthlyEquivalentCop",
+            "institutionPlanPriceCop",
+            "institutionPlanMonthlyEquivalentCop",
+            "institutionCourseLimit",
+            "institutionStudentLimit",
+            "institutionTeacherLimit",
+            "institutionPaymentMethod",
+            "institutionPlanNotes",
+            "institutionPaymentInstructions",
+            "institutionPaymentRequestedAt",
+            "institutionPaymentRequestedBy",
             "updatedAt"
           ])
           && (
-            request.resource.data.role in ['docente', 'estudiante']
+            request.resource.data.role in ['docente', 'estudiante', 'institucion']
             || (isOwner(userId) && request.resource.data.role == 'admin')
           )
           && (
@@ -491,6 +733,26 @@ service cloud.firestore {
             || request.resource.data.teacherRejectionReason is string
             || request.resource.data.teacherRejectionReason == null
           )
+        )
+        || (
+          canManageInstitutionById(currentInstitutionId())
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "role",
+            "requestedRole",
+            "teacherApprovalStatus",
+            "institutionId",
+            "institutionName",
+            "institution",
+            "teacherInstitutionName",
+            "institutionManaged",
+            "updatedAt"
+          ])
+          && request.resource.data.institutionId == currentInstitutionId()
+          && (
+            !("institutionId" in resource.data)
+            || resource.data.institutionId == currentInstitutionId()
+          )
+          && request.resource.data.role in ['docente', 'estudiante']
         );
       allow delete: if isOwner(userId)
         || canManageDeletions()
@@ -556,10 +818,33 @@ service cloud.firestore {
 
     match /cursos/{courseId} {
       allow read: if signedIn();
-      // Spark-compatible mode: allow client writes used by current app.
+      
+      // Creación de curso
       allow create: if signedIn() && request.resource.data.teacherId == request.auth.uid;
+      allow create: if signedIn()
+        && hasInstitutionId(request.resource.data)
+        && request.resource.data.createdBy is string
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdByInstitutionId is string
+        && request.resource.data.createdByInstitutionId == request.resource.data.institutionId
+        && canManageInstitutionById(request.resource.data.institutionId)
+        && (
+          !hasTeacherId(request.resource.data)
+          || teacherBelongsToInstitution(
+            request.resource.data.teacherId,
+            request.resource.data.institutionId
+          )
+        );
+      allow create: if signedIn()
+        && hasInstitutionId(request.resource.data)
+        && canManageInstitutionById(request.resource.data.institutionId)
+        && (
+          !hasTeacherId(request.resource.data)
+          || teacherBelongsToInstitution(request.resource.data.teacherId, request.resource.data.institutionId)
+        );
 
-      allow update, delete: if signedIn() && (
+      // Actualización regular del curso (profesor actual)
+      allow update: if signedIn() && (
         resource.data.teacherId == request.auth.uid
         || isOwnerAdminEmail()
         || (
@@ -578,19 +863,61 @@ service cloud.firestore {
           )
         )
       );
+      allow update: if canManageInstitutionCourse(courseId)
+        && request.resource.data.institutionId == resource.data.institutionId
+        && (
+          !hasTeacherId(request.resource.data)
+          || teacherBelongsToInstitution(request.resource.data.teacherId, request.resource.data.institutionId)
+        );
+
+      // Regla especial para TRANSFERENCIA de curso - SOLO campos específicos
+      allow update: if canTransferCourse(courseId)
+        && isCourseTransfer(resource.data, request.resource.data);
+
+      allow delete: if signedIn() && (
+        resource.data.teacherId == request.auth.uid
+        || isOwnerAdminEmail()
+        || canManageInstitutionCourse(courseId)
+      );
     }
 
     match /estudiantes/{studentId} {
       allow read: if signedIn();
       allow create: if isOwner(studentId)
-        && request.resource.data.role in ['docente', 'estudiante'];
+        && request.resource.data.role in ['docente', 'estudiante', 'institucion'];
       allow create: if (
           canManageTeacherApprovals()
           || canManageInstitutions()
           || canManageUsersDirectory()
         )
-        && request.resource.data.role in ['docente', 'estudiante', 'admin'];
-      // Spark-compatible mode: allow app-managed enrollment updates from teacher/student/admin.
+        && request.resource.data.role in ['docente', 'estudiante', 'admin', 'institucion'];
+      allow create: if canManageInstitutionById(currentInstitutionId())
+        && request.resource.data.keys().hasOnly([
+          "id",
+          "email",
+          "name",
+          "role",
+          "requestedRole",
+          "teacherApprovalStatus",
+          "teacherInstitutionName",
+          "institutionId",
+          "institutionName",
+          "institution",
+          "institutionManaged",
+          "updatedAt"
+        ])
+        && request.resource.data.role in ['docente', 'estudiante']
+        && request.resource.data.institutionId == currentInstitutionId()
+        && request.resource.data.email is string
+        && request.resource.data.name is string
+        && (
+          !("requestedRole" in request.resource.data)
+          || request.resource.data.requestedRole in ['docente', 'estudiante']
+        )
+        && (
+          !("teacherApprovalStatus" in request.resource.data)
+          || request.resource.data.teacherApprovalStatus in ['pending', 'approved', 'rejected']
+        );
       allow update: if signedIn() && (
         isOwner(studentId)
         || (isCurrentUserTeacher() && targetUserIsStudent(studentId))
@@ -598,6 +925,14 @@ service cloud.firestore {
         || canManageBilling()
         || canManageInstitutions()
         || canManageUsersDirectory()
+        || (
+          canManageInstitutionById(currentInstitutionId())
+          && request.resource.data.institutionId == currentInstitutionId()
+          && (
+            !("institutionId" in resource.data)
+            || resource.data.institutionId == currentInstitutionId()
+          )
+        )
       );
       allow delete: if signedIn() && (
         request.auth.uid == studentId
@@ -609,7 +944,19 @@ service cloud.firestore {
     match /gradeSheets/{sheetId} {
       allow read: if canReadTeacherOrCourseBound(resource.data);
       allow create: if canWriteTeacherOrCourseBound(request.resource.data);
+      
+      // Actualización normal
       allow update, delete: if canWriteTeacherOrCourseBound(resource.data);
+      
+      // REGLA ESPECIAL PARA TRANSFERENCIA - permitir actualización de teacherId durante transferencia
+      allow update: if canTransferCourse(resource.data.courseId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherId', 'teacherName', 'updatedAt'])
+        && request.resource.data.teacherId is string
+        && request.resource.data.teacherName is string;
+      allow update: if canManageInstitutionCourse(resource.data.courseId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherId', 'teacherName', 'updatedAt'])
+        && request.resource.data.teacherId is string
+        && request.resource.data.teacherName is string;
     }
 
     match /unidades/{unitId} {
@@ -635,13 +982,37 @@ service cloud.firestore {
     match /evaluaciones/{assessmentId} {
       allow read: if canReadCourseBound(resource.data);
       allow create: if canWriteCourseBound(request.resource.data);
+      
+      // Actualización normal
       allow update, delete: if canWriteCourseBound(resource.data);
+      
+      // REGLA ESPECIAL PARA TRANSFERENCIA
+      allow update: if canTransferCourse(resource.data.courseId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherId', 'teacherName', 'updatedAt'])
+        && request.resource.data.teacherId is string
+        && request.resource.data.teacherName is string;
+      allow update: if canManageInstitutionCourse(resource.data.courseId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherId', 'teacherName', 'updatedAt'])
+        && request.resource.data.teacherId is string
+        && request.resource.data.teacherName is string;
     }
 
     match /assessments/{assessmentId} {
       allow read: if canReadCourseBound(resource.data);
       allow create: if canWriteCourseBound(request.resource.data);
+      
+      // Actualización normal
       allow update, delete: if canWriteCourseBound(resource.data);
+      
+      // REGLA ESPECIAL PARA TRANSFERENCIA
+      allow update: if canTransferCourse(resource.data.courseId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherId', 'teacherName', 'updatedAt'])
+        && request.resource.data.teacherId is string
+        && request.resource.data.teacherName is string;
+      allow update: if canManageInstitutionCourse(resource.data.courseId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teacherId', 'teacherName', 'updatedAt'])
+        && request.resource.data.teacherId is string
+        && request.resource.data.teacherName is string;
     }
 
     match /assessmentForumComments/{commentId} {
@@ -713,24 +1084,40 @@ service cloud.firestore {
       allow read: if canReadCourseBound(resource.data);
       allow create: if canWriteCourseBound(request.resource.data);
       allow update, delete: if canWriteCourseBound(resource.data);
+      
+      // REGLA ESPECIAL PARA BACKFILL DE CONTENIDO
+      allow update: if canTransferCourse(request.resource.data.courseId)
+        && isContentBackfill(resource.data, request.resource.data);
     }
 
     match /weeks/{weekId} {
       allow read: if canReadCourseBound(resource.data);
       allow create: if canWriteCourseBound(request.resource.data);
       allow update, delete: if canWriteCourseBound(resource.data);
+      
+      // REGLA ESPECIAL PARA BACKFILL DE CONTENIDO
+      allow update: if canTransferCourse(request.resource.data.courseId)
+        && isContentBackfill(resource.data, request.resource.data);
     }
 
     match /course_files/{fileId} {
-      allow read: if canReadCourseBound(resource.data);
+      allow read: if canReadCourseFileBound(resource.data);
       allow create: if canWriteCourseBound(request.resource.data);
       allow update, delete: if canWriteCourseBound(resource.data);
+      
+      // REGLA ESPECIAL PARA BACKFILL DE CONTENIDO
+      allow update: if canTransferCourse(request.resource.data.courseId)
+        && isContentBackfill(resource.data, request.resource.data);
     }
 
     match /course_file/{fileId} {
-      allow read: if canReadCourseBound(resource.data);
+      allow read: if canReadCourseFileBound(resource.data);
       allow create: if canWriteCourseBound(request.resource.data);
       allow update, delete: if canWriteCourseBound(resource.data);
+      
+      // REGLA ESPECIAL PARA BACKFILL DE CONTENIDO
+      allow update: if canTransferCourse(request.resource.data.courseId)
+        && isContentBackfill(resource.data, request.resource.data);
     }
 
     // Question bank

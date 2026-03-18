@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, matchPath, useParams } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AcademicProvider } from "@/contexts/AcademicContext";
@@ -14,21 +14,32 @@ import { AdminRoute } from "@/components/auth/AdminRoute";
 import { AdminPermissionRoute } from "@/components/auth/AdminPermissionRoute";
 import { CookieConsentBanner } from "@/components/common/CookieConsentBanner";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import {
+  resolvePlatformFaviconUrl,
+  resolvePlatformTouchIconUrl,
+  useAdminPlatformSettings,
+} from "@/lib/services/adminSettingsService";
+import { isAdminEmail } from "@/lib/services/adminAccessService";
 
 
 
 // Importar páginas en orden lógico
 // 1. Páginas públicas
-const Index = lazy(() => import("./pages/Index"));
-const AboutPage = lazy(() => import("./pages/AboutPage"));
-const ContactPage = lazy(() => import("./pages/ContactPage"));
-const NotFound = lazy(() => import("./pages/NotFound"));
+const Index = lazy(() => import("./pages/shared/Index"));
+const AboutPage = lazy(() => import("./pages/shared/AboutPage"));
+const ContactPage = lazy(() => import("./pages/shared/ContactPage"));
+const NotFound = lazy(() => import("./pages/shared/NotFound"));
 const AuthPage = lazy(() => import("./pages/shared/AuthPage"));
 const TeacherPlanDetailPage = lazy(() => import("./pages/shared/TeacherPlanDetailPage"));
+const MaintenancePage = lazy(() => import("./pages/shared/MaintenancePage"));
+const PrivacyPolicyPage = lazy(() => import("./pages/shared/PrivacyPolicyPage"));
+const TermsConditionsPage = lazy(() => import("./pages/shared/TermsConditionsPage"));
+const CookiesPolicyPage = lazy(() => import("./pages/shared/CookiesPolicyPage"));
 
 // 2. Dashboards principales
 const StudentDashboard = lazy(() => import("./pages/students/StudentDashboard"));
 const TeacherDashboard = lazy(() => import("./pages/teacher/TeacherDashboard"));
+const InstitutionDashboardPage = lazy(() => import("./pages/institution/InstitutionDashboardPage"));
  
 // 3. Páginas compartidas (estudiantes y profesores)
 const CoursesPage = lazy(() => import("./pages/shared/CoursesPage"));
@@ -47,7 +58,7 @@ const AdminAccessAdminsPage = lazy(() => import("./pages/admin/AdminAccessAdmins
 const AdminAccessTeacherApprovalsPage = lazy(() => import("./pages/admin/AdminAccessTeacherApprovalsPage"));
 const AdminAccessTeacherOpsPage = lazy(() => import("./pages/admin/AdminAccessTeacherOpsPage"));
 const AdminAccessDeletionsPage = lazy(() => import("./pages/admin/AdminAccessDeletionsPage"));
-const AdminAccessInboxPage = lazy(() => import("./pages/admin/AdminAccessInboxPage"));
+const AdminAccessInboxPage = lazy(() => import("./pages/admin/AdminSupportConversationsPage"));
 const AdminSettingsPage = lazy(() => import("./pages/admin/AdminSettingsPage"));
 const AdminBillingPage = lazy(() => import("./pages/admin/AdminBillingPage"));
 const AdminInstitutionsPage = lazy(() => import("./pages/admin/AdminInstitutionsPage"));
@@ -55,7 +66,6 @@ const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
 const AdminReportsPage = lazy(() => import("./pages/admin/AdminReportsPage"));
 const AdminBackupsPage = lazy(() => import("./pages/admin/AdminBackupsPage"));
 const AdminAuditLogPage = lazy(() => import("./pages/admin/AdminAuditLogPage"));
-const AdminSupportConversationsPage = lazy(() => import("./pages/admin/AdminSupportConversationsPage"));
 const AdminInstitutionDetailPage = lazy(() => import("./pages/admin/AdminInstitutionDetailPage"));
 const AdminPermissionsPage = lazy(() => import("./pages/admin/AdminPermissionsPage"));
 const AdminNotificationsPage = lazy(() => import("./pages/admin/AdminNotificationsPage"));
@@ -80,7 +90,7 @@ const StatsPage = lazy(() => import("./pages/teacher/StatsPage"));
 const NotificationsPage = lazy(() => import("./pages/teacher/NotificationsPage"));
 
 const queryClient = new QueryClient();
-const APP_NAME = "MultiCourses";
+const DEFAULT_APP_NAME = "Socrattica";
 
 type TitleRule = {
   path: string;
@@ -94,12 +104,17 @@ const titleRules: TitleRule[] = [
   { path: "/about", title: "About" },
   { path: "/acerca-de", title: "Acerca de" },
   { path: "/contact", title: "Contact" },
+  { path: "/privacy-policy", title: "Privacy Policy" },
+  { path: "/terms-and-conditions", title: "Terms & Conditions" },
+  { path: "/cookies-policy", title: "Cookies Policy" },
   { path: "/plans/:planId", title: "Teacher Plan Detail" },
   { path: "/auth", title: "Authentication" },
+  { path: "/maintenance", title: "Maintenance" },
   { path: "/teacher-approval-waiting", title: "Teacher Approval Pending" },
   { path: "/teacher-approval-rejected", title: "Teacher Approval Rejected" },
   { path: "/student", title: "Students Dashboard" },
   { path: "/teacher", title: "Teacher Dashboard" },
+  { path: "/institution", title: "Institution Dashboard" },
   { path: "/courses", title: "Courses" },
   {
     path: "/courses/view/:courseCode",
@@ -157,10 +172,11 @@ const titleRules: TitleRule[] = [
   { path: "/admin", title: "Admin Access" },
   { path: "/admin/dashboard", title: "Admin Dashboard" },
   { path: "/admin/admins", title: "Admin Emails" },
-  { path: "/admin/teacher-approvals", title: "Teacher Approvals" },
+  { path: "/admin/teacher-approvals", title: "Access Approvals" },
   { path: "/admin/teacher-ops", title: "Teacher Operations" },
   { path: "/admin/deletions", title: "Deletion Requests" },
   { path: "/admin/inbox", title: "Admin Inbox" },
+  { path: "/admin/support-conversations", title: "Support Conversations" },
   { path: "/admin/settings", title: "Settings" },
   { path: "/admin/billing", title: "Billing" },
   { path: "/admin/institutions", title: "Institutions" },
@@ -169,28 +185,29 @@ const titleRules: TitleRule[] = [
   { path: "/admin/reports", title: "Reports" },
   { path: "/admin/backups", title: "Backups" },
   { path: "/admin/audit-log", title: "Audit Log" },
-  { path: "/admin/support-conversations", title: "Support Conversations" },
   { path: "/admin/notifications", title: "Notifications" },
   { path: "/admin/permissions", title: "Permissions" },
   { path: "*", title: "Page Not Found" },
 ];
 
-function getDocumentTitle(pathname: string): string {
+function getDocumentTitle(pathname: string, appName: string = DEFAULT_APP_NAME): string {
   for (const rule of titleRules) {
     const match = matchPath({ path: rule.path, end: true }, pathname);
     if (match) {
       const pageTitle =
         typeof rule.title === "function" ? rule.title(match.params) : rule.title;
-      return `${pageTitle} | ${APP_NAME}`;
+      return `${pageTitle} | ${appName}`;
     }
   }
 
-  return APP_NAME;
+  return appName;
 }
 
 function DocumentTitleManager() {
   const { pathname } = useLocation();
   const { user } = useAuth();
+  const { settings } = useAdminPlatformSettings();
+  const appName = String(settings.platformName || "").trim() || DEFAULT_APP_NAME;
 
   useEffect(() => {
     const isProfilePath =
@@ -199,12 +216,61 @@ function DocumentTitleManager() {
       pathname.startsWith("/student/profile/");
 
     if (isProfilePath && user?.name) {
-      document.title = `${user.name} | ${APP_NAME}`;
+      document.title = `${user.name} | ${appName}`;
       return;
     }
 
-    document.title = getDocumentTitle(pathname);
-  }, [pathname, user?.name]);
+    document.title = getDocumentTitle(pathname, appName);
+  }, [appName, pathname, user?.name]);
+
+  return null;
+}
+
+function BrandAssetsManager() {
+  const { settings } = useAdminPlatformSettings();
+
+  useEffect(() => {
+    const faviconHref = resolvePlatformFaviconUrl(settings.logoUrl);
+    const touchIconHref = resolvePlatformTouchIconUrl(settings.logoUrl);
+    const faviconType = faviconHref.endsWith(".svg")
+      ? "image/svg+xml"
+      : faviconHref.endsWith(".ico")
+        ? "image/x-icon"
+        : "image/png";
+    const faviconSizes = faviconHref.endsWith(".svg") ? "any" : "32x32";
+
+    const ensureLink = (
+      selector: string,
+      rel: string,
+      sizes?: string,
+      type?: string,
+    ): HTMLLinkElement => {
+      const existing = document.head.querySelector(selector);
+      if (existing instanceof HTMLLinkElement) return existing;
+      const link = document.createElement("link");
+      link.rel = rel;
+      if (sizes) link.sizes = sizes;
+      if (type) link.type = type;
+      document.head.appendChild(link);
+      return link;
+    };
+
+    const favicon = ensureLink('link[rel="icon"]', "icon", faviconSizes, faviconType);
+    favicon.href = faviconHref;
+    favicon.type = faviconType;
+    favicon.sizes.value = faviconSizes;
+
+    const shortcutIcon = ensureLink('link[rel="shortcut icon"]', "shortcut icon", faviconSizes, faviconType);
+    shortcutIcon.href = faviconHref;
+    shortcutIcon.type = faviconType;
+
+    const appleTouch = ensureLink(
+      'link[rel="apple-touch-icon"]',
+      "apple-touch-icon",
+      "180x180",
+    );
+    appleTouch.href = touchIconHref;
+  }, [settings.logoUrl]);
 
   return null;
 }
@@ -224,6 +290,53 @@ function HomeworkAssessmentDetailRedirect() {
   return <Navigate to={`/courses/${courseCode || ""}/assessments/${assessmentId || ""}/overview`} replace />;
 }
 
+const resolveRoleHomePath = (role?: string): string => {
+  if (role === "docente") return "/teacher";
+  if (role === "admin") return "/admin/dashboard";
+  if (role === "institucion") return "/institution";
+  if (role === "estudiante") return "/student";
+  return "/";
+};
+
+function MaintenanceModeGate({ children }: { children: ReactNode }) {
+  const { pathname, search } = useLocation();
+  const { user, isLoading: authLoading } = useAuth();
+  const { settings, isLoading: settingsLoading } = useAdminPlatformSettings();
+  const maintenanceMode = settings.maintenanceMode === true;
+  const isMaintenancePath = pathname === "/maintenance";
+  const isAuthPath = pathname === "/auth";
+  const isLegalPath =
+    pathname === "/privacy-policy" ||
+    pathname === "/terms-and-conditions" ||
+    pathname === "/cookies-policy";
+  const isAdminUser = user?.role === "admin" || isAdminEmail(user?.email);
+  const isPreviewMode = new URLSearchParams(search).get("preview") === "1";
+
+  if (authLoading || settingsLoading) {
+    return <div className="min-h-screen bg-background" />;
+  }
+
+  if (!maintenanceMode) {
+    if (isMaintenancePath) {
+      return <Navigate to={resolveRoleHomePath(user?.role)} replace />;
+    }
+    return <>{children}</>;
+  }
+
+  if (isAdminUser) {
+    if (isMaintenancePath && !isPreviewMode) {
+      return <Navigate to="/admin/dashboard" replace />;
+    }
+    return <>{children}</>;
+  }
+
+  if (isMaintenancePath || isAuthPath || isLegalPath) {
+    return <>{children}</>;
+  }
+
+  return <Navigate to="/maintenance" replace />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -234,8 +347,10 @@ const App = () => (
             <Sonner />
             <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
               <DocumentTitleManager />
-              <Suspense fallback={<div className="min-h-screen bg-background" />}>
-                <Routes>
+              <BrandAssetsManager />
+              <MaintenanceModeGate>
+                <Suspense fallback={<div className="min-h-screen bg-background" />}>
+                  <Routes>
               {/* ========== RUTAS PÚBLICAS ========== */}
               <Route
                 path="/"
@@ -244,6 +359,10 @@ const App = () => (
               <Route
                 path="/auth"
                 element={<AuthPage />}
+              />
+              <Route
+                path="/maintenance"
+                element={<MaintenancePage />}
               />
               <Route
                 path="/about"
@@ -256,6 +375,18 @@ const App = () => (
               <Route
                 path="/contact"
                 element={<ContactPage />}
+              />
+              <Route
+                path="/privacy-policy"
+                element={<PrivacyPolicyPage />}
+              />
+              <Route
+                path="/terms-and-conditions"
+                element={<TermsConditionsPage />}
+              />
+              <Route
+                path="/cookies-policy"
+                element={<CookiesPolicyPage />}
               />
               <Route
                 path="/plans/:planId"
@@ -295,6 +426,14 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/institution"
+                element={
+                  <ProtectedRoute requiredRole="institucion">
+                    <InstitutionDashboardPage />
+                  </ProtectedRoute>
+                }
+              />
 
               
 
@@ -303,7 +442,7 @@ const App = () => (
               <Route
                 path="/courses"
                 element={
-                  <ProtectedRoute requiredRole={["docente", "estudiante", "admin"]}>
+                  <ProtectedRoute requiredRole={["docente", "estudiante", "admin", "institucion"]}>
                     <CoursesPage />
                   </ProtectedRoute>
                 }
@@ -311,7 +450,7 @@ const App = () => (
               <Route
                 path="/courses/view/:courseCode"
                 element={
-                  <ProtectedRoute requiredRole={["docente", "estudiante", "admin"]}>
+                  <ProtectedRoute requiredRole={["docente", "estudiante", "admin", "institucion"]}>
                     <CoursesPage />
                   </ProtectedRoute>
                 }
@@ -389,7 +528,7 @@ const App = () => (
               <Route
                 path="/calendar"
                 element={
-                  <ProtectedRoute requiredRole={["docente", "estudiante", "admin"]}>
+                  <ProtectedRoute requiredRole={["docente", "estudiante", "admin", "institucion"]}>
                     <CalendarPage />
                   </ProtectedRoute>
                 }
@@ -526,7 +665,7 @@ const App = () => (
                 path="/admin/support-conversations"
                 element={
                   <AdminPermissionRoute permission="manageInbox">
-                    <AdminSupportConversationsPage />
+                    <Navigate to="/admin/inbox" replace />
                   </AdminPermissionRoute>
                 }
               />
@@ -569,7 +708,7 @@ const App = () => (
               <Route
                 path="/courses/create"
                 element={
-                  <ProtectedRoute requiredRole={["docente", "admin"]}>
+                  <ProtectedRoute requiredRole={["docente", "admin", "institucion"]}>
                     <CreateCoursePage />
                   </ProtectedRoute>
                 }
@@ -577,7 +716,7 @@ const App = () => (
               <Route
                 path="/courses/:courseCode/edit"
                 element={
-                  <ProtectedRoute requiredRole={["docente", "admin"]}>
+                  <ProtectedRoute requiredRole={["docente", "admin", "institucion"]}>
                     <CoursesEditPage />
                   </ProtectedRoute>
                 }
@@ -587,7 +726,7 @@ const App = () => (
               <Route
                 path="/students/list"
                 element={
-                  <ProtectedRoute requiredRole="docente">
+                  <ProtectedRoute requiredRole={["docente", "institucion"]}>
                     <StudentsList />
                   </ProtectedRoute>
                 }
@@ -595,7 +734,7 @@ const App = () => (
               <Route
                 path="/students/:studentId"
                 element={
-                  <ProtectedRoute requiredRole="docente">
+                  <ProtectedRoute requiredRole={["docente", "institucion"]}>
                     <StudentDetailPage />
                   </ProtectedRoute>
                 }
@@ -606,7 +745,7 @@ const App = () => (
               <Route
                 path="/students/:studentId/enroll"
                 element={
-                  <ProtectedRoute requiredRole="docente">
+                  <ProtectedRoute requiredRole={["docente", "institucion"]}>
                     <EnrollStudentPage />
                   </ProtectedRoute>
                 }
@@ -680,8 +819,9 @@ const App = () => (
                   </DashboardLayout>
                 )}
               />
-                </Routes>
-              </Suspense>
+                  </Routes>
+                </Suspense>
+              </MaintenanceModeGate>
               <CookieConsentBanner />
             </BrowserRouter>
           </NotificationProvider>

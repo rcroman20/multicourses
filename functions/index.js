@@ -41,6 +41,17 @@ function normalizeRole(value) {
   ) {
     return "estudiante";
   }
+  if (normalized === "admin" || normalized === "administrator") {
+    return "admin";
+  }
+  if (
+    normalized === "institucion" ||
+    normalized === "institution" ||
+    normalized === "organization" ||
+    normalized === "organizacion"
+  ) {
+    return "institucion";
+  }
   return "";
 }
 
@@ -324,6 +335,21 @@ function assertTeacherPlanActive(planContext) {
   }
 }
 
+function getCourseManagerIds(courseData) {
+  return new Set(
+    [
+      courseData?.teacherId,
+      courseData?.createdBy,
+      courseData?.createdById,
+      courseData?.createdByUserId,
+      courseData?.ownerId,
+      courseData?.adminId,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  );
+}
+
 async function deleteSubcollectionDocs(db, parentRef, subcollectionName) {
   const subRef = parentRef.collection(subcollectionName);
   const snap = await subRef.get();
@@ -332,6 +358,224 @@ async function deleteSubcollectionDocs(db, parentRef, subcollectionName) {
   const batch = db.batch();
   snap.docs.forEach((docSnap) => batch.delete(docSnap.ref));
   await batch.commit();
+}
+
+async function deleteDocsInChunks(db, docs, batchSize = 300) {
+  if (!Array.isArray(docs) || docs.length === 0) return 0;
+
+  let deleted = 0;
+  for (let index = 0; index < docs.length; index += batchSize) {
+    const batch = db.batch();
+    docs.slice(index, index + batchSize).forEach((docSnap) => batch.delete(docSnap.ref));
+    await batch.commit();
+    deleted += Math.min(batchSize, docs.length - index);
+  }
+
+  return deleted;
+}
+
+async function deleteByField(db, collectionName, field, value) {
+  if (!value) return 0;
+
+  try {
+    const snap = await db.collection(collectionName).where(field, "==", value).get();
+    return await deleteDocsInChunks(db, snap.docs);
+  } catch {
+    return 0;
+  }
+}
+
+function getInstitutionOwnerId(courseData) {
+  return String(courseData?.createdByInstitutionId || courseData?.institutionId || "").trim();
+}
+
+function isInstitutionOwnedCourse(courseData) {
+  return Boolean(getInstitutionOwnerId(courseData));
+}
+
+async function deleteCourseScopedData(db, courseId) {
+  const courseScopedCollections = [
+    "assessments",
+    "evaluaciones",
+    "gradeSheets",
+    "submissions",
+    "notas",
+    "course_files",
+    "periods",
+    "weeks",
+    "semanas",
+    "unidades",
+    "diapositivas",
+    "exerciseQuestions",
+    "exerciseThemeLinks",
+    "quizAttempts",
+    "assessmentForumComments",
+    "slides",
+    "units",
+    "courseBackups",
+  ];
+
+  await Promise.all(
+    courseScopedCollections.map((collectionName) =>
+      deleteByField(db, collectionName, "courseId", courseId),
+    ),
+  );
+}
+
+async function deleteTeacherOwnedCourses(db, collectionName, teacherId) {
+  if (!teacherId) return;
+
+  try {
+    const snap = await db.collection(collectionName).where("teacherId", "==", teacherId).get();
+    for (const courseSnap of snap.docs) {
+      const courseData = courseSnap.data() || {};
+      if (isInstitutionOwnedCourse(courseData)) {
+        continue;
+      }
+      await deleteCourseScopedData(db, courseSnap.id);
+      await courseSnap.ref.delete().catch(() => undefined);
+    }
+  } catch {
+    // ignore optional cleanup failures
+  }
+}
+
+async function deleteInstitutionOwnedCourses(db, collectionName, institutionId) {
+  if (!institutionId) return;
+
+  try {
+    const [byInstitutionSnap, byCreatorSnap] = await Promise.all([
+      db.collection(collectionName).where("institutionId", "==", institutionId).get(),
+      db.collection(collectionName).where("createdByInstitutionId", "==", institutionId).get(),
+    ]);
+
+    const deduped = new Map();
+    [...byInstitutionSnap.docs, ...byCreatorSnap.docs].forEach((courseSnap) => {
+      deduped.set(courseSnap.id, courseSnap);
+    });
+
+    for (const courseSnap of deduped.values()) {
+      await deleteCourseScopedData(db, courseSnap.id);
+      await courseSnap.ref.delete().catch(() => undefined);
+    }
+  } catch {
+    // ignore optional cleanup failures
+  }
+}
+
+async function removeFromCourseEnrollment(db, collectionName, userId) {
+  if (!userId) return;
+
+  try {
+    const snap = await db
+      .collection(collectionName)
+      .where("enrolledStudents", "array-contains", userId)
+      .get();
+
+    for (let index = 0; index < snap.docs.length; index += 300) {
+      const batch = db.batch();
+      snap.docs.slice(index, index + 300).forEach((courseSnap) => {
+        const data = courseSnap.data() || {};
+        const enrolledStudents = Array.isArray(data.enrolledStudents) ? data.enrolledStudents : [];
+        batch.update(courseSnap.ref, {
+          enrolledStudents: enrolledStudents.filter((entry) => String(entry || "").trim() !== userId),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      });
+      await batch.commit();
+    }
+  } catch {
+    // ignore optional cleanup failures
+  }
+}
+
+async function deleteUserNotifications(db, userId) {
+  if (!userId) return;
+  const userRef = db.collection("usuarios").doc(userId);
+  await deleteSubcollectionDocs(db, userRef, "notifications").catch(() => undefined);
+}
+
+function isInstitutionAccount(userId, userData, studentData) {
+  const candidateRoles = [
+    normalizeRole(userData?.role),
+    normalizeRole(studentData?.role),
+    normalizeRole(userData?.requestedRole),
+    normalizeRole(studentData?.requestedRole),
+  ];
+  if (candidateRoles.includes("institucion")) return true;
+
+  const institutionRoles = [userData?.institutionRole, studentData?.institutionRole]
+    .map((value) => String(value || "").trim().toLowerCase());
+  if (institutionRoles.includes("owner") || institutionRoles.includes("coordinator")) {
+    return true;
+  }
+
+  const institutionId = String(userData?.institutionId || studentData?.institutionId || "").trim();
+  const institutionPlanStatus = String(
+    userData?.institutionPlanStatus ||
+      studentData?.institutionPlanStatus ||
+      userData?.planStatus ||
+      studentData?.planStatus ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
+
+  return Boolean(institutionId && institutionId === userId && institutionPlanStatus);
+}
+
+async function purgeUserData(db, userId, email) {
+  const normalizedEmail = normalizeEmail(email);
+
+  await deleteUserNotifications(db, userId);
+  await Promise.all([
+    removeFromCourseEnrollment(db, "cursos", userId),
+    removeFromCourseEnrollment(db, "courses", userId),
+  ]);
+
+  await Promise.all([
+    deleteTeacherOwnedCourses(db, "cursos", userId),
+    deleteTeacherOwnedCourses(db, "courses", userId),
+    deleteInstitutionOwnedCourses(db, "cursos", userId),
+    deleteInstitutionOwnedCourses(db, "courses", userId),
+  ]);
+
+  const userScopedCleanup = [
+    ["assessments", "createdBy"],
+    ["evaluaciones", "createdBy"],
+    ["gradeSheets", "teacherId"],
+    ["gradeSheets", "createdBy"],
+    ["submissions", "studentId"],
+    ["submissions", "gradedBy"],
+    ["notas", "studentId"],
+    ["notas", "gradedBy"],
+    ["quizAttempts", "studentId"],
+    ["assessmentForumComments", "authorId"],
+    ["assessmentForumComments", "userId"],
+    ["exerciseQuestions", "createdBy"],
+    ["exerciseQuestions", "teacherId"],
+    ["exerciseThemeLinks", "createdBy"],
+    ["courseBackups", "teacherId"],
+  ];
+
+  await Promise.all(
+    userScopedCleanup.map(([collectionName, field]) =>
+      deleteByField(db, collectionName, field, userId),
+    ),
+  );
+
+  if (normalizedEmail) {
+    await Promise.all([
+      deleteByField(db, "usuarios", "email", normalizedEmail),
+      deleteByField(db, "estudiantes", "email", normalizedEmail),
+    ]);
+  }
+
+  await Promise.all([
+    db.collection("usuarios").doc(userId).delete().catch(() => undefined),
+    db.collection("estudiantes").doc(userId).delete().catch(() => undefined),
+    db.collection("instituciones").doc(userId).delete().catch(() => undefined),
+  ]);
 }
 
 async function getDelegatedAdminContext(auth, db) {
@@ -373,6 +617,130 @@ async function assertCallerCanManageDeletions(auth, db) {
   );
 }
 
+function getStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean);
+}
+
+async function assertTeacherCanDeleteStudent(auth, db, targetUserId, userData, studentData) {
+  const actorUserId = String(auth?.uid || "").trim();
+  if (!actorUserId) {
+    throw new HttpsError("permission-denied", "Authentication is required.");
+  }
+
+  const [actorUserSnap, actorStudentSnap, directEnrollmentCoursesSnap] = await Promise.all([
+    db.collection("usuarios").doc(actorUserId).get(),
+    db.collection("estudiantes").doc(actorUserId).get(),
+    db.collection("cursos").where("enrolledStudents", "array-contains", targetUserId).get(),
+  ]);
+
+  const actorUserData = actorUserSnap.exists ? actorUserSnap.data() || {} : {};
+  const actorStudentData = actorStudentSnap.exists ? actorStudentSnap.data() || {} : {};
+  const actorRole = normalizeRole(
+    actorUserData.role ||
+      actorStudentData.role ||
+      actorUserData.requestedRole ||
+      actorStudentData.requestedRole,
+  );
+
+  if (actorRole !== "docente") {
+    throw new HttpsError(
+      "permission-denied",
+      "You do not have permission to process account deletions.",
+    );
+  }
+
+  assertTeacherApproved(actorUserData, actorStudentData);
+
+  const targetRole = normalizeRole(userData.role || studentData.role);
+  const targetRequestedRole = normalizeRole(
+    userData.requestedRole || studentData.requestedRole,
+  );
+
+  if (targetRole !== "estudiante" || targetRequestedRole === "docente") {
+    throw new HttpsError(
+      "failed-precondition",
+      "Only student accounts can be deleted from the teacher panel.",
+    );
+  }
+
+  const directEnrollmentCourses = directEnrollmentCoursesSnap.docs;
+  if (directEnrollmentCourses.length > 0) {
+    const teacherManagesAllCourses = directEnrollmentCourses.every((courseSnap) =>
+      getCourseManagerIds(courseSnap.data() || {}).has(actorUserId),
+    );
+
+    if (!teacherManagesAllCourses) {
+      throw new HttpsError(
+        "permission-denied",
+        "Teachers can only delete students assigned exclusively to their own courses.",
+      );
+    }
+
+    return;
+  }
+
+  const fallbackCourseIds = getStringArray(studentData.courses);
+  if (!fallbackCourseIds.length) {
+    throw new HttpsError(
+      "permission-denied",
+      "Teachers can only delete students who belong to their own courses.",
+    );
+  }
+
+  const fallbackCourseSnaps = await Promise.all(
+    fallbackCourseIds.map((courseId) => db.collection("cursos").doc(courseId).get()),
+  );
+  const existingFallbackCourses = fallbackCourseSnaps.filter((courseSnap) => courseSnap.exists);
+
+  if (!existingFallbackCourses.length) {
+    throw new HttpsError(
+      "permission-denied",
+      "Teachers can only delete students who belong to their own courses.",
+    );
+  }
+
+  const teacherManagesAllFallbackCourses = existingFallbackCourses.every((courseSnap) =>
+    getCourseManagerIds(courseSnap.data() || {}).has(actorUserId),
+  );
+
+  if (!teacherManagesAllFallbackCourses) {
+    throw new HttpsError(
+      "permission-denied",
+      "Teachers can only delete students assigned exclusively to their own courses.",
+    );
+  }
+}
+
+async function assertCallerCanDeleteUser(auth, db, targetUserId, userData, studentData) {
+  const actorUserId = String(auth?.uid || "").trim();
+  if (actorUserId && actorUserId === targetUserId) {
+    const effectiveRole = normalizeRole(
+      userData.role ||
+        studentData.role ||
+        userData.requestedRole ||
+        studentData.requestedRole,
+    );
+    if (effectiveRole === "docente" || isInstitutionAccount(targetUserId, userData, studentData)) {
+      return;
+    }
+  }
+
+  try {
+    await assertCallerCanManageDeletions(auth, db);
+    return;
+  } catch (error) {
+    const code = String(error?.code || "");
+    if (!code.includes("permission-denied")) {
+      throw error;
+    }
+  }
+
+  await assertTeacherCanDeleteStudent(auth, db, targetUserId, userData, studentData);
+}
+
 exports.deleteUserByAdmin = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Authentication is required.");
@@ -385,7 +753,6 @@ exports.deleteUserByAdmin = onCall(async (request) => {
   }
 
   const db = admin.firestore();
-  await assertCallerCanManageDeletions(request.auth, db);
   const userDocRef = db.collection("usuarios").doc(userId);
   const studentDocRef = db.collection("estudiantes").doc(userId);
 
@@ -397,6 +764,8 @@ exports.deleteUserByAdmin = onCall(async (request) => {
   const userData = userSnap.exists ? userSnap.data() || {} : {};
   const studentData = studentSnap.exists ? studentSnap.data() || {} : {};
 
+  await assertCallerCanDeleteUser(request.auth, db, userId, userData, studentData);
+
   const targetEmail = normalizeEmail(userData.email || studentData.email);
   if (targetEmail === OWNER_ADMIN_EMAIL) {
     throw new HttpsError(
@@ -405,10 +774,13 @@ exports.deleteUserByAdmin = onCall(async (request) => {
     );
   }
 
-  const roleRaw = String(userData.role || studentData.role || "")
-    .trim()
-    .toLowerCase();
-  if (!allowTeacherDeletion && (roleRaw === "docente" || roleRaw === "teacher")) {
+  const effectiveRole = normalizeRole(
+    userData.role ||
+      studentData.role ||
+      userData.requestedRole ||
+      studentData.requestedRole,
+  );
+  if (!allowTeacherDeletion && effectiveRole === "docente") {
     throw new HttpsError(
       "failed-precondition",
       "Teacher accounts require manual review before deletion.",
@@ -425,19 +797,11 @@ exports.deleteUserByAdmin = onCall(async (request) => {
   }
 
   await Promise.all([
-    deleteSubcollectionDocs(db, userDocRef, "notifications").catch(() => undefined),
-    db
-      .collection("accountDeletionRequests")
-      .doc(userId)
-      .delete()
-      .catch(() => undefined),
+    db.collection("accountDeletionRequests").doc(userId).delete().catch(() => undefined),
     db.collection("deletedAccounts").doc(userId).delete().catch(() => undefined),
   ]);
 
-  await Promise.all([
-    userDocRef.delete().catch(() => undefined),
-    studentDocRef.delete().catch(() => undefined),
-  ]);
+  await purgeUserData(db, userId, targetEmail);
 
   return { ok: true, userId };
 });
@@ -472,6 +836,19 @@ exports.createCourseWithPlan = onCall(async (request) => {
   const [userSnap, studentSnap] = await Promise.all([userRef.get(), studentRef.get()]);
   const userData = userSnap.exists ? userSnap.data() || {} : {};
   const studentData = studentSnap.exists ? studentSnap.data() || {} : {};
+
+  const isInstitutionManagedTeacher =
+    normalizeRole(userData.role || studentData.role || userData.requestedRole || studentData.requestedRole) === "docente" &&
+    (Boolean(userData.institutionManaged) ||
+      Boolean(studentData.institutionManaged) ||
+      String(userData.institutionId || studentData.institutionId || "").trim().length > 0);
+
+  if (isInstitutionManagedTeacher) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Institution-managed teachers cannot create courses. Your institution must create and assign them.",
+    );
+  }
 
   assertTeacherApproved(userData, studentData);
   const planContext = getTeacherPlanContext(userData, studentData);
@@ -574,17 +951,104 @@ exports.changeCourseEnrollmentWithPlan = onCall(async (request) => {
 
   const courseData = courseSnap.data() || {};
   const teacherId = String(courseData.teacherId || "").trim();
-  if (!teacherId) {
-    throw new HttpsError("failed-precondition", "Course has no teacher assigned.");
-  }
-
-  const canManageAsTeacher = actorUserId === teacherId;
+  const [actorUserSnap, actorStudentSnap, adminContext] = await Promise.all([
+    db.collection("usuarios").doc(actorUserId).get(),
+    db.collection("estudiantes").doc(actorUserId).get(),
+    getDelegatedAdminContext(request.auth, db),
+  ]);
+  const actorUserData = actorUserSnap.exists ? actorUserSnap.data() || {} : {};
+  const actorStudentData = actorStudentSnap.exists ? actorStudentSnap.data() || {} : {};
+  const actorRole = normalizeRole(
+    actorUserData.role ||
+      actorStudentData.role ||
+      actorUserData.requestedRole ||
+      actorStudentData.requestedRole,
+  );
+  const canManageAsTeacher = Boolean(teacherId) && actorUserId === teacherId;
   const canManageAsSelf = actorUserId === studentId;
-  if (!canManageAsTeacher && !canManageAsSelf) {
+  const canManageAsAdminOwner =
+    (actorRole === "admin" || adminContext.isOwner || adminContext.isDelegatedAdmin) &&
+    getCourseManagerIds(courseData).has(actorUserId);
+  if (!canManageAsTeacher && !canManageAsSelf && !canManageAsAdminOwner) {
     throw new HttpsError(
       "permission-denied",
       "You are not allowed to change this enrollment.",
     );
+  }
+
+  if (!teacherId) {
+    if (canManageAsSelf || canManageAsAdminOwner) {
+      const studentRef = db.collection("estudiantes").doc(studentId);
+      await db.runTransaction(async (transaction) => {
+        const [freshCourseSnap, studentSnap] = await Promise.all([
+          transaction.get(courseRef),
+          transaction.get(studentRef),
+        ]);
+
+        if (!freshCourseSnap.exists) {
+          throw new HttpsError("not-found", "Course not found.");
+        }
+
+        const freshCourseData = freshCourseSnap.data() || {};
+        const currentStudents = Array.isArray(freshCourseData.enrolledStudents)
+          ? freshCourseData.enrolledStudents
+          : [];
+        const isCurrentlyEnrolled = currentStudents.includes(studentId);
+
+        if (action === "enroll" && !isCurrentlyEnrolled) {
+          transaction.update(courseRef, {
+            enrolledStudents: [...currentStudents, studentId],
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+
+        if (action === "unenroll" && isCurrentlyEnrolled) {
+          transaction.update(courseRef, {
+            enrolledStudents: currentStudents.filter((id) => id !== studentId),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+
+        if (studentSnap.exists) {
+          const studentData = studentSnap.data() || {};
+          const currentCourses = Array.isArray(studentData.courses) ? studentData.courses : [];
+          if (action === "enroll" && !currentCourses.includes(courseId)) {
+            transaction.update(studentRef, {
+              courses: [...currentCourses, courseId],
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+          if (action === "unenroll" && currentCourses.includes(courseId)) {
+            transaction.update(studentRef, {
+              courses: currentCourses.filter((id) => id !== courseId),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        } else if (action === "enroll") {
+          transaction.set(
+            studentRef,
+            {
+              id: studentId,
+              role: "estudiante",
+              courses: [courseId],
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
+      });
+
+      return {
+        ok: true,
+        courseId,
+        studentId,
+        action,
+        planName: canManageAsSelf ? "Self enrollment" : "Admin managed",
+        studentLimit: 0,
+      };
+    }
+
+    throw new HttpsError("failed-precondition", "Course has no teacher assigned.");
   }
 
   const teacherUserRef = db.collection("usuarios").doc(teacherId);

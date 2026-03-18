@@ -33,7 +33,7 @@ const formatDateTime = (value?: Date | null): string => {
 };
 
 const getDueBadgeClassName = (scheduledDeletionAt?: Date | null): string => {
-  if (!scheduledDeletionAt) return "border-slate-200 bg-slate-50 text-slate-700";
+  if (!scheduledDeletionAt) return "border-slate-200/60 bg-slate-50 text-slate-700";
   const now = Date.now();
   const dueAt = scheduledDeletionAt.getTime();
   if (dueAt <= now) return "border-rose-200 bg-rose-50 text-rose-700";
@@ -150,9 +150,9 @@ export default function AdminAccessDeletionsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <section className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
@@ -172,7 +172,7 @@ export default function AdminAccessDeletionsPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <ShieldCheck className="h-4 w-4" />
@@ -181,7 +181,7 @@ export default function AdminAccessDeletionsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Pending queue</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-rose-100 text-rose-700">
                         <AlertTriangle className="h-4 w-4" />
@@ -190,7 +190,7 @@ export default function AdminAccessDeletionsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Due now</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                         <Users className="h-4 w-4" />
@@ -199,7 +199,7 @@ export default function AdminAccessDeletionsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Teacher requests</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                         <UserCheck className="h-4 w-4" />
@@ -212,7 +212,7 @@ export default function AdminAccessDeletionsPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Deletion Queue</p>
@@ -237,19 +237,19 @@ export default function AdminAccessDeletionsPage() {
                   </div>
                 </div>
               ) : errorMessage ? (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                   <AlertTriangle className="mx-auto h-9 w-9 text-slate-400" />
                   <p className="mt-2 text-sm font-medium text-slate-700">{errorMessage}</p>
                   <button
                     type="button"
                     onClick={() => void loadRequests()}
-                    className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="mt-3 rounded-lg border border-slate-200/60 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     Retry
                   </button>
                 </div>
               ) : requests.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                   <CheckCircle2 className="mx-auto h-9 w-9 text-emerald-500" />
                   <p className="mt-2 text-sm font-medium text-slate-700">No pending deletion requests</p>
                   <p className="text-xs text-slate-500">Queue is clear. New requests will appear here.</p>
@@ -261,7 +261,7 @@ export default function AdminAccessDeletionsPage() {
                     return (
                       <article
                         key={request.userId}
-                        className="rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                        className="rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                       >
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                           <div className="min-w-0">

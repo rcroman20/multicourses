@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { firebaseDB } from "@/lib/firebase";
 import { appendAdminAuditLog } from "@/lib/services/adminAuditLogService";
 import { assertAdminPermission } from "@/lib/services/adminPermissionGuardService";
+import { useAdminPlatformSettings } from "@/lib/services/adminSettingsService";
 import {
   courseBackupService,
   type CourseBackupPayload,
@@ -74,7 +75,7 @@ const getAgeLabel = (value: Date | null): string => {
 };
 
 const getAgeBadgeClassName = (value: Date | null): string => {
-  if (!value) return "border-slate-200 bg-slate-50 text-slate-700";
+  if (!value) return "border-slate-200/60 bg-slate-50 text-slate-700";
   const diffDays = Math.max(0, Math.floor((Date.now() - value.getTime()) / (24 * 60 * 60 * 1000)));
   if (diffDays >= 30) return "border-rose-200 bg-rose-50 text-rose-700";
   if (diffDays >= 14) return "border-amber-200 bg-amber-50 text-amber-700";
@@ -83,6 +84,8 @@ const getAgeBadgeClassName = (value: Date | null): string => {
 
 export default function AdminBackupsPage() {
   const { user } = useAuth();
+  const { settings } = useAdminPlatformSettings();
+  const allowBackupDeletionByAdmin = settings.allowBackupDeletionByAdmin !== false;
   const [snapshots, setSnapshots] = useState<AdminBackupSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -101,7 +104,7 @@ export default function AdminBackupsPage() {
         return createdAt ? createdAt.getTime() < cutoffMs : false;
       });
 
-      if (staleDocs.length > 0 && user?.email) {
+      if (allowBackupDeletionByAdmin && staleDocs.length > 0 && user?.email) {
         try {
           assertAdminPermission(
             "manageBackups",
@@ -147,7 +150,7 @@ export default function AdminBackupsPage() {
 
   useEffect(() => {
     void loadSnapshots();
-  }, []);
+  }, [allowBackupDeletionByAdmin, user?.email]);
 
   const filteredSnapshots = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -193,6 +196,11 @@ export default function AdminBackupsPage() {
   };
 
   const handleDelete = async (snapshot: AdminBackupSnapshot) => {
+    if (!allowBackupDeletionByAdmin) {
+      toast.error("Backup deletion is currently disabled in platform settings.");
+      return;
+    }
+
     const confirmed = window.confirm(`Delete backup snapshot for ${snapshot.courseCode}?`);
     if (!confirmed) return;
 
@@ -229,9 +237,9 @@ export default function AdminBackupsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <section className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
@@ -251,7 +259,7 @@ export default function AdminBackupsPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-orange-100 text-orange-700">
                         <ArchiveRestore className="h-4 w-4" />
@@ -260,7 +268,7 @@ export default function AdminBackupsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Snapshots indexed</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <UserCog className="h-4 w-4" />
@@ -269,7 +277,7 @@ export default function AdminBackupsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Teachers covered</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <AlertTriangle className="h-4 w-4" />
@@ -278,7 +286,7 @@ export default function AdminBackupsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Older than 30d</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                         <CheckCircle2 className="h-4 w-4" />
@@ -295,7 +303,7 @@ export default function AdminBackupsPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Snapshot Registry</p>
@@ -308,7 +316,7 @@ export default function AdminBackupsPage() {
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                     placeholder="Search backups..."
-                    className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                    className="w-full rounded-xl border border-slate-200/60 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
                   />
                 </div>
               </div>
@@ -322,19 +330,19 @@ export default function AdminBackupsPage() {
                   </div>
                 </div>
               ) : errorMessage ? (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                   <AlertTriangle className="mx-auto h-9 w-9 text-slate-400" />
                   <p className="mt-2 text-sm font-medium text-slate-700">{errorMessage}</p>
                   <button
                     type="button"
                     onClick={() => void loadSnapshots()}
-                    className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="mt-3 rounded-lg border border-slate-200/60 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     Retry
                   </button>
                 </div>
               ) : filteredSnapshots.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                   <ArchiveRestore className="mx-auto h-9 w-9 text-slate-400" />
                   <p className="mt-2 text-sm font-medium text-slate-700">No backup snapshots found</p>
                   <p className="text-xs text-slate-500">Snapshots will appear here after teachers export course backups.</p>
@@ -344,7 +352,7 @@ export default function AdminBackupsPage() {
                   {filteredSnapshots.map((snapshot) => (
                     <article
                       key={snapshot.id}
-                      className="rounded-xl border border-slate-200 bg-white p-3 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                      className="rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                     >
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div className="min-w-0 flex-1">
@@ -379,7 +387,7 @@ export default function AdminBackupsPage() {
                           </button>
                           <button
                             type="button"
-                            disabled={Boolean(deletingById[snapshot.id])}
+                            disabled={!allowBackupDeletionByAdmin || Boolean(deletingById[snapshot.id])}
                             onClick={() => void handleDelete(snapshot)}
                             className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
                           >
@@ -396,18 +404,18 @@ export default function AdminBackupsPage() {
               )}
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-slate-50/70 p-4 shadow-sm">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Operational Notes</p>
                   <p className="text-xs text-slate-500">What the backup registry is telling you right now.</p>
                 </div>
-                <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
+                <span className="rounded-full border border-slate-200/60 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">
                   {filteredSnapshots.length} visible
                 </span>
               </div>
               <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
-                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="rounded-xl border border-slate-200/60 bg-white p-3">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Coverage</p>
                   <p className="mt-1 text-sm font-semibold text-slate-900">
                     {teacherCoverageCount > 0
@@ -415,7 +423,7 @@ export default function AdminBackupsPage() {
                       : "No teacher backup coverage detected yet."}
                   </p>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="rounded-xl border border-slate-200/60 bg-white p-3">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Retention</p>
                   <p className="mt-1 text-sm font-semibold text-slate-900">
                     {staleCount > 0
@@ -423,10 +431,10 @@ export default function AdminBackupsPage() {
                       : "No stale backup snapshots detected."}
                   </p>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="rounded-xl border border-slate-200/60 bg-white p-3">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Access</p>
                   <p className="mt-1 text-sm font-semibold text-slate-900">
-                    Download and deletion actions are restricted by delegated backup permissions.
+                    Download actions follow delegated backup permissions. Deletion is currently {allowBackupDeletionByAdmin ? "enabled" : "disabled"} in platform settings.
                   </p>
                 </div>
               </div>

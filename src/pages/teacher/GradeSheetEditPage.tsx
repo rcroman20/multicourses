@@ -415,7 +415,7 @@ setIsPublished(data.isPublished || false);
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-3 lg:p-5 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)]">
+          <div className="relative border border-slate-200/60 bg-white p-3 lg:p-5 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)]">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="text-center">
                 <div className="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
@@ -434,7 +434,7 @@ setIsPublished(data.isPublished || false);
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-3 lg:p-5 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)]">
+          <div className="relative border border-slate-200/60 bg-white p-3 lg:p-5 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)]">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="text-center">
                 <AlertCircle className="mx-auto mb-3 h-10 w-10 text-slate-400" />
@@ -444,7 +444,7 @@ setIsPublished(data.isPublished || false);
                 </p>
                 <Button
                   onClick={() => navigate(`/courses/${courseCode}/grade-sheets`)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200/60 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" />
                   Back to Grade Sheets
@@ -462,9 +462,9 @@ setIsPublished(data.isPublished || false);
       <div className="relative overflow-x-hidden">
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-3 lg:p-5 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)]">
+        <div className="relative border border-slate-200/60 bg-white p-3 lg:p-5 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)]">
           <div className="flex flex-col gap-3">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50/70 p-3.5 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50/70 p-3.5 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
               <div className="relative z-10 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -482,7 +482,7 @@ setIsPublished(data.isPublished || false);
                   <div className="mt-2.5">
                     <Link
                       to={`/courses/${courseCode}/grade-sheets`}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200/60 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                     >
                       <ArrowLeft className="h-3.5 w-3.5" />
                       Back to Grade Sheets
@@ -497,7 +497,7 @@ setIsPublished(data.isPublished || false);
                       'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition',
                       isPublished
                         ? 'border-sky-200 bg-sky-50 text-sky-600 hover:bg-sky-100'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                        : 'border-slate-200/60 bg-white text-slate-700 hover:bg-slate-50',
                     )}
                     disabled={isSaving}
                   >
@@ -591,7 +591,7 @@ setIsPublished(data.isPublished || false);
               </div>
             )}
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-3.5 shadow-sm">
               <h2 className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold text-slate-900">
                 <FileSpreadsheet className="h-3.5 w-3.5 text-sky-600" />
                 Grade Sheet Information
@@ -606,7 +606,7 @@ setIsPublished(data.isPublished || false);
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Enter grade sheet title"
-                    className="w-full rounded-xl border-slate-300 bg-white text-slate-700 focus-visible:ring-sky-200"
+                    className="w-full rounded-xl border-slate-300/60 bg-white text-slate-700 focus-visible:ring-sky-200"
                   />
                   <p className="mt-1 text-xs text-slate-500">
                     A descriptive title for this grade sheet (e.g., "Midterm Exam", "Quarter 1 Assessments")
@@ -621,7 +621,7 @@ setIsPublished(data.isPublished || false);
                    <select
   value={gradingPeriod || ''}
   onChange={(e) => setGradingPeriod(e.target.value)}
-  className="h-9 w-full rounded-xl border border-slate-300 bg-white px-3 text-xs text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+  className="h-9 w-full rounded-xl border border-slate-300/60 bg-white px-3 text-xs text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
 >
   <option value="">Select grading period...</option>
   {GRADING_PERIODS.map(period => (
@@ -645,7 +645,7 @@ setIsPublished(data.isPublished || false);
                         value={weightPercentage}
                         onChange={(e) => setWeightPercentage(Number(e.target.value))}
                         placeholder="0"
-                        className="w-full rounded-xl border-slate-300 bg-white pl-3 pr-10 text-slate-700 focus-visible:ring-sky-200"
+                        className="w-full rounded-xl border-slate-300/60 bg-white pl-3 pr-10 text-slate-700 focus-visible:ring-sky-200"
                       />
                       <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
                         %
@@ -659,12 +659,12 @@ setIsPublished(data.isPublished || false);
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-3.5 shadow-sm">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-xs font-semibold text-slate-900">Activities</h2>
                 <Button
                   onClick={addActivity}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200/60 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add Activity
@@ -675,7 +675,7 @@ setIsPublished(data.isPublished || false);
                 {activities.map((activity, index) => (
                   <div
                     key={activity.id}
-                    className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                    className="rounded-xl border border-slate-200/60 bg-slate-50 p-3"
                   >
                     <div className="flex items-center justify-between mb-2">
                       <h3 className="font-medium text-slate-900">Activity {index + 1}</h3>
@@ -696,7 +696,7 @@ setIsPublished(data.isPublished || false);
                           value={activity.name}
                           onChange={(e) => updateActivity(index, 'name', e.target.value)}
                           placeholder="e.g., Quiz 1, Final Exam, Homework"
-                          className="w-full rounded-xl border-slate-300 bg-white text-slate-700 focus-visible:ring-sky-200"
+                          className="w-full rounded-xl border-slate-300/60 bg-white text-slate-700 focus-visible:ring-sky-200"
                         />
                       </div>
                       
@@ -707,7 +707,7 @@ setIsPublished(data.isPublished || false);
                         <select
                           value={activity.type}
                           onChange={(e) => updateActivity(index, 'type', e.target.value)}
-                          className="h-9 w-full rounded-xl border border-slate-300 bg-white px-3 text-xs text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                          className="h-9 w-full rounded-xl border border-slate-300/60 bg-white px-3 text-xs text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                         >
                           <option value="">Select type...</option>
                           {ACTIVITY_TYPES.map(type => (
@@ -728,7 +728,7 @@ setIsPublished(data.isPublished || false);
                           <select
                             value={activity.maxScore}
                             onChange={(e) => updateActivity(index, 'maxScore', Number(e.target.value))}
-                            className="h-9 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-xs text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                            className="h-9 flex-1 rounded-xl border border-slate-300/60 bg-white px-3 text-xs text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                           >
                             {MAX_SCORES.map(score => (
                               <option key={score} value={score}>
@@ -742,7 +742,7 @@ setIsPublished(data.isPublished || false);
                             max="1000"
                             value={activity.maxScore}
                             onChange={(e) => updateActivity(index, 'maxScore', Number(e.target.value))}
-                            className="w-24 rounded-xl border-slate-300 bg-white text-slate-700 focus-visible:ring-sky-200"
+                            className="w-24 rounded-xl border-slate-300/60 bg-white text-slate-700 focus-visible:ring-sky-200"
                           />
                         </div>
                       </div>
@@ -751,7 +751,7 @@ setIsPublished(data.isPublished || false);
                         <label className="mb-2 block text-xs font-medium text-slate-700">
                           Current Score
                         </label>
-                        <div className="rounded-xl border border-slate-200 bg-white p-2 text-sm text-slate-500">
+                        <div className="rounded-xl border border-slate-200/60 bg-white p-2 text-sm text-slate-500">
                           Students will enter scores from 0 to {activity.maxScore}
                         </div>
                       </div>
@@ -766,7 +766,7 @@ setIsPublished(data.isPublished || false);
                         onChange={(e) => updateActivity(index, 'description', e.target.value)}
                         placeholder="Brief description of the activity..."
                         rows={2}
-                        className="w-full rounded-xl border-slate-300 bg-white text-slate-700 focus-visible:ring-sky-200"
+                        className="w-full rounded-xl border-slate-300/60 bg-white text-slate-700 focus-visible:ring-sky-200"
                       />
                     </div>
                   </div>
@@ -774,7 +774,7 @@ setIsPublished(data.isPublished || false);
               </div>
               
               {activities.length === 0 && (
-                <div className="rounded-xl border-2 border-dashed border-slate-300 py-8 text-center">
+                <div className="rounded-xl border-2 border-dashed border-slate-300/60 py-8 text-center">
                   <FileSpreadsheet className="mx-auto mb-3 h-10 w-10 text-slate-300" />
                   <p className="text-slate-500">No activities added yet</p>
                   <p className="mt-1 text-sm text-slate-400">
@@ -793,7 +793,7 @@ setIsPublished(data.isPublished || false);
           </div>
 
           <div className="space-y-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm">
+            <div className="rounded-2xl border border-slate-200/60 bg-white p-3.5 shadow-sm">
               <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-800">Summary</h3>
               
               <div className="space-y-1.5">
@@ -814,7 +814,7 @@ setIsPublished(data.isPublished || false);
                     className={
                       isPublished
                         ? 'border-sky-200 bg-sky-50 px-2 py-0 text-[10px] font-semibold text-sky-600'
-                        : 'border-slate-200 bg-slate-100 px-2 py-0 text-[10px] font-semibold text-slate-700'
+                        : 'border-slate-200/60 bg-slate-100 px-2 py-0 text-[10px] font-semibold text-slate-700'
                     }
                   >
                     {isPublished ? 'Published' : 'Draft'}
@@ -846,10 +846,10 @@ setIsPublished(data.isPublished || false);
                 </div>
               </div>
               
-              <div className="mt-3 border-t border-slate-200 pt-2.5">
+              <div className="mt-3 border-t border-slate-200/60 pt-2.5">
                 <Button
                   onClick={() => navigate(`/courses/${courseCode}/grade-sheets`)}
-                  className="mt-3 h-8 w-full rounded-xl border border-slate-200 bg-white text-xs font-medium text-slate-700 transition hover:bg-slate-50"
+                  className="mt-3 h-8 w-full rounded-xl border border-slate-200/60 bg-white text-xs font-medium text-slate-700 transition hover:bg-slate-50"
                 >
                   Cancel
                 </Button>
@@ -862,7 +862,7 @@ setIsPublished(data.isPublished || false);
                 ? weightPercentage <= 100
                   ? 'border-sky-100 bg-sky-50'
                   : 'border-rose-200 bg-rose-50'
-                : 'border-slate-200 bg-slate-50'
+                : 'border-slate-200/60 bg-slate-50'
             )}>
               <h3 className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold text-slate-900">
                 <Percent className="h-3.5 w-3.5" />
@@ -917,10 +917,10 @@ setIsPublished(data.isPublished || false);
           }}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)]"
+            className="w-full max-w-md rounded-2xl border border-slate-200/60 bg-white shadow-[0_32px_72px_-40px_rgba(15,23,42,0.6)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="border-b border-slate-200 px-4 py-3">
+            <div className="border-b border-slate-200/60 px-4 py-3">
               <div className="flex items-center gap-2">
                 <div className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-600">
                   <AlertCircle className="h-4 w-4" />
@@ -938,12 +938,12 @@ setIsPublished(data.isPublished || false);
               You are about to permanently remove <span className="font-semibold text-slate-900">{title || 'this sheet'}</span> and all its grades.
             </div>
 
-            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200/60 px-4 py-3">
               <button
                 type="button"
                 onClick={() => setShowDeleteModal(false)}
                 disabled={isDeleting}
-                className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center rounded-lg border border-slate-200/60 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Cancel
               </button>

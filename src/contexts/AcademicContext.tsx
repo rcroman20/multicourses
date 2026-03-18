@@ -149,6 +149,10 @@ const areCoursesEqual = (prev: Course[], next: Course[]): boolean => {
       prevCourse.credits !== nextCourse.credits ||
       prevCourse.teacherId !== nextCourse.teacherId ||
       prevCourse.teacherName !== nextCourse.teacherName ||
+      (prevCourse.institutionId || '') !== (nextCourse.institutionId || '') ||
+      (prevCourse.institutionName || '') !== (nextCourse.institutionName || '') ||
+      (prevCourse.createdByInstitutionId || '') !== (nextCourse.createdByInstitutionId || '') ||
+      (prevCourse.createdByInstitutionName || '') !== (nextCourse.createdByInstitutionName || '') ||
       prevCourse.description !== nextCourse.description ||
       (prevCourse.coverUrl || '') !== (nextCourse.coverUrl || '') ||
       toTimestamp(prevCourse.createdAt) !== toTimestamp(nextCourse.createdAt)
@@ -190,6 +194,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? '';
   const userRole = user?.role;
+  const institutionId = user?.institutionId ?? '';
   const [courses, setCourses] = useState<Course[]>([]);
   const [teacherOnboardingCourse, setTeacherOnboardingCourse] = useState<Course | null>(null);
   const [selectedCourseId, setSelectedCourseIdState] = useState<string>('');
@@ -245,6 +250,10 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
       credits: data.credits || 0,
       teacherId: data.teacherId || '',
       teacherName: data.teacherName || '',
+      institutionId: data.institutionId || '',
+      institutionName: data.institutionName || '',
+      createdByInstitutionId: data.createdByInstitutionId || '',
+      createdByInstitutionName: data.createdByInstitutionName || '',
       description: data.description || '',
       coverUrl: data.coverUrl || '',
       classSchedule: normalizeClassSchedule(data.classSchedule),
@@ -284,6 +293,10 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             credits: data.credits || 0,
             teacherId: data.teacherId || '',
             teacherName: data.teacherName || '',
+            institutionId: data.institutionId || '',
+            institutionName: data.institutionName || '',
+            createdByInstitutionId: data.createdByInstitutionId || '',
+            createdByInstitutionName: data.createdByInstitutionName || '',
             description: data.description || '',
             coverUrl: data.coverUrl || '',
             classSchedule: normalizeClassSchedule(data.classSchedule),
@@ -310,6 +323,10 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             credits: data.credits || 0,
             teacherId: data.teacherId || '',
             teacherName: data.teacherName || '',
+            institutionId: data.institutionId || '',
+            institutionName: data.institutionName || '',
+            createdByInstitutionId: data.createdByInstitutionId || '',
+            createdByInstitutionName: data.createdByInstitutionName || '',
             description: data.description || '',
             coverUrl: data.coverUrl || '',
             classSchedule: normalizeClassSchedule(data.classSchedule),
@@ -340,6 +357,10 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             credits: data.credits || 0,
             teacherId: data.teacherId || '',
             teacherName: data.teacherName || '',
+            institutionId: data.institutionId || '',
+            institutionName: data.institutionName || '',
+            createdByInstitutionId: data.createdByInstitutionId || '',
+            createdByInstitutionName: data.createdByInstitutionName || '',
             description: data.description || '',
             coverUrl: data.coverUrl || '',
             classSchedule: normalizeClassSchedule(data.classSchedule),
@@ -368,6 +389,10 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             credits: data.credits || 0,
             teacherId: data.teacherId || '',
             teacherName: data.teacherName || '',
+            institutionId: data.institutionId || '',
+            institutionName: data.institutionName || '',
+            createdByInstitutionId: data.createdByInstitutionId || '',
+            createdByInstitutionName: data.createdByInstitutionName || '',
             description: data.description || '',
             coverUrl: data.coverUrl || '',
             classSchedule: normalizeClassSchedule(data.classSchedule),
@@ -375,6 +400,37 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             createdAt: data.createdAt?.toDate() || new Date(),
           });
         });
+      } else if (userRole === 'institucion' && institutionId) {
+        const q = query(
+          coursesRef,
+          where('institutionId', '==', institutionId),
+        );
+        const querySnapshot = await getDocs(q);
+
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          coursesData.push({
+            id: doc.id,
+            name: data.name || '',
+            code: data.code || '',
+            semester: data.semester || '',
+            group: data.group || '',
+            credits: data.credits || 0,
+            teacherId: data.teacherId || '',
+            teacherName: data.teacherName || '',
+            institutionId: data.institutionId || '',
+            institutionName: data.institutionName || '',
+            createdByInstitutionId: data.createdByInstitutionId || '',
+            createdByInstitutionName: data.createdByInstitutionName || '',
+            description: data.description || '',
+            coverUrl: data.coverUrl || '',
+            classSchedule: normalizeClassSchedule(data.classSchedule),
+            enrolledStudents: data.enrolledStudents || [],
+            createdAt: data.createdAt?.toDate() || new Date(),
+          });
+        });
+
+        coursesData.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
       } else {
         setCoursesSafely([]);
         setLoadingFlag('courses', false);
@@ -386,7 +442,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoadingFlag('courses', false);
     }
-  }, [setCoursesSafely, setLoadingFlag, teacherOnboardingCourse, userId, userRole]);
+  }, [institutionId, setCoursesSafely, setLoadingFlag, teacherOnboardingCourse, userId, userRole]);
 
   // Cargar evaluaciones para todos los cursos del usuario
   useEffect(() => {
@@ -399,17 +455,26 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     const loadAllAssessments = async () => {
       setLoadingFlag('assessments', true);
       try {
-        let allAssessments: Assessment[] = [];
+        const assessmentsById = new Map<string, Assessment>();
         
         for (const course of courses) {
           try {
-            const courseAssessments = await assessmentService.getCourseAssessments(course.id);
-            allAssessments = [...allAssessments, ...courseAssessments];
+            const courseAssessments = await assessmentService.getCourseAssessments(course.id, {
+              courseCode: course.code,
+              courseName: course.name,
+            });
+            courseAssessments.forEach((assessment) => {
+              assessmentsById.set(assessment.id, assessment);
+            });
           } catch (error) {
           }
         }
-        
-        setAssessments(allAssessments);
+
+        setAssessments(
+          Array.from(assessmentsById.values()).sort(
+            (a, b) => toTimestamp(b.createdAt) - toTimestamp(a.createdAt),
+          ),
+        );
       } catch (error) {
       } finally {
         setLoadingFlag('assessments', false);
@@ -444,7 +509,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
             } catch (error) {
             }
           }
-        } else if (userRole === 'docente' || userRole === 'admin') {
+        } else if (userRole === 'docente' || userRole === 'admin' || userRole === 'institucion') {
           // Para docentes, cargar todas las calificaciones de sus cursos
           for (const course of courses) {
             try {
@@ -804,6 +869,29 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         setLoadingFlag('courses', false);
       }
+    } else if (userRole === 'institucion' && institutionId) {
+      try {
+        const q = query(
+          collection(firebaseDB, 'cursos'),
+          where('institutionId', '==', institutionId),
+        );
+
+        unsubscribe = onSnapshot(q,
+          (snapshot) => {
+            const coursesData = snapshot.docs
+              .map(buildCourseFromSnapshot)
+              .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+            setCoursesSafely(coursesData);
+            setLoadingFlag('courses', false);
+          },
+          () => {
+            setLoadingFlag('courses', false);
+          }
+        );
+      } catch (error) {
+        setLoadingFlag('courses', false);
+      }
     } else {
       setCoursesSafely([]);
       setLoadingFlag('courses', false);
@@ -813,7 +901,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [buildCourseFromSnapshot, setCoursesSafely, setLoadingFlag, teacherOnboardingCourse, userId, userRole]);
+  }, [buildCourseFromSnapshot, institutionId, setCoursesSafely, setLoadingFlag, teacherOnboardingCourse, userId, userRole]);
 
   // FUNCIONES IMPLEMENTADAS
   const addAssessment = async (assessmentData: Omit<Assessment, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {
@@ -861,7 +949,11 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
 
   const getCourseAssessments = async (courseId: string): Promise<Assessment[]> => {
     try {
-      return await assessmentService.getCourseAssessments(courseId);
+      const course = courses.find((entry) => entry.id === courseId);
+      return await assessmentService.getCourseAssessments(courseId, {
+        courseCode: course?.code,
+        courseName: course?.name,
+      });
     } catch (error) {
       throw error;
     }

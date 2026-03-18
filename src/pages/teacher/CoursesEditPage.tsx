@@ -27,13 +27,13 @@ import type { CourseClassSchedule } from '@/types/academic';
 
 const fieldLabelClass = 'mb-2 block text-sm font-semibold text-slate-700';
 const fieldInputClass =
-  'h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100';
+  'h-11 w-full rounded-xl border border-slate-200/60 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100';
 const fieldTextAreaClass =
-  'min-h-[120px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100';
+  'min-h-[120px] w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100';
 const primaryButtonClass =
   'inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60';
 const secondaryButtonClass =
-  'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50';
+  'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200/60 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50';
 const SEMESTER_OPTIONS = Array.from({ length: (2040 - 2026 + 1) * 2 }, (_, index) => {
   const year = 2026 + Math.floor(index / 2);
   const half = (index % 2) + 1;
@@ -45,6 +45,7 @@ export default function CoursesEditPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { courses } = useAcademic();
+  const institutionId = typeof user?.institutionId === "string" ? user.institutionId.trim() : "";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -133,6 +134,7 @@ export default function CoursesEditPage() {
           description: data.description || '',
           credits: data.credits || 3,
           semester: data.semester || '2026-1',
+          group: data.group || '',
           teacherName: data.teacherName || '',
           teacherId: data.teacherId || '',
           classSchedule: Array.isArray(data.classSchedule) ? data.classSchedule : [],
@@ -150,7 +152,11 @@ export default function CoursesEditPage() {
 
     if (course) {
       const isAdmin = user.role === "admin";
-      if (!isAdmin) {
+      const isInstitutionManager =
+        user.role === "institucion" &&
+        institutionId.length > 0 &&
+        String(course.institutionId || "").trim() === institutionId;
+      if (!isAdmin && !isInstitutionManager) {
         if (user.role !== 'docente' || course.teacherId !== user.id) {
           navigate(`/courses/view/${course.code}`);
           return;
@@ -164,7 +170,7 @@ export default function CoursesEditPage() {
       void loadCourseFromFirestore();
       return;
     }
-  }, [course, user, courses, navigate, courseCode]);
+  }, [course, user, courses, navigate, courseCode, institutionId]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -337,7 +343,7 @@ export default function CoursesEditPage() {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[420px] items-center justify-center">
               <div className="text-center">
                 <Loader2Icon className="mx-auto h-8 w-8 animate-spin text-sky-600" />
@@ -356,7 +362,7 @@ export default function CoursesEditPage() {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[420px] items-center justify-center p-4">
               <div className="max-w-md text-center">
                 <AlertCircle className="mx-auto h-16 w-16 text-red-500" />
@@ -382,10 +388,10 @@ export default function CoursesEditPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
+              <div className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
                 <div className="pointer-events-none absolute -left-16 -top-20 h-44 w-44 rounded-full bg-sky-200/30" />
                 <div className="pointer-events-none absolute -bottom-24 -right-20 h-56 w-56 rounded-full bg-indigo-200/30" />
                 <div className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -510,7 +516,7 @@ export default function CoursesEditPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-4">
                   <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-sm font-semibold text-slate-800">Class Schedule</p>
@@ -530,7 +536,7 @@ export default function CoursesEditPage() {
 
                   <div className="space-y-3">
                     {formData.classSchedule.map((row, index) => (
-                      <div key={row.rowId} className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div key={row.rowId} className="rounded-xl border border-slate-200/60 bg-white p-3">
                         <div className="mb-2 flex items-center justify-between">
                           <p className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
                             <CalendarDays className="h-3.5 w-3.5" />
@@ -540,7 +546,7 @@ export default function CoursesEditPage() {
                             type="button"
                             onClick={() => removeScheduleRow(row.rowId)}
                             disabled={formData.classSchedule.length <= 1}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                             aria-label={`Remove block ${index + 1}`}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -593,7 +599,7 @@ export default function CoursesEditPage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-4">
                   <div className="mb-2 flex items-center gap-2">
                     <User className="h-4 w-4 text-slate-500" />
                     <span className="text-sm font-semibold text-slate-700">Teacher</span>
@@ -646,7 +652,7 @@ export default function CoursesEditPage() {
                   </div>
                 </div>
 
-                <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+                <div className="flex flex-col-reverse gap-2 border-t border-slate-200/60 pt-4 sm:flex-row sm:justify-end">
                   <Link to={`/courses/view/${course.code}`} className={secondaryButtonClass}>
                     Cancel
                   </Link>
@@ -667,7 +673,7 @@ export default function CoursesEditPage() {
               </form>
             </section>
 
-            <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <aside className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-3 flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
                   <Info className="h-4 w-4" />
@@ -679,13 +685,13 @@ export default function CoursesEditPage() {
               </div>
 
               <div className="space-y-2">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Current course</p>
                   <p className="mt-1 text-sm font-bold text-slate-900">{course.name}</p>
                   <p className="mt-1 text-xs text-slate-500">Code: {course.code}</p>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Enrollment impact</p>
                   <p className="mt-1 text-sm text-slate-700">
                     Changes to schedule and semester immediately affect classroom planning and calendar views.

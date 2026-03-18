@@ -1,11 +1,14 @@
-const CACHE_NAME = "multicourses-v1";
+const CACHE_NAME = "socrattica-v2";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/offline.html",
   "/manifest.webmanifest",
-  "/favicon.ico",
-  "/logo.png"
+  "/favicon.svg",
+  "/brand-mark.svg",
+  "/apple-touch-icon.png",
+  "/icon-192.png",
+  "/icon-512.png"
 ];
 
 self.addEventListener("install", (event) => {
@@ -56,6 +59,31 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => caches.match("/offline.html"));
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const rawLink = event.notification?.data?.link;
+  const targetLink = typeof rawLink === "string" && rawLink.trim() ? rawLink.trim() : "/";
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ("focus" in client) {
+          if (client.url.includes(targetLink)) {
+            return client.focus();
+          }
+        }
+      }
+
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetLink);
+      }
+
+      return undefined;
     })
   );
 });

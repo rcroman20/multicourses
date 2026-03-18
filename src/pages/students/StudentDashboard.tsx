@@ -7,6 +7,7 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   ExternalLink,
   FileCheck,
   GraduationCap,
@@ -120,7 +121,7 @@ const STATUS_TONE_CLASS: Record<StatusTone, string> = {
   good: "border-emerald-200 bg-emerald-50 text-emerald-700",
   mid: "border-amber-200 bg-amber-50 text-amber-700",
   risk: "border-rose-200 bg-rose-50 text-rose-700",
-  neutral: "border-slate-200 bg-slate-100 text-slate-600",
+  neutral: "border-slate-200/60 bg-slate-100 text-slate-600",
 };
 
 const getStatusToneClass = (tone: StatusTone): string => STATUS_TONE_CLASS[tone];
@@ -145,9 +146,9 @@ const INSIGHT_TONE_CLASS: Record<
     chip: "border-rose-200 bg-rose-50 text-rose-700",
   },
   neutral: {
-    panel: "border-slate-200 bg-slate-50",
+    panel: "border-slate-200/60 bg-slate-50",
     value: "text-slate-700",
-    chip: "border-slate-200 bg-slate-100 text-slate-700",
+    chip: "border-slate-200/60 bg-slate-100 text-slate-700",
   },
 };
 
@@ -374,6 +375,12 @@ const isForumOrDeliveryAssessment = (assessment: Assessment): boolean => {
 
   if (isAnnouncement || isQuizOrExam) return false;
   return isForum || isDelivery;
+};
+
+const isAnnouncementAssessment = (assessment: Assessment): boolean => {
+  const assessmentType = String(assessment.assessmentType || "").toLowerCase();
+  const activityType = String(assessment.type || "").toLowerCase();
+  return assessmentType === "announcement" || activityType === "announcement";
 };
 
 const resolveGradeTone = (hasGrade: boolean, gradeValue: number): StatusTone => {
@@ -1314,6 +1321,14 @@ export default function StudentDashboard() {
     [assessments, studentCourseIds],
   );
 
+  const assessmentById = useMemo(
+    () =>
+      new Map(
+        assessments.map((assessment) => [String(assessment.id || "").trim(), assessment]),
+      ),
+    [assessments],
+  );
+
   const studentAssessments = useMemo(
     () => activeStudentAssessments.filter((assessment) => isForumOrDeliveryAssessment(assessment)),
     [activeStudentAssessments],
@@ -1322,6 +1337,34 @@ export default function StudentDashboard() {
   const courseById = useMemo(
     () => new Map(studentCourses.map((course) => [course.id, course])),
     [studentCourses],
+  );
+
+  const studentAnnouncements = useMemo(
+    () =>
+      activeStudentAssessments
+        .filter((assessment) => isAnnouncementAssessment(assessment))
+        .map((assessment) => {
+          const course = courseById.get(assessment.courseId);
+          const baseDate = toDate(
+            assessment.startDate || assessment.dueDate || assessment.createdAt,
+          );
+          const dateLabel = isValidDate(baseDate)
+            ? format(baseDate, "MMM dd", { locale: enUS })
+            : "Recent";
+
+          return {
+            id: assessment.id,
+            title: assessment.name,
+            subtitle: `${course?.code || "Course"} • ${dateLabel}`,
+            sortAt: isValidDate(baseDate) ? baseDate.getTime() : 0,
+            link: course?.code
+              ? `/courses/${course.code}/assessments/${assessment.id}`
+              : "/courses",
+          };
+        })
+        .sort((a, b) => b.sortAt - a.sortAt)
+        .slice(0, 4),
+    [activeStudentAssessments, courseById],
   );
 
   const todayClassesDateLabel = format(new Date(), "EEEE, MMM d", { locale: enUS });
@@ -1570,6 +1613,144 @@ export default function StudentDashboard() {
     );
   }, [pendingRealWork]);
 
+  const nextDeadlineItem = useMemo(() => {
+    const withDate = pendingRealWork.find((item) => Number.isFinite(item.dueDateTs));
+    return withDate || pendingRealWork[0] || null;
+  }, [pendingRealWork]);
+
+  const recentFeedbackItems = useMemo(() => {
+    const feedbackItems: Array<{
+      id: string;
+      title: string;
+      subtitle: string;
+      comment: string;
+      score: number | null;
+      link: string;
+      updatedAt: number;
+    }> = [];
+
+    gradeSheets.forEach((sheet) => {
+      if (!sheet.isPublished) return;
+
+      const studentRecord = sheet.students.find(
+        (student) =>
+          student.matchesCurrentUser ||
+          normalizeIdentityValue(student.studentId) === normalizeIdentityValue(user?.id) ||
+          normalizeIdentityValue(student.userId) === normalizeIdentityValue(user?.id),
+      );
+      if (!studentRecord?.grades) return;
+
+      Object.entries(studentRecord.grades).forEach(([activityId, gradeEntry]) => {
+        const comment = normalizeTextField(gradeEntry?.comment);
+        if (!comment) return;
+
+        const activity = sheet.activities.find((item) => item.id === activityId);
+        const course = courseById.get(sheet.courseId);
+        const score = parseLooseNumber(gradeEntry?.value);
+        const updatedAt = toDate(gradeEntry?.submittedAt || sheet.updatedAt).getTime();
+
+        feedbackItems.push({
+          id: `sheet-${sheet.id}-${activityId}`,
+          title: activity?.name || sheet.title,
+          subtitle: course?.code || sheet.courseCode || sheet.courseName,
+          comment,
+          score,
+          link: "/grades",
+          updatedAt,
+        });
+      });
+    });
+
+    grades.forEach((grade) => {
+      if (grade.studentId !== user?.id) return;
+
+      const comment = normalizeTextField(grade.feedback || grade.comment || grade.comments);
+      if (!comment) return;
+
+      const assessment = assessmentById.get(String(grade.assessmentId || "").trim());
+      const course = courseById.get(String(grade.courseId || assessment?.courseId || "").trim());
+      feedbackItems.push({
+        id: `grade-${grade.id}`,
+        title: assessment?.name || "Teacher feedback",
+        subtitle: course?.code || "Course",
+        comment,
+        score: parseLooseNumber(grade.value),
+        link: "/grades",
+        updatedAt: toDate(grade.gradedAt || grade.submittedAt || 0).getTime(),
+      });
+    });
+
+    const uniqueItems = new Map<string, (typeof feedbackItems)[number]>();
+    feedbackItems.forEach((item) => {
+      const key = `${item.title}::${item.subtitle}::${normalizeText(item.comment)}`;
+      const existing = uniqueItems.get(key);
+      if (!existing || item.updatedAt > existing.updatedAt) {
+        uniqueItems.set(key, item);
+      }
+    });
+
+    return Array.from(uniqueItems.values())
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 4);
+  }, [assessmentById, courseById, gradeSheets, grades, user?.id]);
+
+  const continueLearningItem = useMemo(() => {
+    if (pendingRealWork.length > 0) {
+      const item = pendingRealWork[0];
+      return {
+        id: `continue-pending-${item.id}`,
+        title: item.title,
+        subtitle: `${item.courseCode} • ${item.stateLabel}`,
+        link: item.assessmentLink,
+        actionLabel: "Resume activity",
+        badge: item.dueRelative,
+        external: false,
+      };
+    }
+
+    if (recentSlides.length > 0) {
+      const slide = recentSlides[0];
+      const course = slide.courseId ? courseById.get(slide.courseId) : undefined;
+      return {
+        id: `continue-slide-${slide.id}`,
+        title: slide.title,
+        subtitle: `${course?.code || slide.courseName || "Course"} • Study material`,
+        link: slide.canvaUrl || "/slides",
+        actionLabel: slide.canvaUrl ? "Open slide" : "Go to slides",
+        badge: "Continue",
+        external: Boolean(slide.canvaUrl),
+      };
+    }
+
+    if (todayClasses.length > 0) {
+      const item = todayClasses[0];
+      return {
+        id: `continue-class-${item.id}`,
+        title: item.courseLabel,
+        subtitle: `${item.timeLabel} • Scheduled today`,
+        link: item.link,
+        actionLabel: "Open course",
+        badge: "Today",
+        external: false,
+      };
+    }
+
+    if (recentGrades.length > 0) {
+      const sheet = recentGrades[0];
+      return {
+        id: `continue-grade-${sheet.id}`,
+        title: sheet.title,
+        subtitle: `${sheet.courseName} • Latest published grade`,
+        link: "/grades",
+        actionLabel: "Review grades",
+        badge: "Updated",
+        external: false,
+      };
+    }
+
+    return null;
+  }, [courseById, pendingRealWork, recentGrades, recentSlides, todayClasses]);
+
   const weeklyCalendar = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -1805,6 +1986,50 @@ export default function StudentDashboard() {
     [selectedCourseId, studentCourses],
   );
 
+  const selectedCourseHeroDetails = useMemo(() => {
+    if (!selectedCourse) return null;
+
+    const roomText =
+      normalizeTextField(selectedCourse.classRoom) || normalizeTextField(selectedCourse.location);
+    const normalizedSchedule = normalizeClassSchedule(selectedCourse.classSchedule);
+
+    let scheduleLabel = "";
+    if (normalizedSchedule.length > 0) {
+      const dayLabels = Array.from(
+        new Set(
+          normalizedSchedule.map((slot) =>
+            format(new Date(2024, 0, 7 + slot.dayOfWeek), "EEE", { locale: enUS }),
+          ),
+        ),
+      ).join(", ");
+      const firstSlot = normalizedSchedule[0];
+      scheduleLabel = `${dayLabels} • ${formatTimeToMeridiem(firstSlot.startTime)} - ${formatTimeToMeridiem(firstSlot.endTime)}`;
+    } else {
+      const fallbackSchedule =
+        normalizeTextField(selectedCourse.classTime) || normalizeTextField(selectedCourse.scheduleText);
+      if (fallbackSchedule) {
+        const daysLabel = normalizeTextField(selectedCourse.classDays);
+        scheduleLabel = daysLabel
+          ? `${daysLabel} • ${formatTimeRangeLabel(fallbackSchedule)}`
+          : formatTimeRangeLabel(fallbackSchedule);
+      }
+    }
+
+    if (scheduleLabel && roomText) {
+      scheduleLabel = `${scheduleLabel} • ${roomText}`;
+    } else if (!scheduleLabel && roomText) {
+      scheduleLabel = roomText;
+    }
+
+    return {
+      courseLabel: `${selectedCourse.code} • Group ${selectedCourse.group}`,
+      courseName: selectedCourse.name,
+      teacherName: normalizeTextField(selectedCourse.teacherName),
+      semester: normalizeTextField(selectedCourse.semester),
+      scheduleLabel,
+    };
+  }, [selectedCourse]);
+
   const scopedCourseProgress = useMemo(
     () =>
       selectedCourseId
@@ -1848,6 +2073,38 @@ export default function StudentDashboard() {
       averageGrade: gradedCourses > 0 ? gradeSum / gradedCourses : 0,
     };
   }, [scopedCourseProgress]);
+
+  const {
+    atRiskCourses: overallAtRiskCourses,
+    failingCourses: overallFailingCourses,
+    completedCourses: overallCompletedCourses,
+    averageGrade: overallAverageGrade,
+  } = useMemo(() => {
+    let atRisk = 0;
+    let failing = 0;
+    let completed = 0;
+    let gradeSum = 0;
+    let gradedCourses = 0;
+
+    courseProgress.forEach((item) => {
+      if (!item.hasRealGrades) return;
+
+      gradedCourses += 1;
+      gradeSum += item.progress.currentGrade;
+
+      if (item.progress.currentGrade >= 3.0) completed += 1;
+
+      if (item.progress.status === "at-risk") atRisk += 1;
+      else if (item.progress.status !== "passing") failing += 1;
+    });
+
+    return {
+      atRiskCourses: atRisk,
+      failingCourses: failing,
+      completedCourses: completed,
+      averageGrade: gradedCourses > 0 ? gradeSum / gradedCourses : 0,
+    };
+  }, [courseProgress]);
 
   const scopedTotalCourses = selectedCourseId ? 1 : totalCourses;
 
@@ -2131,7 +2388,7 @@ export default function StudentDashboard() {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="space-y-2 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
@@ -2166,8 +2423,8 @@ export default function StudentDashboard() {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-6 shadow-sm">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-6 shadow-sm">
               <div className="pointer-events-none absolute -left-10 top-0 h-28 w-28 rounded-full bg-sky-100/70 blur-sm" />
               <div className="pointer-events-none absolute -bottom-12 -right-8 h-36 w-36 rounded-full bg-indigo-100/60 blur-sm" />
               <div className="relative mx-auto max-w-2xl text-center">
@@ -2183,15 +2440,15 @@ export default function StudentDashboard() {
                   Join your first course to access grades, activities, and study materials.
                 </p>
                 <div className="mx-auto mt-4 grid max-w-lg grid-cols-1 gap-2 sm:grid-cols-3">
-                  <div className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600">
+                  <div className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200/60 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600">
                     <Percent className="h-3.5 w-3.5" />
                     Grades
                   </div>
-                  <div className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600">
+                  <div className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200/60 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600">
                     <FileCheck className="h-3.5 w-3.5" />
                     Activities
                   </div>
-                  <div className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600">
+                  <div className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200/60 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600">
                     <BookOpen className="h-3.5 w-3.5" />
                     Materials
                   </div>
@@ -2232,10 +2489,10 @@ export default function StudentDashboard() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
-          <div className="space-y-4">
+        <div className="relative border border-slate-200/60 bg-white p-2.5 sm:p-3 lg:p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)]">
+          <div className="space-y-3">
             <section
-              className={`relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+              className={`relative overflow-hidden rounded-2xl border border-slate-200/60 bg-slate-50/70 p-3 lg:p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
               style={entryMotionStyle(0)}
             >
               <div className="pointer-events-none absolute -left-16 -top-20 h-40 w-40 rounded-full bg-sky-200/20" />
@@ -2253,34 +2510,39 @@ export default function StudentDashboard() {
                   <p className="mt-1 text-sm text-slate-600">
                     Track courses, pending work, grades and study materials in one place.
                   </p>
-                  {selectedCourse && (
-                    <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-sky-700">
-                      {selectedCourse.code} • Group {selectedCourse.group}
-                    </p>
+                  {selectedCourseHeroDetails && (
+                    <div className="mt-3 space-y-1.5">
+                      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2 sm:whitespace-nowrap">
+                        <p className="text-[1.05rem] font-semibold leading-tight text-slate-950">
+                          {selectedCourseHeroDetails.courseName}
+                        </p>
+                        <span className="hidden text-slate-400 sm:inline">|</span>
+                        <p className="text-[13px] font-bold uppercase tracking-[0.08em] text-slate-900">
+                          {selectedCourseHeroDetails.courseLabel}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-1 text-xs text-slate-700 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-1.5">
+                        {selectedCourseHeroDetails.teacherName ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="font-semibold text-slate-950">Teacher:</span>
+                            <span>{selectedCourseHeroDetails.teacherName}</span>
+                          </span>
+                        ) : null}
+                        {selectedCourseHeroDetails.semester ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="font-semibold text-slate-950">Semester:</span>
+                            <span>{selectedCourseHeroDetails.semester}</span>
+                          </span>
+                        ) : null}
+                        {selectedCourseHeroDetails.scheduleLabel ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="font-semibold text-slate-950">Schedule:</span>
+                            <span>{selectedCourseHeroDetails.scheduleLabel}</span>
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
                   )}
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Link
-                      to="/courses"
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
-                    >
-                      <BookOpen className="h-3.5 w-3.5" />
-                      Open courses
-                    </Link>
-                    <Link
-                      to="/grades"
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
-                    >
-                      <Trophy className="h-3.5 w-3.5" />
-                      Open grades
-                    </Link>
-                    <Link
-                      to="/slides"
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
-                    >
-                      <Presentation className="h-3.5 w-3.5" />
-                      Study materials
-                    </Link>
-                  </div>
                 </div>
 
                 <div className="grid w-full grid-cols-2 gap-2 lg:w-auto lg:min-w-[340px]">
@@ -2288,7 +2550,7 @@ export default function StudentDashboard() {
                     {
                       key: "courses",
                       label: "Courses",
-                      value: scopedTotalCourses,
+                      value: totalCourses,
                       icon: BookOpen,
                       tone: "bg-sky-100 text-sky-700",
                     },
@@ -2297,7 +2559,7 @@ export default function StudentDashboard() {
                       label: "Average",
                       value: (
                         <>
-                          {scopedAverageGrade.toFixed(1)}
+                          {overallAverageGrade.toFixed(1)}
                           <span className="text-sm font-medium text-slate-500"> / 5.0</span>
                         </>
                       ),
@@ -2307,21 +2569,21 @@ export default function StudentDashboard() {
                     {
                       key: "passed",
                       label: "Passed",
-                      value: scopedCompletedCourses,
+                      value: overallCompletedCourses,
                       icon: Trophy,
                       tone: "bg-emerald-100 text-emerald-700",
                     },
                     {
                       key: "attention",
                       label: "Attention",
-                      value: scopedAtRiskCourses + scopedFailingCourses,
+                      value: overallAtRiskCourses + overallFailingCourses,
                       icon: FileCheck,
                       tone: "bg-amber-100 text-amber-700",
-                    },
+                    }, 
                   ].map((metric) => {
                     const Icon = metric.icon;
                     return (
-                      <div key={metric.key} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                      <div key={metric.key} className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5">
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <p className="text-[11px] uppercase tracking-wide text-slate-500">{metric.label}</p>
@@ -2339,12 +2601,12 @@ export default function StudentDashboard() {
             </section>
 
             <section
-              className={`grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px] transition-all duration-500 ease-out ${entryMotionClass}`}
+              className={`grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_340px] transition-all duration-500 ease-out ${entryMotionClass}`}
               style={entryMotionStyle(160)}
             >
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <article
-                  className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                  className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
                   style={entryMotionStyle(210)}
                 >
                   <div className="mb-3 flex items-center justify-between gap-2">
@@ -2354,13 +2616,13 @@ export default function StudentDashboard() {
                         Tap a card to switch the active dashboard context.
                       </p>
                     </div>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                       {studentCourseCards.length} total
                     </span>
                   </div>
 
                   {studentCourseCards.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-600">
+                    <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-4 text-center text-sm text-slate-600">
                       No courses available.
                     </div>
                   ) : (
@@ -2382,7 +2644,7 @@ export default function StudentDashboard() {
                             className={`rounded-xl border p-3 text-left transition ${
                               isActive
                                 ? "border-sky-300 bg-sky-50/60 shadow-sm"
-                                : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+                                : "border-slate-200/60 bg-white hover:border-slate-300/60 hover:bg-slate-50"
                             }`}
                           >
                             <div className="flex items-start justify-between gap-2">
@@ -2414,13 +2676,13 @@ export default function StudentDashboard() {
                             </div>
 
                             <div className="mt-2 grid grid-cols-3 gap-1.5">
-                              <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                              <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                                   Students
                                 </p>
                                 <p className="text-sm font-bold text-slate-900">{item.studentCount}</p>
                               </div>
-                              <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                              <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                                   Evaluated
                                 </p>
@@ -2428,7 +2690,7 @@ export default function StudentDashboard() {
                                   {item.evaluatedPercent}%
                                 </p>
                               </div>
-                              <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-center">
+                              <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-2 py-1 text-center">
                                 <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                                   Pending
                                 </p>
@@ -2452,7 +2714,7 @@ export default function StudentDashboard() {
                 </article>
 
                 <article
-                  className={`rounded-2xl border border-slate-200 bg-slate-50/70 p-3 shadow-sm transition-all duration-500 ease-out sm:p-4 ${entryMotionClass}`}
+                  className={`rounded-2xl border border-slate-200/60 bg-slate-50/70 p-3 shadow-sm transition-all duration-500 ease-out sm:p-4 ${entryMotionClass}`}
                   style={entryMotionStyle(230)}
                 >
                   <div className="mb-3 flex items-center justify-between gap-2">
@@ -2466,7 +2728,7 @@ export default function StudentDashboard() {
                       <button
                         type="button"
                         onClick={goToPreviousInsight}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-sky-200 hover:text-sky-700"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/60 bg-white text-slate-600 transition hover:border-sky-200 hover:text-sky-700"
                         aria-label="Previous general card"
                       >
                         <ChevronLeft className="h-4 w-4" />
@@ -2474,7 +2736,7 @@ export default function StudentDashboard() {
                       <button
                         type="button"
                         onClick={goToNextInsight}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-sky-200 hover:text-sky-700"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200/60 bg-white text-slate-600 transition hover:border-sky-200 hover:text-sky-700"
                         aria-label="Next general card"
                       >
                         <ChevronRight className="h-4 w-4" />
@@ -2506,7 +2768,7 @@ export default function StudentDashboard() {
                         {activeInsightCard.metrics.map((metric) => (
                           <div
                             key={`${activeInsightCard.id}-${metric.label}`}
-                            className="rounded-xl border border-slate-200 bg-white p-2 text-center"
+                            className="rounded-xl border border-slate-200/60 bg-white p-2 text-center"
                           >
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                               {metric.label}
@@ -2539,7 +2801,7 @@ export default function StudentDashboard() {
 
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   <article
-                    className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                    className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
                     style={entryMotionStyle(250)}
                   >
                     <div className="mb-3 flex items-center justify-between gap-2">
@@ -2549,26 +2811,26 @@ export default function StudentDashboard() {
                       </Link>
                     </div>
                     <div className="mb-3 grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                      <div className="rounded-lg border border-slate-200/60 bg-slate-50 p-2">
                         <p className="text-slate-500">Overdue</p>
                         <p className="text-sm font-bold text-slate-900">{scopedPendingWorkSummary.overdue}</p>
                       </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                      <div className="rounded-lg border border-slate-200/60 bg-slate-50 p-2">
                         <p className="text-slate-500">Due Today</p>
                         <p className="text-sm font-bold text-slate-900">{scopedPendingWorkSummary.dueToday}</p>
                       </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                      <div className="rounded-lg border border-slate-200/60 bg-slate-50 p-2">
                         <p className="text-slate-500">Waiting Review</p>
                         <p className="text-sm font-bold text-slate-900">{scopedPendingWorkSummary.waitingReview}</p>
                       </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                      <div className="rounded-lg border border-slate-200/60 bg-slate-50 p-2">
                         <p className="text-slate-500">Open</p>
                         <p className="text-sm font-bold text-slate-900">{scopedPendingWorkSummary.pendingSubmission}</p>
                       </div>
                     </div>
 
                     {scopedPendingRealWork.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
+                      <div className="rounded-lg border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
                         No pending work right now.
                       </div>
                     ) : (
@@ -2577,13 +2839,13 @@ export default function StudentDashboard() {
                           const stateTone = getStatusToneClass(resolvePendingStateTone(item.stateKey));
                           return (
                             <Link key={item.id} to={item.assessmentLink}>
-                              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 transition hover:border-slate-300 hover:bg-white">
+                              <div className="rounded-lg border border-slate-200/60 bg-slate-50 p-2.5 transition hover:border-slate-300/60 hover:bg-white">
                                 <p className="truncate text-sm font-semibold text-slate-900">{item.title}</p>
                                 <p className="truncate text-xs text-slate-500">
                                   {item.courseCode} • {item.typeLabel}
                                 </p>
                                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                  <span className="rounded-full border border-slate-200/60 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                                     {item.dueRelative}
                                   </span>
                                   <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${stateTone}`}>
@@ -2599,12 +2861,12 @@ export default function StudentDashboard() {
                   </article>
 
                   <article
-                    className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                    className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
                     style={entryMotionStyle(290)}
                   >
                     <h2 className="mb-3 text-base font-bold text-slate-900">Critical Alerts</h2>
                     {scopedCriticalAlerts.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
+                      <div className="rounded-lg border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
                         No critical alerts detected.
                       </div>
                     ) : (
@@ -2613,7 +2875,7 @@ export default function StudentDashboard() {
                           const severityTone = getStatusToneClass(alert.tone);
                           return (
                             <Link key={alert.id} to={alert.link}>
-                              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 transition hover:border-slate-300 hover:bg-white">
+                              <div className="rounded-lg border border-slate-200/60 bg-slate-50 p-2.5 transition hover:border-slate-300/60 hover:bg-white">
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
                                     <p className="truncate text-sm font-semibold text-slate-900">{alert.title}</p>
@@ -2632,8 +2894,197 @@ export default function StudentDashboard() {
                   </article>
                 </div>
 
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <article
+                    className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                    style={entryMotionStyle(310)}
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div>
+                        <h2 className="text-base font-bold text-slate-900">Next Deadline</h2>
+                        <p className="text-xs text-slate-500">Closest action that still needs your attention.</p>
+                      </div>
+                      <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                        <Clock3 className="h-4 w-4" />
+                      </span>
+                    </div>
+
+                    {nextDeadlineItem ? (
+                      <Link to={nextDeadlineItem.assessmentLink}>
+                        <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3 transition hover:border-slate-300/60 hover:bg-white">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-900">{nextDeadlineItem.title}</p>
+                              <p className="truncate text-xs text-slate-500">
+                                {nextDeadlineItem.courseCode} • {nextDeadlineItem.typeLabel}
+                              </p>
+                            </div>
+                            <span className="rounded-full border border-slate-200/60 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                              {nextDeadlineItem.dueRelative}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getStatusToneClass(
+                                resolvePendingStateTone(nextDeadlineItem.stateKey),
+                              )}`}
+                            >
+                              {nextDeadlineItem.stateLabel}
+                            </span>
+                            <span className="text-xs font-semibold text-sky-700">Open activity</span>
+                          </div>
+                        </div>
+                      </Link>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
+                        No upcoming deadlines right now.
+                      </div>
+                    )}
+                  </article>
+
+                  <article
+                    className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                    style={entryMotionStyle(330)}
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div>
+                        <h2 className="text-base font-bold text-slate-900">Announcements</h2>
+                        <p className="text-xs text-slate-500">Latest course notices and teacher broadcasts.</p>
+                      </div>
+                      <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                        <Bell className="h-4 w-4" />
+                      </span>
+                    </div>
+
+                    {studentAnnouncements.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
+                        No announcements available.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {studentAnnouncements.map((announcement) => (
+                          <Link key={announcement.id} to={announcement.link}>
+                            <div className="rounded-lg border border-slate-200/60 bg-slate-50 p-2.5 transition hover:border-slate-300/60 hover:bg-white">
+                              <p className="truncate text-sm font-semibold text-slate-900">{announcement.title}</p>
+                              <p className="truncate text-xs text-slate-500">{announcement.subtitle}</p>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+
+                  <article
+                    className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                    style={entryMotionStyle(350)}
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div>
+                        <h2 className="text-base font-bold text-slate-900">Teacher Feedback</h2>
+                        <p className="text-xs text-slate-500">Recent comments and grading notes from your courses.</p>
+                      </div>
+                      <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+                        <FileCheck className="h-4 w-4" />
+                      </span>
+                    </div>
+
+                    {loadingSheets && recentFeedbackItems.length === 0 ? (
+                      <div className="flex h-28 items-center justify-center">
+                        <Loader2 className="h-5 w-5 animate-spin text-sky-600" />
+                      </div>
+                    ) : recentFeedbackItems.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
+                        No teacher feedback available yet.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {recentFeedbackItems.map((item) => (
+                          <Link key={item.id} to={item.link}>
+                            <div className="rounded-lg border border-slate-200/60 bg-slate-50 p-2.5 transition hover:border-slate-300/60 hover:bg-white">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-slate-900">{item.title}</p>
+                                  <p className="truncate text-xs text-slate-500">{item.subtitle}</p>
+                                </div>
+                                {item.score !== null ? (
+                                  <span className="rounded-full border border-slate-200/60 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                                    {item.score.toFixed(1)}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p className="mt-1 line-clamp-2 text-xs text-slate-600">{item.comment}</p>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+
+                  <article
+                    className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                    style={entryMotionStyle(370)}
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div>
+                        <h2 className="text-base font-bold text-slate-900">Continue Learning</h2>
+                        <p className="text-xs text-slate-500">Jump back into the most relevant next step.</p>
+                      </div>
+                      <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+                        <Rocket className="h-4 w-4" />
+                      </span>
+                    </div>
+
+                    {continueLearningItem ? (
+                      continueLearningItem.external ? (
+                        <a
+                          href={continueLearningItem.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block rounded-xl border border-slate-200/60 bg-slate-50 p-3 transition hover:border-slate-300/60 hover:bg-white"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-900">{continueLearningItem.title}</p>
+                              <p className="truncate text-xs text-slate-500">{continueLearningItem.subtitle}</p>
+                            </div>
+                            <span className="rounded-full border border-slate-200/60 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                              {continueLearningItem.badge}
+                            </span>
+                          </div>
+                          <div className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-sky-700">
+                            {continueLearningItem.actionLabel}
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </div>
+                        </a>
+                      ) : (
+                        <Link to={continueLearningItem.link}>
+                          <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3 transition hover:border-slate-300/60 hover:bg-white">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-slate-900">{continueLearningItem.title}</p>
+                                <p className="truncate text-xs text-slate-500">{continueLearningItem.subtitle}</p>
+                              </div>
+                              <span className="rounded-full border border-slate-200/60 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                                {continueLearningItem.badge}
+                              </span>
+                            </div>
+                            <div className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-sky-700">
+                              {continueLearningItem.actionLabel}
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            </div>
+                          </div>
+                        </Link>
+                      )
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
+                        Your next learning step will appear here.
+                      </div>
+                    )}
+                  </article>
+                </div>
+
                 <article
-                  className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                  className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
                   style={entryMotionStyle(330)}
                 >
                   <div className="mb-3 flex items-center justify-between gap-2">
@@ -2651,12 +3102,12 @@ export default function StudentDashboard() {
                       <Loader2 className="h-5 w-5 animate-spin text-sky-600" />
                     </div>
                   ) : scopedRecentSlides.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
+                    <div className="rounded-lg border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
                       No materials available yet.
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-3 lg:grid-cols-[260px_minmax(0,1fr)]">
-                      <Link to="/slides" className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                      <Link to="/slides" className="overflow-hidden rounded-xl border border-slate-200/60 bg-slate-50">
                         <img
                           src="/slides.png"
                           alt="Slides area preview"
@@ -2689,7 +3140,7 @@ export default function StudentDashboard() {
                                 href={slide.canvaUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5 transition hover:border-slate-300 hover:bg-white"
+                                className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-slate-50 p-2.5 transition hover:border-slate-300/60 hover:bg-white"
                               >
                                 <div className="min-w-0">
                                   <p className="truncate text-sm font-semibold text-slate-900">{slide.title}</p>
@@ -2697,7 +3148,7 @@ export default function StudentDashboard() {
                                     {courseLabel} • {dateLabel}
                                   </p>
                                 </div>
-                                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600">
+                                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200/60 bg-white text-slate-600">
                                   <ExternalLink className="h-3.5 w-3.5" />
                                 </span>
                               </a>
@@ -2708,7 +3159,7 @@ export default function StudentDashboard() {
                             <Link
                               key={slide.id}
                               to="/slides"
-                              className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5 transition hover:border-slate-300 hover:bg-white"
+                              className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-slate-50 p-2.5 transition hover:border-slate-300/60 hover:bg-white"
                             >
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-semibold text-slate-900">{slide.title}</p>
@@ -2729,28 +3180,28 @@ export default function StudentDashboard() {
                 </article>
 
                 <article
-                  className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                  className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
                   style={entryMotionStyle(370)}
                 >
                   <h2 className="mb-3 text-base font-bold text-slate-900">Consolidated Weekly Calendar</h2>
                   {scopedWeeklyCalendar.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
+                    <div className="rounded-lg border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
                       No events scheduled in the next 7 days.
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                       {scopedWeeklyCalendar.map((day) => (
-                        <div key={day.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <div key={day.key} className="rounded-lg border border-slate-200/60 bg-slate-50 p-3">
                           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{day.label}</p>
                           <div className="mt-2 space-y-1.5">
                             {day.items.slice(0, 3).map((item) => (
                               <Link
                                 key={item.id}
                                 to={item.link}
-                                className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 transition hover:border-sky-200 hover:text-sky-700"
+                                className="flex items-center justify-between gap-2 rounded-md border border-slate-200/60 bg-white px-2 py-1.5 text-xs text-slate-700 transition hover:border-sky-200 hover:text-sky-700"
                               >
                                 <span className="truncate">{item.title}</span>
-                                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
                                   {item.badge}
                                 </span>
                               </Link>
@@ -2765,11 +3216,11 @@ export default function StudentDashboard() {
 
               <aside className="space-y-4">
                 <article
-                  className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                  className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
                   style={entryMotionStyle(250)}
                 >
                   <div className="text-center">
-                    <div className="mx-auto inline-flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-sky-100 text-2xl shadow-sm">
+                    <div className="mx-auto inline-flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-slate-200/60 bg-sky-100 text-2xl shadow-sm">
                       {user?.avatarUrl && !avatarLoadFailed ? (
                         <img
                           src={user.avatarUrl}
@@ -2794,7 +3245,7 @@ export default function StudentDashboard() {
                       { label: "Failing", value: scopedFailingCourses },
                       { label: "Pending", value: scopedPendingRealWork.length },
                     ].map((item) => (
-                      <div key={item.label} className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-center">
+                      <div key={item.label} className="rounded-lg border border-slate-200/60 bg-slate-50 p-2 text-center">
                         <p className="text-base font-bold text-slate-900">{item.value}</p>
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           {item.label}
@@ -2805,7 +3256,7 @@ export default function StudentDashboard() {
                 </article>
 
                 <article
-                  className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                  className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
                   style={entryMotionStyle(270)}
                 >
                   <p className="text-base font-bold text-slate-900">Live Snapshot</p>
@@ -2813,19 +3264,19 @@ export default function StudentDashboard() {
                     Instant context for today and this week.
                   </p>
                   <div className="mt-3 space-y-2">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Today classes
                       </p>
                       <p className="text-lg font-bold text-slate-900">{scopedTodayClasses.length}</p>
                     </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Weekly events
                       </p>
                       <p className="text-lg font-bold text-slate-900">{scopedWeeklyCalendar.length}</p>
                     </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Published sheets
                       </p>
@@ -2835,7 +3286,7 @@ export default function StudentDashboard() {
                 </article>
 
                 <article
-                  className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                  className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
                   style={entryMotionStyle(290)}
                 >
                   <h2 className="text-base font-bold text-slate-900">Today Classes</h2>
@@ -2851,14 +3302,14 @@ export default function StudentDashboard() {
                         <Link
                           key={item.id}
                           to={item.link}
-                          className="block rounded-lg border border-slate-200 bg-slate-50 p-2.5 transition hover:border-slate-300 hover:bg-white"
+                          className="block rounded-lg border border-slate-200/60 bg-slate-50 p-2.5 transition hover:border-slate-300/60 hover:bg-white"
                         >
                           <p className="text-sm font-semibold text-slate-900">{item.timeLabel}</p>
                           <p className="truncate text-xs text-slate-500">{item.courseLabel}</p>
                         </Link>
                       ))}
                       {scopedTodayClasses.length > 3 && (
-                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                        <span className="inline-flex rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
                           +{scopedTodayClasses.length - 3} more
                         </span>
                       )}
@@ -2867,7 +3318,7 @@ export default function StudentDashboard() {
                 </article>
 
                 <article
-                  className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                  className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
                   style={entryMotionStyle(330)}
                 >
                   <div className="mb-3 flex items-center justify-between gap-2">
@@ -2877,7 +3328,7 @@ export default function StudentDashboard() {
                     </Link>
                   </div>
                   {scopedRecentGrades.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
+                    <div className="rounded-lg border border-dashed border-slate-300/60 bg-slate-50 px-3 py-5 text-center text-sm text-slate-600">
                       No grades available yet.
                     </div>
                   ) : (
@@ -2893,7 +3344,7 @@ export default function StudentDashboard() {
 
                         return (
                           <Link key={sheet.id} to="/grades">
-                            <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5 transition hover:border-slate-300 hover:bg-white">
+                            <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200/60 bg-slate-50 p-2.5 transition hover:border-slate-300/60 hover:bg-white">
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-semibold text-slate-900">{sheet.title}</p>
                                 <p className="truncate text-xs text-slate-500">{sheet.courseName}</p>
@@ -2910,14 +3361,14 @@ export default function StudentDashboard() {
                 </article>
 
                 <article
-                  className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
+                  className={`rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-500 ease-out ${entryMotionClass}`}
                   style={entryMotionStyle(370)}
                 >
                   <h2 className="mb-3 text-base font-bold text-slate-900">Quick Access</h2>
                   <div className="space-y-1.5">
                     <Link
                       to="/grades"
-                      className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                      className="flex items-center justify-between rounded-lg border border-slate-200/60 bg-slate-50 px-2.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
                     >
                       <span className="inline-flex items-center gap-2">
                         <Trophy className="h-4 w-4" />
@@ -2927,7 +3378,7 @@ export default function StudentDashboard() {
                     </Link>
                     <Link
                       to="/courses"
-                      className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                      className="flex items-center justify-between rounded-lg border border-slate-200/60 bg-slate-50 px-2.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
                     >
                       <span className="inline-flex items-center gap-2">
                         <GraduationCap className="h-4 w-4" />
@@ -2937,7 +3388,7 @@ export default function StudentDashboard() {
                     </Link>
                     <Link
                       to={profileHref}
-                      className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                      className="flex items-center justify-between rounded-lg border border-slate-200/60 bg-slate-50 px-2.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
                     >
                       <span className="inline-flex items-center gap-2">
                         <Bell className="h-4 w-4" />

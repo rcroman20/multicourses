@@ -13,6 +13,7 @@ import {
   where,
 } from "firebase/firestore";
 import { firebaseDB } from "@/lib/firebase";
+import { loadAdminPlatformSettings } from "@/lib/services/adminSettingsService";
 
 export const TEACHER_ONBOARDING_COURSE_CODE = "MCT-ONB-101";
 export const TEACHER_ONBOARDING_DURATION_MONTHS = 2;
@@ -80,6 +81,11 @@ export async function ensureTeacherOnboardingEnrollment(
   if (!normalizedTeacherId) throw new Error("Teacher id is required.");
 
   const course = explicitCourse || (await getTeacherOnboardingCourse());
+  const platformSettings = await loadAdminPlatformSettings();
+  const onboardingDurationMonths = Math.max(
+    1,
+    Number(platformSettings.defaultOnboardingMonths) || TEACHER_ONBOARDING_DURATION_MONTHS,
+  );
   if (!course) {
     throw new Error(
       `Onboarding course ${TEACHER_ONBOARDING_COURSE_CODE} was not found. Create it first.`,
@@ -103,7 +109,7 @@ export async function ensureTeacherOnboardingEnrollment(
   const currentEnrolledAt = toDateOrNull(studentData.teacherOnboardingEnrolledAt);
   const currentDueAt = toDateOrNull(studentData.teacherOnboardingDueAt);
   const baseDate = currentEnrolledAt || new Date();
-  const dueAt = currentDueAt || addMonths(baseDate, TEACHER_ONBOARDING_DURATION_MONTHS);
+  const dueAt = currentDueAt || addMonths(baseDate, onboardingDurationMonths);
 
   const isAlreadyEnrolled = course.enrolledStudents.includes(normalizedTeacherId);
   if (!isAlreadyEnrolled) {
@@ -145,6 +151,11 @@ export async function closeTeacherOnboardingIfExpired(
   if (!studentSnap.exists()) return false;
 
   const studentData = (studentSnap.data() || {}) as Record<string, unknown>;
+  const platformSettings = await loadAdminPlatformSettings();
+  const onboardingDurationMonths = Math.max(
+    1,
+    Number(platformSettings.defaultOnboardingMonths) || TEACHER_ONBOARDING_DURATION_MONTHS,
+  );
   const status = String(studentData.teacherOnboardingStatus || "").trim().toLowerCase();
   if (status === "completed" || status === "closed") return false;
 
@@ -152,7 +163,7 @@ export async function closeTeacherOnboardingIfExpired(
   const storedDueAt = toDateOrNull(studentData.teacherOnboardingDueAt);
   const effectiveDueAt =
     storedDueAt ||
-    (enrolledAt ? addMonths(enrolledAt, TEACHER_ONBOARDING_DURATION_MONTHS) : null);
+    (enrolledAt ? addMonths(enrolledAt, onboardingDurationMonths) : null);
   if (!effectiveDueAt) return false;
   if (effectiveDueAt.getTime() > Date.now()) return false;
 

@@ -19,6 +19,7 @@ import {
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import type { CourseClassSchedule } from '@/types/academic';
 import { createCourseWithPlan } from '@/lib/services/teacherPlanEnforcementService';
+import { createInstitutionCourse } from '@/lib/services/institutionService';
 import { firebaseDB } from "@/lib/firebase";
 
 const createCourseSchema = z.object({
@@ -35,13 +36,13 @@ const createCourseSchema = z.object({
 
 const fieldLabelClass = 'mb-2 block text-sm font-semibold text-slate-700';
 const fieldInputClass =
-  'h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100';
+  'h-11 w-full rounded-xl border border-slate-200/60 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100';
 const fieldTextAreaClass =
-  'min-h-[120px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100';
+  'min-h-[120px] w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100';
 const primaryButtonClass =
   'inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60';
 const secondaryButtonClass =
-  'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50';
+  'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200/60 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50';
 const SEMESTER_OPTIONS = Array.from({ length: (2040 - 2026 + 1) * 2 }, (_, index) => {
   const year = 2026 + Math.floor(index / 2);
   const half = (index % 2) + 1;
@@ -52,6 +53,10 @@ export default function CreateCoursePage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const isInstitution = user?.role === "institucion";
+  const institutionId = (user?.institutionId || "").trim();
+  const isInstitutionManagedTeacher =
+    user?.role === "docente" && (user?.institutionManaged === true || institutionId.length > 0);
   const teacherPlanName = (user?.teacherPlanName || "No assigned plan").trim();
   const teacherPlanCourseLimit =
     typeof user?.teacherPlanCourseLimit === "number" && user.teacherPlanCourseLimit > 0
@@ -79,6 +84,16 @@ export default function CreateCoursePage() {
           year: "numeric",
         })
       : "No expiration date";
+  const institutionPlanName = (user?.institutionPlanName || "Institution Plan").trim();
+  const institutionCourseLimit =
+    typeof user?.institutionCourseLimit === "number" && user.institutionCourseLimit > 0
+      ? user.institutionCourseLimit
+      : null;
+  const institutionStudentLimit =
+    typeof user?.institutionStudentLimit === "number" && user.institutionStudentLimit > 0
+      ? user.institutionStudentLimit
+      : null;
+  const institutionPlanStatus = (user?.institutionPlanStatus || "active").trim();
 
   const [courseData, setCourseData] = useState({
     name: '',
@@ -166,6 +181,10 @@ export default function CreateCoursePage() {
       setError('You must be signed in to create courses.');
       return;
     }
+    if (isInstitutionManagedTeacher) {
+      setError('Institution-managed teachers cannot create courses. Your institution must create and assign them.');
+      return;
+    }
 
     const result = createCourseSchema.safeParse(courseData);
     if (!result.success) {
@@ -222,6 +241,29 @@ export default function CreateCoursePage() {
           status: "active",
           enrolledStudents: [],
         });
+      } else if (isInstitution) {
+        const institutionId = (user.institutionId || user.id || "").trim();
+        const institutionName = (user.institutionName || user.name || user.email || "Institution").trim();
+
+        if (!institutionId) {
+          setError("Institution profile is incomplete. Please update your account and try again.");
+          setIsLoading(false);
+          return;
+        }
+
+        await createInstitutionCourse({
+          institutionId,
+          institutionName,
+          actorUserId: user.id,
+          actorName: user.name || user.email || "Institution",
+          name: courseData.name,
+          code: courseData.code,
+          semester: courseData.semester,
+          group: courseData.group,
+          credits: courseData.credits,
+          description: courseData.description,
+          classSchedule: normalizedSchedule,
+        });
       } else {
         if (
           teacherPlanExpiresAt &&
@@ -259,10 +301,10 @@ export default function CreateCoursePage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
+              <div className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
                 <div className="pointer-events-none absolute -left-16 -top-20 h-44 w-44 rounded-full bg-sky-200/30" />
                 <div className="pointer-events-none absolute -bottom-24 -right-20 h-56 w-56 rounded-full bg-indigo-200/30" />
                 <div className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -273,7 +315,9 @@ export default function CreateCoursePage() {
                     </div>
                     <h1 className="mt-2 text-xl font-extrabold text-slate-900 sm:text-2xl">Create New Course</h1>
                     <p className="mt-1.5 text-sm text-slate-600">
-                      Set up basic details, schedule blocks and description for your new class.
+                      {isInstitution
+                        ? "Set up the academic details for a new course owned by your institution."
+                        : "Set up basic details, schedule blocks and description for your new class."}
                     </p>
                   </div>
                   <button
@@ -286,6 +330,28 @@ export default function CreateCoursePage() {
                   </button>
                 </div>
               </div>
+
+              {isInstitutionManagedTeacher && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="mt-0.5 h-4 w-4 text-amber-700" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800">Your institution manages course creation</p>
+                      <p className="mt-1 text-sm text-amber-700">
+                        This teacher account is linked to an institution, so new courses must be created from the institution workspace and then assigned to you.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => navigate('/courses')}
+                        className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        Back to courses
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3" role="alert">
@@ -310,6 +376,7 @@ export default function CreateCoursePage() {
                       onChange={handleChange}
                       className={fieldInputClass}
                       placeholder="e.g., Contemporary English Literature"
+                      disabled={isInstitutionManagedTeacher}
                       required
                     />
                     <p className="mt-1 text-xs text-slate-500">Full course name</p>
@@ -327,6 +394,7 @@ export default function CreateCoursePage() {
                       onChange={handleChange}
                       className={fieldInputClass}
                       placeholder="e.g., LIT-401"
+                      disabled={isInstitutionManagedTeacher}
                       required
                     />
                     <p className="mt-1 text-xs text-slate-500">Unique identifier code</p>
@@ -344,6 +412,7 @@ export default function CreateCoursePage() {
                       value={courseData.semester}
                       onChange={handleChange}
                       className={fieldInputClass}
+                      disabled={isInstitutionManagedTeacher}
                       required
                     >
                       <option value="">Select</option>
@@ -367,6 +436,7 @@ export default function CreateCoursePage() {
                       onChange={handleChange}
                       className={fieldInputClass}
                       placeholder="e.g., 01"
+                      disabled={isInstitutionManagedTeacher}
                       required
                     />
                   </div>
@@ -381,6 +451,7 @@ export default function CreateCoursePage() {
                       value={courseData.credits}
                       onChange={handleChange}
                       className={fieldInputClass}
+                      disabled={isInstitutionManagedTeacher}
                       required
                     >
                       <option value="0">No credits</option>
@@ -394,7 +465,7 @@ export default function CreateCoursePage() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-4">
                   <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <label className={fieldLabelClass}>Class Schedule (Optional)</label>
@@ -402,7 +473,12 @@ export default function CreateCoursePage() {
                         Add weekly class blocks if this course has fixed times.
                       </p>
                     </div>
-                    <button type="button" className={secondaryButtonClass} onClick={addScheduleRow}>
+                    <button
+                      type="button"
+                      className={secondaryButtonClass}
+                      onClick={addScheduleRow}
+                      disabled={isInstitutionManagedTeacher}
+                    >
                       <PlusCircle className="h-4 w-4" />
                       Add block
                     </button>
@@ -410,7 +486,7 @@ export default function CreateCoursePage() {
 
                   <div className="space-y-3">
                     {classSchedule.map((row, index) => (
-                      <div key={row.rowId} className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div key={row.rowId} className="rounded-xl border border-slate-200/60 bg-white p-3">
                         <div className="mb-2 flex items-center justify-between">
                           <p className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
                             <CalendarDays className="h-3.5 w-3.5" />
@@ -418,9 +494,9 @@ export default function CreateCoursePage() {
                           </p>
                           <button
                             type="button"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                             onClick={() => removeScheduleRow(row.rowId)}
-                            disabled={classSchedule.length === 1}
+                            disabled={isInstitutionManagedTeacher || classSchedule.length === 1}
                             aria-label={`Remove schedule block ${index + 1}`}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -434,6 +510,7 @@ export default function CreateCoursePage() {
                             onChange={(event) =>
                               handleScheduleChange(row.rowId, 'dayOfWeek', event.target.value)
                             }
+                            disabled={isInstitutionManagedTeacher}
                           >
                             {weekDays.map((day) => (
                               <option key={day.value} value={day.value}>
@@ -448,6 +525,7 @@ export default function CreateCoursePage() {
                             onChange={(event) =>
                               handleScheduleChange(row.rowId, 'startTime', event.target.value)
                             }
+                            disabled={isInstitutionManagedTeacher}
                           />
                           <input
                             type="time"
@@ -456,6 +534,7 @@ export default function CreateCoursePage() {
                             onChange={(event) =>
                               handleScheduleChange(row.rowId, 'endTime', event.target.value)
                             }
+                            disabled={isInstitutionManagedTeacher}
                           />
                         </div>
 
@@ -467,6 +546,7 @@ export default function CreateCoursePage() {
                           onChange={(event) =>
                             handleScheduleChange(row.rowId, 'location', event.target.value)
                           }
+                          disabled={isInstitutionManagedTeacher}
                         />
                       </div>
                     ))}
@@ -485,6 +565,7 @@ export default function CreateCoursePage() {
                     className={fieldTextAreaClass}
                     placeholder="Describe course objectives, content, and methodology..."
                     maxLength={100}
+                    disabled={isInstitutionManagedTeacher}
                     required
                   />
                   <div className="mt-2 flex items-start gap-2 text-xs text-slate-500">
@@ -496,16 +577,21 @@ export default function CreateCoursePage() {
                   </p>
                 </div>
 
-                <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+                <div className="flex flex-col-reverse gap-2 border-t border-slate-200/60 pt-4 sm:flex-row sm:justify-end">
                   <button type="button" onClick={() => navigate(-1)} className={secondaryButtonClass}>
                     Cancel
                   </button>
 
-                  <button type="submit" disabled={isLoading} className={primaryButtonClass}>
+                  <button type="submit" disabled={isLoading || isInstitutionManagedTeacher} className={primaryButtonClass}>
                     {isLoading ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
                         Creating Course...
+                      </>
+                    ) : isInstitutionManagedTeacher ? (
+                      <>
+                        <AlertCircle className="h-4 w-4" />
+                        Institution Creates Courses
                       </>
                     ) : (
                       <>
@@ -518,19 +604,21 @@ export default function CreateCoursePage() {
               </form>
             </section>
 
-            <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <aside className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-700">
-                  Active Teacher Plan
+                  {isInstitution ? "Institution Plan" : "Active Teacher Plan"}
                 </p>
                 <p className="mt-1 text-sm font-bold text-slate-900">
-                  {teacherPlanName} · {teacherPlanPriceText}
+                  {isInstitution ? institutionPlanName : `${teacherPlanName} · ${teacherPlanPriceText}`}
                 </p>
                 <p className="mt-1 text-xs text-slate-600">
-                  Course limit: {teacherPlanCourseLimit ?? "Unlimited"} · Student limit:{" "}
-                  {teacherPlanStudentLimit ?? "Unlimited"}
+                  Course limit: {isInstitution ? institutionCourseLimit ?? "Unlimited" : teacherPlanCourseLimit ?? "Unlimited"} · Student limit:{" "}
+                  {isInstitution ? institutionStudentLimit ?? "Unlimited" : teacherPlanStudentLimit ?? "Unlimited"}
                 </p>
-                <p className="text-xs text-slate-600">Expires: {teacherPlanExpiresText}</p>
+                <p className="text-xs text-slate-600">
+                  {isInstitution ? `Status: ${institutionPlanStatus || "active"}` : `Expires: ${teacherPlanExpiresText}`}
+                </p>
               </div>
 
               <div className="mb-3 flex items-center gap-2">
@@ -545,8 +633,8 @@ export default function CreateCoursePage() {
 
               <ul className="space-y-2">
                 {requirementItems.map((item, index) => (
-                  <li key={item.title} className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-bold text-slate-700">
+                  <li key={item.title} className="flex items-start gap-2 rounded-xl border border-slate-200/60 bg-slate-50 p-2.5">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200/60 bg-white text-xs font-bold text-slate-700">
                       {index + 1}
                     </span>
                     <div>

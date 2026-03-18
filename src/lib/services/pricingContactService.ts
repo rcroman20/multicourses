@@ -1,6 +1,7 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDocs,
   limit,
@@ -35,6 +36,9 @@ export interface PricingContactRequestRecord {
   interestedPlanId: string;
   message: string;
   status: "new" | "resolved";
+  archived?: boolean;
+  archivedAt?: Date | null;
+  archivedBy?: string;
   source: "landing_estimator";
   createdAt: Date | null;
   resolvedAt?: Date | null;
@@ -132,6 +136,9 @@ export async function getPricingContactRequests(): Promise<PricingContactRequest
       interestedPlanId: String(data.interestedPlanId || "").trim(),
       message: String(data.message || "").trim(),
       status: String(data.status || "new").trim().toLowerCase() === "resolved" ? "resolved" : "new",
+      archived: Boolean(data.archived),
+      archivedAt: toDate(data.archivedAt),
+      archivedBy: String(data.archivedBy || "").trim(),
       source: "landing_estimator",
       createdAt: toDate(data.createdAt),
       resolvedAt: toDate(data.resolvedAt),
@@ -154,4 +161,39 @@ export async function markPricingContactRequestResolved(
     },
     { merge: true },
   );
+}
+
+export async function archivePricingContactRequest(
+  requestId: string,
+  archivedBy: string,
+): Promise<void> {
+  await setDoc(
+    doc(firebaseDB, COLLECTION_NAME, requestId),
+    {
+      archived: true,
+      archivedBy: String(archivedBy || "").trim().toLowerCase() || null,
+      archivedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function restorePricingContactRequest(
+  requestId: string,
+): Promise<void> {
+  await setDoc(
+    doc(firebaseDB, COLLECTION_NAME, requestId),
+    {
+      archived: false,
+      archivedBy: null,
+      archivedAt: null,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+}
+
+export async function deletePricingContactRequest(requestId: string): Promise<void> {
+  await deleteDoc(doc(firebaseDB, COLLECTION_NAME, requestId));
 }

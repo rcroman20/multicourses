@@ -31,10 +31,10 @@ import { cn } from "@/lib/utils";
 import { TEACHER_ONBOARDING_COURSE_CODE } from "@/lib/services/teacherOnboardingService";
 
 const modalInputClass =
-  "w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100";
+  "w-full rounded-xl border border-slate-200/60 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100";
 const modalLabelClass = "mb-2 block text-sm font-semibold text-slate-700";
 const modalSecondaryButtonClass =
-  "inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50";
+  "inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200/60 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50";
 const modalPrimaryButtonClass =
   "inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60";
 
@@ -640,7 +640,7 @@ export default function SlidesPage() {
         <div className="relative overflow-x-hidden">
           <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
           <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
-          <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+          <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
             <div className="flex min-h-[320px] items-center justify-center">
               <div className="space-y-2 text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
@@ -660,9 +660,9 @@ export default function SlidesPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <div className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-slate-50/70 p-4 shadow-sm">
               <div>
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
@@ -683,7 +683,7 @@ export default function SlidesPage() {
                     <button
                       type="button"
                       onClick={() => setShowUnitModal(true)}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200/60 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
                     >
                       <Plus className="h-4 w-4 text-sky-600" />
                       New unit
@@ -692,7 +692,7 @@ export default function SlidesPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <BookOpen className="h-4 w-4" />
@@ -701,7 +701,7 @@ export default function SlidesPage() {
                     </div>
                     <p className="mt-1 text-[11px] uppercase tracking-wide text-slate-500">Units</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                         <Calendar className="h-4 w-4" />
@@ -710,7 +710,7 @@ export default function SlidesPage() {
                     </div>
                     <p className="mt-1 text-[11px] uppercase tracking-wide text-slate-500">Weeks</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                         <Presentation className="h-4 w-4" />
@@ -719,7 +719,7 @@ export default function SlidesPage() {
                     </div>
                     <p className="mt-1 text-[11px] uppercase tracking-wide text-slate-500">Slides</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <ExternalLink className="h-4 w-4" />
@@ -732,7 +732,7 @@ export default function SlidesPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <section className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div className="flex-1 flex flex-col sm:flex-row gap-4">
                   <div className="flex-1">
@@ -741,7 +741,7 @@ export default function SlidesPage() {
                       <input
                         type="text"
                         placeholder="Search slides, topics, units..."
-                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-all text-sm font-medium"
+                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200/60 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition-all text-sm font-medium"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                       />
@@ -759,7 +759,7 @@ export default function SlidesPage() {
                     <select
                       value={selectedUnitFilter}
                       onChange={(e) => setSelectedUnitFilter(e.target.value)}
-                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     >
                       <option value="">All units</option>
                       {unitFilterOptions.map((unit) => (
@@ -774,7 +774,7 @@ export default function SlidesPage() {
                     <select
                       value={selectedCourseId}
                       onChange={(e) => handleCourseChange(e.target.value)}
-                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300/60 bg-white px-3 pr-9 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                     >
                       {userCourses.length === 0 ? (
                         <option value="">No courses available</option>
@@ -798,7 +798,7 @@ export default function SlidesPage() {
                   <button
                     type="button"
                     onClick={() => setShowCourseStructure((prev) => !prev)}
-                    className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-300/60 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                   >
                     {showCourseStructure ? "Hide structure" : "Show structure"}
                   </button>
@@ -806,7 +806,7 @@ export default function SlidesPage() {
               </div>
 
               {(searchTerm || selectedUnitFilter) && visibleSlidesCount > 0 && (
-                <div className="mt-4 pt-4 border-t border-slate-200">
+                <div className="mt-4 pt-4 border-t border-slate-200/60">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-sky-600">
@@ -828,7 +828,7 @@ export default function SlidesPage() {
               )}
 
               {(searchTerm || selectedUnitFilter) && visibleSlidesCount === 0 && allSlides.length > 0 && (
-                <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3">
+                <div className="mt-4 rounded-xl border border-dashed border-slate-300/60 bg-slate-50 px-4 py-3">
                   <p className="text-sm font-semibold text-slate-700">No matching slides</p>
                   <p className="text-xs text-slate-500">Try another term, another unit, or clear the filters.</p>
                 </div>
@@ -836,7 +836,7 @@ export default function SlidesPage() {
             </section>
 
         {!selectedCourseId && userCourses.length === 0 && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <div className="rounded-2xl border border-slate-200/60 bg-white p-8 text-center shadow-sm">
             <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-slate-100 flex items-center justify-center">
               <Presentation className="h-10 w-10 text-slate-400" />
             </div>
@@ -866,7 +866,7 @@ export default function SlidesPage() {
         {selectedCourseId && (
           <div className="space-y-6">
             {showCourseStructure && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-5">
                   <div className="flex items-center gap-3">
                     <div className="h-8 w-8 rounded-xl bg-sky-100 flex items-center justify-center">
@@ -914,7 +914,7 @@ export default function SlidesPage() {
                         .map((unit) => (
                           <div
                             key={unit.id}
-                            className="border border-slate-200 rounded-xl overflow-hidden hover:border-slate-300 transition-all duration-300 hover:shadow-sm"
+                            className="border border-slate-200/60 rounded-xl overflow-hidden hover:border-slate-300/60 transition-all duration-300 hover:shadow-sm"
                           >
                             <div className="flex items-center justify-between p-3 bg-white hover:bg-slate-100 transition-all duration-300">
                               <button
@@ -981,7 +981,7 @@ export default function SlidesPage() {
                             </div>
 
                             {expandedUnits.includes(unit.id) && (
-                              <div className="border-t border-slate-200 bg-slate-50/30 p-3 space-y-2">
+                              <div className="border-t border-slate-200/60 bg-slate-50/30 p-3 space-y-2">
                                 {(unit.weeks || []).length === 0 ? (
                                   <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-slate-100">
                                     <Calendar className="h-4 w-4 text-slate-400" />
@@ -1015,7 +1015,7 @@ export default function SlidesPage() {
                                         key={week.id}
                                         className="space-y-2"
                                       >
-                                        <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 transition-colors hover:border-slate-300">
+                                        <div className="flex items-center justify-between rounded-lg border border-slate-200/60 bg-white px-3 py-2 transition-colors hover:border-slate-300/60">
                                           <div className="flex items-center gap-2">
                                             <button
                                               onClick={() =>
@@ -1086,7 +1086,7 @@ export default function SlidesPage() {
                                         </div>
 
                                         {expandedWeeks.includes(week.id) && (
-                                          <div className="pl-6 border-l border-slate-200 space-y-2">
+                                          <div className="pl-6 border-l border-slate-200/60 space-y-2">
                                             {(week.slides || []).length ===
                                             0 ? (
                                               <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-lg">
@@ -1126,7 +1126,7 @@ export default function SlidesPage() {
                                                   return (
                                                     <div
                                                       key={slide.id}
-                                                      className="group flex items-center gap-2 rounded-lg border border-slate-200 bg-white transition-colors hover:border-sky-200"
+                                                      className="group flex items-center gap-2 rounded-lg border border-slate-200/60 bg-white transition-colors hover:border-sky-200"
                                                     >
                                                       <div className="flex-1 flex items-center gap-3 px-3 py-2">
                                                         <Presentation className="h-4 w-4 shrink-0 text-slate-600 group-hover:text-sky-500 transition-colors" />
@@ -1184,8 +1184,8 @@ export default function SlidesPage() {
               </div>
             )}
 
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="px-5 py-4 border-b border-slate-200 bg-white">
+            <div className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-sm">
+                <div className="px-5 py-4 border-b border-slate-200/60 bg-white">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h3 className="text-base font-bold text-slate-900">Slides Library</h3>
@@ -1199,7 +1199,7 @@ export default function SlidesPage() {
 
                 <div className="p-4">
                   {visibleSlidesCount === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                    <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-8 text-center">
                       <h4 className="text-base font-semibold text-slate-900">No slides to display</h4>
                       <p className="mt-1 text-sm text-slate-500">{emptySlidesMessage}</p>
                     </div>
@@ -1207,11 +1207,11 @@ export default function SlidesPage() {
                     <div className="space-y-6">
                       {visibleSlidesByUnit.map((group) => (
                         <section key={group.unitId} className="space-y-3">
-                          <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-2">
+                          <div className="flex items-center justify-between gap-3 border-b border-slate-200/60 pb-2">
                             <h4 className="text-sm font-bold uppercase tracking-wide text-slate-700">
                               {group.unitName}
                             </h4>
-                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                            <span className="inline-flex items-center rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
                               {group.slides.length} slide{group.slides.length !== 1 ? "s" : ""}
                             </span>
                           </div>
@@ -1225,7 +1225,7 @@ export default function SlidesPage() {
                               return (
                                 <article
                                   key={slide.id}
-                                  className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-200 hover:shadow-md"
+                                  className="rounded-xl border border-slate-200/60 bg-white p-4 shadow-sm transition hover:border-sky-200 hover:shadow-md"
                                 >
                                   <div className="mb-2 flex flex-wrap items-center gap-2">
                                     <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
@@ -1292,7 +1292,7 @@ export default function SlidesPage() {
                                             .then(() => alert("Link copied to clipboard!"))
                                             .catch(() => alert("Could not copy the link."));
                                         }}
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-white text-slate-700 transition hover:bg-slate-50"
                                         title="Copy link"
                                         aria-label="Copy link"
                                       >
@@ -1327,8 +1327,8 @@ export default function SlidesPage() {
 
         {showUnitModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-              <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div className="w-full max-w-2xl rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+              <div className="flex items-center justify-between border-b border-slate-200/60 px-6 py-4">
                 <div className="flex items-center gap-3">
                   <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
                     <BookOpen className="h-5 w-5" />
@@ -1341,7 +1341,7 @@ export default function SlidesPage() {
                 <button
                   type="button"
                   onClick={closeUnitModal}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -1390,8 +1390,8 @@ export default function SlidesPage() {
 
         {showWeekModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-              <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div className="w-full max-w-2xl rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+              <div className="flex items-center justify-between border-b border-slate-200/60 px-6 py-4">
                 <div className="flex items-center gap-3">
                   <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
                     <Calendar className="h-5 w-5" />
@@ -1404,7 +1404,7 @@ export default function SlidesPage() {
                 <button
                   type="button"
                   onClick={closeWeekModal}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -1466,8 +1466,8 @@ export default function SlidesPage() {
 
         {showSlideModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
-              <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div className="w-full max-w-2xl rounded-3xl border border-slate-200/60 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+              <div className="flex items-center justify-between border-b border-slate-200/60 px-6 py-4">
                 <div className="flex items-center gap-3">
                   <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
                     <Presentation className="h-5 w-5" />
@@ -1480,7 +1480,7 @@ export default function SlidesPage() {
                 <button
                   type="button"
                   onClick={closeSlideModal}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200/60 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
                 >
                   <X className="h-4 w-4" />
                 </button>

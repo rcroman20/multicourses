@@ -335,9 +335,9 @@ export default function AdminAccessTeacherOpsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <section className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
@@ -357,7 +357,7 @@ export default function AdminAccessTeacherOpsPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                         <Users className="h-4 w-4" />
@@ -366,7 +366,7 @@ export default function AdminAccessTeacherOpsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Active teachers</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <BookOpen className="h-4 w-4" />
@@ -375,7 +375,7 @@ export default function AdminAccessTeacherOpsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Assigned courses</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <Clock3 className="h-4 w-4" />
@@ -386,7 +386,7 @@ export default function AdminAccessTeacherOpsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Pending approvals</p>
                   </div>
-                  <div className="min-w-0 rounded-xl border border-slate-200 bg-white/90 p-2.5 sm:p-3">
+                  <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5 sm:p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-100 text-cyan-700">
                         <BadgeCheck className="h-4 w-4" />
@@ -402,13 +402,13 @@ export default function AdminAccessTeacherOpsPage() {
             </section>
 
             <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm xl:col-span-2">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Teacher Workload Snapshot</p>
                     <p className="text-xs text-slate-500">Current delivery pressure and scheduling indicators by teacher.</p>
                   </div>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                     {teacherRows.length} teachers
                   </span>
                 </div>
@@ -422,7 +422,7 @@ export default function AdminAccessTeacherOpsPage() {
                     </div>
                   </div>
                 ) : teacherRows.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                     <Users className="mx-auto h-9 w-9 text-slate-400" />
                     <p className="mt-2 text-sm font-medium text-slate-700">No active teachers found</p>
                     <p className="text-xs text-slate-500">Assign teachers to courses to start operational monitoring.</p>
@@ -443,12 +443,12 @@ export default function AdminAccessTeacherOpsPage() {
                       return (
                         <div
                           key={row.teacherId}
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition-colors hover:border-slate-300 hover:bg-slate-50"
+                          className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="flex items-center gap-2">
-                                <div className="inline-flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-sky-100 text-[11px] font-bold text-sky-700">
+                                <div className="inline-flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-slate-200/60 bg-sky-100 text-[11px] font-bold text-sky-700">
                                   {avatarUrl ? (
                                     <img
                                       src={avatarUrl}
@@ -521,39 +521,39 @@ export default function AdminAccessTeacherOpsPage() {
                 )}
               </article>
 
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Operational Flags</p>
                     <p className="text-xs text-slate-500">Queue pressure and delivery risk signals.</p>
                   </div>
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                  <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
                     Monitor
                   </span>
                 </div>
 
                 <div className="space-y-2">
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Pending approvals</p>
                     <p className="text-sm font-bold text-amber-700">{pendingApprovalsCount ?? "..."}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Payment pending</p>
                     <p className="text-sm font-bold text-sky-700">{paymentPendingCount ?? "..."}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Unassigned courses</p>
                     <p className="text-sm font-bold text-rose-700">{unassignedCoursesCount}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">No schedule</p>
                     <p className="text-sm font-bold text-amber-700">{coursesWithoutScheduleCount}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">High load teachers</p>
                     <p className="text-sm font-bold text-rose-700">{teachersWithHighLoadCount}</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  <div className="rounded-xl border border-slate-200/60 bg-white px-3 py-2.5">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Rejected requests</p>
                     <p className="text-sm font-bold text-slate-700">{rejectedCount ?? "..."}</p>
                   </div>
@@ -564,11 +564,11 @@ export default function AdminAccessTeacherOpsPage() {
                     to="/admin/teacher-approvals"
                     className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-center text-xs font-semibold text-sky-700 transition hover:bg-sky-100"
                   >
-                    Open Teacher Approvals
+                    Open Access Approvals
                   </Link>
                   <Link
                     to="/admin/admins"
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="rounded-lg border border-slate-200/60 bg-white px-3 py-2 text-center text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
                     Open Admin Emails
                   </Link>

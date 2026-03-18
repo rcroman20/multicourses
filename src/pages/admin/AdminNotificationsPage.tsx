@@ -416,9 +416,9 @@ export default function AdminNotificationsPage() {
         <div className="pointer-events-none absolute -left-16 top-8 h-40 w-40 rounded-full bg-white/70 blur-[40px]" />
         <div className="pointer-events-none absolute -right-10 bottom-8 h-44 w-44 rounded-full bg-slate-300/50 blur-[40px]" />
 
-        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+        <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <section className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
               <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
               <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
 
@@ -436,7 +436,7 @@ export default function AdminNotificationsPage() {
                   </p>
                 </div>
                 <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 text-sky-700">
                         <Users className="h-4 w-4" />
@@ -445,7 +445,7 @@ export default function AdminNotificationsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold text-slate-500">Users reachable</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
                         <GraduationCap className="h-4 w-4" />
@@ -454,7 +454,7 @@ export default function AdminNotificationsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold text-slate-500">Teachers</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                         <MessageSquare className="h-4 w-4" />
@@ -463,7 +463,7 @@ export default function AdminNotificationsPage() {
                     </div>
                     <p className="mt-1 text-[11px] font-semibold text-slate-500">Students</p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white/90 p-3">
+                  <div className="rounded-xl border border-slate-200/60 bg-white/90 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                         <ShieldCheck className="h-4 w-4" />
@@ -477,7 +477,7 @@ export default function AdminNotificationsPage() {
             </section>
 
             <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-1">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm xl:col-span-1">
                 <div className="mb-3">
                   <p className="text-sm font-semibold text-slate-900">Broadcast Composer</p>
                   <p className="text-xs text-slate-500">Deliver a notification directly to the in-app bell and notification center.</p>
@@ -496,7 +496,7 @@ export default function AdminNotificationsPage() {
                             key={template.key}
                             type="button"
                             onClick={() => applyTemplate(template)}
-                            className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-left transition hover:border-slate-300 hover:bg-white"
+                            className="rounded-xl border border-slate-200/60 bg-slate-50 p-3 text-left transition hover:border-slate-300/60 hover:bg-white"
                           >
                             <div className="flex items-start gap-2">
                               <div
@@ -522,7 +522,7 @@ export default function AdminNotificationsPage() {
                     <select
                       value={selectedUserId}
                       onChange={(event) => setSelectedUserId(event.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                      className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
                     >
                       <option value="">
                         All eligible users ({eligibleUsers.length})
@@ -538,7 +538,7 @@ export default function AdminNotificationsPage() {
                   <select
                     value={audience}
                     onChange={(event) => setAudience(event.target.value as BroadcastAudience)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                    className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
                   >
                     <option value="all">All users ({counts.all})</option>
                     <option value="teachers">Teachers ({counts.teachers})</option>
@@ -549,7 +549,7 @@ export default function AdminNotificationsPage() {
                   <select
                     value={type}
                     onChange={(event) => setType(event.target.value as NotificationType)}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                    className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
                   >
                     <option value="info">Info</option>
                     <option value="success">Success</option>
@@ -561,7 +561,7 @@ export default function AdminNotificationsPage() {
                     value={title}
                     onChange={(event) => setTitle(event.target.value)}
                     placeholder="Notification title"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                    className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
                   />
 
                   <textarea
@@ -569,7 +569,7 @@ export default function AdminNotificationsPage() {
                     value={message}
                     onChange={(event) => setMessage(event.target.value)}
                     placeholder="Message..."
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                    className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
                   />
 
                   <input
@@ -577,10 +577,10 @@ export default function AdminNotificationsPage() {
                     value={link}
                     onChange={(event) => setLink(event.target.value)}
                     placeholder="Optional link, e.g. /admin/dashboard"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                    className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
                   />
 
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3 text-xs text-slate-600">
                     This message will appear in the notification bell and the personal notifications view of the selected audience.
                     {selectedTemplate ? ` Eligible now: ${eligibleUsers.length}.` : ""}
                     {selectedUser ? ` Current target: ${selectedUser.name}.` : ""}
@@ -600,7 +600,7 @@ export default function AdminNotificationsPage() {
                 </div>
               </article>
 
-              <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm xl:col-span-2">
                 <div className="mb-3">
                   <p className="text-sm font-semibold text-slate-900">Broadcast History</p>
                   <p className="text-xs text-slate-500">Recent notification pushes recorded in the audit log.</p>
@@ -611,12 +611,12 @@ export default function AdminNotificationsPage() {
                     <Loader2 className="h-8 w-8 animate-spin text-sky-600" />
                   </div>
                 ) : warnings.length > 0 && recentBroadcasts.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                     <AlertTriangle className="mx-auto h-9 w-9 text-slate-400" />
                     <p className="mt-2 text-sm font-medium text-slate-700">{warnings[0]}</p>
                   </div>
                 ) : recentBroadcasts.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
                     <BellRing className="mx-auto h-9 w-9 text-slate-400" />
                     <p className="mt-2 text-sm font-medium text-slate-700">No broadcasts yet</p>
                     <p className="text-xs text-slate-500">Send your first notification to start the log.</p>
@@ -624,7 +624,7 @@ export default function AdminNotificationsPage() {
                 ) : (
                   <div className="space-y-2">
                     {recentBroadcasts.map((entry) => (
-                      <article key={entry.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                      <article key={entry.id} className="rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-sm font-semibold text-slate-900">{entry.targetLabel || "Broadcast notification"}</p>
                           <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getTypeBadgeClassName(

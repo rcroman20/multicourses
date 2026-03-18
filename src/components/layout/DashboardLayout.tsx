@@ -1,10 +1,12 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { matchPath, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, CheckCheck, ChevronLeft, ChevronRight, Circle, Loader2, Sparkles, X } from 'lucide-react';
+import { Bell, CheckCheck, Circle, Loader2, Sparkles, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { cn } from '@/lib/utils';
+import { PublicFooter } from '@/components/common/PublicFooter';
+import { useAdminPlatformSettings } from '@/lib/services/adminSettingsService';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -27,10 +29,11 @@ type HeaderRule = {
 };
 
 const pageHeaderRules: HeaderRule[] = [
-  { path: '/', title: 'Home', subtitle: 'Welcome to MultiCourses' },
+  { path: '/', title: 'Home', subtitle: 'Welcome to Socrattica' },
   { path: '/auth', title: 'Authentication', subtitle: 'Sign in to continue' },
   { path: '/student', title: 'Student Dashboard', subtitle: 'Your academic overview' },
   { path: '/teacher', title: 'Teacher Dashboard', subtitle: 'Your teaching overview' },
+  { path: '/institution', title: 'Institution Dashboard', subtitle: 'Institution operations and academic oversight' },
   { path: '/courses/create', title: 'Create Course', subtitle: 'Set up a new course' },
   {
     path: '/courses/:courseCode/edit',
@@ -94,10 +97,21 @@ const pageHeaderRules: HeaderRule[] = [
   { path: '/admin', title: 'Admin Access', subtitle: 'Manage admin permissions by email' },
   { path: '/admin/dashboard', title: 'Admin Dashboard', subtitle: 'Central admin workspace' },
   { path: '/admin/admins', title: 'Admin Emails', subtitle: 'Manage admin access by email' },
-  { path: '/admin/teacher-approvals', title: 'Teacher Approvals', subtitle: 'Review and process teacher requests' },
+  { path: '/admin/teacher-approvals', title: 'Access Approvals', subtitle: 'Review and process teacher and institution requests' },
   { path: '/admin/teacher-ops', title: 'Teacher Operations', subtitle: 'Active teacher workload and usage analytics' },
   { path: '/admin/deletions', title: 'Account Deletions', subtitle: 'Process account deletion requests' },
   { path: '/admin/inbox', title: 'Inbound Requests', subtitle: 'Contact and estimator messages' },
+  { path: '/admin/support-conversations', title: 'Support Conversations', subtitle: 'Contact and estimator messages' },
+  { path: '/admin/settings', title: 'Settings', subtitle: 'Platform settings and governance controls' },
+  { path: '/admin/billing', title: 'Billing', subtitle: 'Plan status, payments, and account billing' },
+  { path: '/admin/institutions', title: 'Institutions', subtitle: 'Institution records and assignments' },
+  { path: '/admin/institutions/:institutionKey', title: 'Institution Detail', subtitle: 'Institution profile and related users' },
+  { path: '/admin/users', title: 'Users Directory', subtitle: 'Global user directory and operational routing' },
+  { path: '/admin/reports', title: 'Reports', subtitle: 'Operational and academic reporting center' },
+  { path: '/admin/backups', title: 'Backups', subtitle: 'Snapshots, recovery points, and retention control' },
+  { path: '/admin/audit-log', title: 'Audit Log', subtitle: 'Trace admin actions and governance history' },
+  { path: '/admin/notifications', title: 'Notifications', subtitle: 'Admin announcements and delivery control' },
+  { path: '/admin/permissions', title: 'Permissions', subtitle: 'Delegated access and module permissions' },
 ];
 
 const resolveHeaderValue = (value: HeaderValue, params: HeaderParams): string =>
@@ -114,7 +128,7 @@ const getPageHeaderByPathname = (pathname: string): { title: string; subtitle: s
   }
 
   return {
-    title: 'MultiCourses',
+    title: 'Socrattica',
     subtitle: 'Learning management platform',
   };
 };
@@ -126,7 +140,7 @@ function getGreetingByHour() {
   return 'Good evening';
 }
 
-function getSectionSubtitle(sectionKey: string, role?: 'docente' | 'estudiante' | 'admin') {
+function getSectionSubtitle(sectionKey: string, role?: 'docente' | 'estudiante' | 'admin' | 'institucion') {
   const teacherSubtitles: Record<string, string> = {
     dashboard: 'Teacher dashboard overview',
     calendar: 'Schedule and class events',
@@ -161,17 +175,26 @@ function getSectionSubtitle(sectionKey: string, role?: 'docente' | 'estudiante' 
     profile: 'Account settings',
   };
 
+  const institutionSubtitles: Record<string, string> = {
+    dashboard: 'Institution dashboard overview',
+    courses: 'Institution course coordination',
+    students: 'Students linked to your institution',
+    profile: 'Account settings',
+  };
+
   const source =
     role === 'docente'
       ? teacherSubtitles
       : role === 'admin'
         ? adminSubtitles
+        : role === 'institucion'
+          ? institutionSubtitles
         : studentSubtitles;
   return source[sectionKey] ?? 'Section overview';
 }
 
 function resolveSectionKey(pathname: string): string {
-  if (pathname === '/teacher' || pathname === '/student') return 'dashboard';
+  if (pathname === '/teacher' || pathname === '/student' || pathname === '/institution') return 'dashboard';
   if (pathname.startsWith('/calendar')) return 'calendar';
   if (pathname.startsWith('/grades') || pathname.includes('/grade-sheets')) return 'grades';
   if (pathname.startsWith('/slides')) return 'slides';
@@ -186,6 +209,38 @@ function resolveSectionKey(pathname: string): string {
   if (pathname.startsWith('/courses')) return 'courses';
   return 'dashboard';
 }
+
+function getFooterSummary(sectionKey: string, role?: 'docente' | 'estudiante' | 'admin' | 'institucion') {
+  const roleLabel =
+    role === 'admin'
+      ? 'admin operations'
+      : role === 'docente'
+        ? 'teaching operations'
+        : role === 'institucion'
+          ? 'institution operations'
+          : 'student progress';
+
+  const summaries: Record<string, string> = {
+    dashboard: `Keep ${roleLabel} aligned from one Socrattica workspace.`,
+    calendar: 'Coordinate classes, deadlines, and academic events from one operational calendar.',
+    courses: 'Manage course structure, enrollment, and delivery with the same workspace flow used across Socrattica.',
+    assessments: 'Review activities, grading workflows, and academic follow-up from one consistent workspace.',
+    exerciseBank: 'Organize practice content, quiz resources, and reusable question banks in one place.',
+    slides: 'Keep presentations, weekly structure, and teaching materials connected in one learning workspace.',
+    files: 'Centralize documents, shared resources, and course files with the same operational structure.',
+    grades: 'Track grading, publishing, and score visibility in one academic workspace.',
+    students: 'Manage rosters, student detail, and enrollment actions from one coordinated workspace.',
+    statistics: 'Monitor academic performance, participation, and progress with a unified reporting view.',
+    notifications: 'Stay on top of alerts, communication, and pending actions without leaving the workspace.',
+    admin: 'Support governance, permissions, reporting, and platform operations from one admin workspace.',
+    profile: 'Keep account details, preferences, and identity settings updated in one secure workspace.',
+  };
+
+  return summaries[sectionKey] ?? 'Keep your academic operations connected inside the Socrattica workspace.';
+}
+
+const applyPlatformName = (value: string, platformName: string): string =>
+  String(value || "").replace(/Socrattica/g, platformName);
 
 function toMillis(value: unknown): number {
   if (!value) return 0;
@@ -271,6 +326,7 @@ export function DashboardLayout({
   showHeader = true,
 }: DashboardLayoutProps) {
   const { user, updateProfile } = useAuth();
+  const { settings: platformSettings } = useAdminPlatformSettings();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { notifications, unreadCount, loading, markAsRead, markAllAsRead } = useNotifications();
@@ -283,11 +339,16 @@ export function DashboardLayout({
   const notificationsRef = useRef<HTMLDivElement | null>(null);
 
   const routeHeader = useMemo(() => getPageHeaderByPathname(pathname), [pathname]);
-  const resolvedTitle = title ?? routeHeader.title;
-  const resolvedSubtitle = subtitle ?? routeHeader.subtitle;
-  const userRole = user?.role as 'docente' | 'estudiante' | 'admin' | undefined;
+  const platformName = String(platformSettings.platformName || "").trim() || "Socrattica";
+  const resolvedTitle = applyPlatformName(title ?? routeHeader.title, platformName);
+  const resolvedSubtitle = applyPlatformName(subtitle ?? routeHeader.subtitle, platformName);
+  const userRole = user?.role as 'docente' | 'estudiante' | 'admin' | 'institucion' | undefined;
   const isDashboardSection = pathname === '/teacher' || pathname === '/student';
   const sectionKey = useMemo(() => resolveSectionKey(pathname), [pathname]);
+  const footerSummary = useMemo(
+    () => applyPlatformName(getFooterSummary(sectionKey, userRole), platformName),
+    [platformName, sectionKey, userRole],
+  );
 
   const headerTitle = isDashboardSection
     ? `${getGreetingByHour()}, ${user?.name || 'User'}`
@@ -404,42 +465,28 @@ export function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#050505]">
       <Sidebar
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={toggleSidebar}
-        showCollapseToggle={false}
+        showCollapseToggle
       />
 
       <main
         className={cn(
-          'relative min-h-screen bg-slate-50 transition-all duration-300',
+          'relative min-h-screen bg-[#050505] transition-all duration-300',
           isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64',
         )}
       >
         {showHeader ? (
-          <header className="sticky top-0 z-30 border-b border-slate-700/60 bg-[#071633] shadow-[0_8px_20px_rgba(15,23,42,0.12)]">
+          <header className="sticky top-0 z-30 border-b border-slate-800 bg-[#050505] shadow-[0_10px_24px_-20px_rgba(0,0,0,0.95)]">
             <div className="flex h-[72px] items-center justify-between gap-3 px-4 pl-16 lg:px-5">
               <div className="flex min-w-0 items-center gap-3">
-                <button
-                  type="button"
-                  onClick={toggleSidebar}
-                  className="hidden h-10 w-10 items-center justify-center rounded-xl border border-slate-500/45 bg-slate-900/35 text-slate-100 transition-colors hover:border-sky-300/70 hover:bg-slate-900/50 lg:inline-flex"
-                  aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                  title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                >
-                  {isSidebarCollapsed ? (
-                    <ChevronRight className="h-5 w-5" />
-                  ) : (
-                    <ChevronLeft className="h-5 w-5" />
-                  )}
-                </button>
-
                 <div className="min-w-0">
-                  <h1 className="truncate text-lg font-extrabold text-slate-50 sm:text-xl lg:text-2xl">
+                  <h1 className="truncate text-lg font-extrabold text-white sm:text-xl lg:text-2xl">
                     {headerTitle}
                   </h1>
-                  <p className="truncate text-xs font-semibold text-blue-200/90 sm:text-sm">
+                  <p className="truncate text-xs font-semibold text-slate-300 sm:text-sm">
                     {headerSubtitle}
                   </p>
                 </div>
@@ -449,7 +496,7 @@ export function DashboardLayout({
                 <button
                   type="button"
                   onClick={() => setIsNotificationsOpen((current) => !current)}
-                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-500/45 bg-slate-900/35 text-slate-100 transition-colors hover:border-sky-300/70 hover:bg-slate-900/50"
+                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-950/90 text-slate-200 transition-colors hover:border-slate-500 hover:bg-slate-900"
                   aria-label="Notifications"
                 >
                   <Bell className="h-5 w-5" />
@@ -464,14 +511,14 @@ export function DashboardLayout({
                   <>
                     <button
                       type="button"
-                      className="fixed inset-x-0 bottom-0 z-40 bg-slate-900/20"
+                      className="fixed inset-x-0 bottom-0 z-40 bg-black/45"
                       style={{ top: HEADER_HEIGHT }}
                       onClick={() => setIsNotificationsOpen(false)}
                       aria-label="Close notifications"
                     />
 
                     <div
-                      className="fixed right-3 z-50 w-[min(440px,calc(100vw-24px))] rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_16px_32px_rgba(15,23,42,0.2)]"
+                      className="fixed right-3 z-50 w-[min(440px,calc(100vw-24px))] rounded-2xl border border-slate-200/80 bg-white p-3 shadow-[0_20px_40px_-24px_rgba(15,23,42,0.45)]"
                       style={{ top: HEADER_HEIGHT + 8 }}
                     >
                       <div className="mb-2 flex items-center justify-between">
@@ -481,7 +528,7 @@ export function DashboardLayout({
                             type="button"
                             onClick={markAllAsRead}
                             disabled={loading || unreadCount === 0}
-                            className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 transition-colors hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition-colors hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <CheckCheck className="h-3.5 w-3.5" />
                             Mark all
@@ -489,7 +536,7 @@ export function DashboardLayout({
                           <button
                             type="button"
                             onClick={() => setIsNotificationsOpen(false)}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:bg-slate-100"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
                             aria-label="Close notifications"
                           >
                             <X className="h-4 w-4" />
@@ -504,7 +551,7 @@ export function DashboardLayout({
                             Loading notifications...
                           </div>
                         ) : notifications.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center text-sm text-slate-600">
+                          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
                             No notifications available.
                           </div>
                         ) : (
@@ -576,12 +623,16 @@ export function DashboardLayout({
 
         <div
           className={cn(
-            'bg-slate-50',
-            showHeader ? 'px-4 pb-6 pt-4 lg:px-6' : 'pr-4 pb-4 pt-20 pl-20 sm:pt-16 sm:pl-16',
+            'flex bg-[#050505]',
+            showHeader ? 'min-h-[calc(100vh-72px)] flex-col' : 'min-h-screen flex-col',
+            showHeader ? 'px-0 pt-4' : 'pt-20 sm:pt-16',
             contentClassName,
           )}
         >
-          {children}
+          <div className="flex-1">
+            {children}
+          </div>
+          <PublicFooter summary={footerSummary} />
         </div>
       </main>
 
