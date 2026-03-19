@@ -45,6 +45,8 @@ import {
   canAccessDelegatedAdminPermission,
 } from '@/lib/services/adminPermissionsService';
 import {
+  DEFAULT_PLATFORM_TAGLINE,
+  DEFAULT_PLATFORM_NAME,
   resolvePlatformLogoUrl,
   useAdminPlatformSettings,
 } from '@/lib/services/adminSettingsService';
@@ -160,7 +162,9 @@ export function Sidebar({
           : '/student';
   const isOwnerAdmin = isOwnerAdminEmail(user?.email);
   const platformName =
-    String(platformSettings.platformName || "").trim() || "Socrattica";
+    String(platformSettings.platformName || "").trim() || DEFAULT_PLATFORM_NAME;
+  const platformTagline =
+    String(platformSettings.platformTagline || "").trim() || DEFAULT_PLATFORM_TAGLINE;
   const brandLogo = resolvePlatformLogoUrl(platformSettings.logoUrl);
 
   useEffect(() => {
@@ -318,7 +322,13 @@ export function Sidebar({
       label: 'Grades',
       href: '/grades',
       icon: <Award className="h-4 w-4" />,
-      roles: ['docente', 'estudiante'],
+      roles: ['docente', 'estudiante', 'institucion'],
+    },
+    {
+      label: 'Analytics',
+      href: '/institution/analytics',
+      icon: <BarChart3 className="h-4 w-4" />,
+      roles: ['institucion'],
     },
     {
       label: 'Grade Sheets',
@@ -533,7 +543,7 @@ export function Sidebar({
                     {platformName}
                   </span>
                   <span className="truncate text-xs text-slate-400">
-                    Academic Platform
+                    {platformTagline}
                   </span>
                 </div>
               )}

@@ -9,6 +9,7 @@ Allow: /sitemap.xml
 
 # Authentication and approval flow
 Disallow: /auth
+Disallow: /maintenance
 Disallow: /teacher-approval-waiting
 Disallow: /teacher-approval-rejected
 
@@ -16,6 +17,7 @@ Disallow: /teacher-approval-rejected
 Disallow: /admin
 Disallow: /student
 Disallow: /teacher
+Disallow: /institution
 Disallow: /calendar
 Disallow: /courses
 Disallow: /grades
@@ -34,4 +36,4 @@ Disallow: /notas
 Disallow: /inscribir-estudiante
 Disallow: /diapositivas
 
-Sitemap: https://socrattica.web.app/sitemap.xml
+Sitemap: https://multicourses.web.app/sitemap.xml

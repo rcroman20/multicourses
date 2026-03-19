@@ -37,7 +37,9 @@ service cloud.firestore {
     }
 
     function canAccessCourse(courseId) {
-      return isCourseTeacher(courseId) || isCourseStudent(courseId);
+      return isCourseTeacher(courseId)
+        || isCourseStudent(courseId)
+        || canManageInstitutionCourse(courseId);
     }
 
     function userPath(uid) {

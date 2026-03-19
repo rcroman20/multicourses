@@ -15,7 +15,21 @@ import { AdminPermissionRoute } from "@/components/auth/AdminPermissionRoute";
 import { CookieConsentBanner } from "@/components/common/CookieConsentBanner";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import {
+  ADMIN_PLATFORM_NAME_COOKIE,
+  ADMIN_PLATFORM_NAME_STORAGE_KEY,
+  ADMIN_PLATFORM_SETTINGS_STORAGE_KEY,
+  DEFAULT_PLATFORM_NAME,
+  DEFAULT_PWA_BACKGROUND_COLOR,
+  DEFAULT_PWA_COURSES_LABEL,
+  DEFAULT_PWA_GRADES_LABEL,
+  DEFAULT_PWA_SHORT_NAME,
+  DEFAULT_SITE_DESCRIPTION,
+  DEFAULT_THEME_COLOR,
+  type AdminPlatformSettings,
+  resolveHexColor,
   resolvePlatformFaviconUrl,
+  resolvePlatformShareImageUrl,
+  resolvePlatformThemeColor,
   resolvePlatformTouchIconUrl,
   useAdminPlatformSettings,
 } from "@/lib/services/adminSettingsService";
@@ -40,6 +54,7 @@ const CookiesPolicyPage = lazy(() => import("./pages/shared/CookiesPolicyPage"))
 const StudentDashboard = lazy(() => import("./pages/students/StudentDashboard"));
 const TeacherDashboard = lazy(() => import("./pages/teacher/TeacherDashboard"));
 const InstitutionDashboardPage = lazy(() => import("./pages/institution/InstitutionDashboardPage"));
+const InstitutionAnalyticsPage = lazy(() => import("./pages/institution/InstitutionAnalyticsPage"));
  
 // 3. Páginas compartidas (estudiantes y profesores)
 const CoursesPage = lazy(() => import("./pages/shared/CoursesPage"));
@@ -90,11 +105,91 @@ const StatsPage = lazy(() => import("./pages/teacher/StatsPage"));
 const NotificationsPage = lazy(() => import("./pages/teacher/NotificationsPage"));
 
 const queryClient = new QueryClient();
-const DEFAULT_APP_NAME = "Socrattica";
+const DEFAULT_APP_NAME = DEFAULT_PLATFORM_NAME;
+const DEFAULT_MANIFEST_DESCRIPTION =
+  "Academic operations platform for teachers, students, admins, and institutions.";
 
 type TitleRule = {
   path: string;
   title: string | ((params: Record<string, string | undefined>) => string);
+};
+
+const inferImageMimeType = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.endsWith(".svg")) return "image/svg+xml";
+  if (normalized.endsWith(".webp")) return "image/webp";
+  if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) return "image/jpeg";
+  if (normalized.endsWith(".ico")) return "image/x-icon";
+  return "image/png";
+};
+
+const toManifestDataUrl = (manifest: Record<string, unknown>): string =>
+  `data:application/manifest+json;charset=utf-8,${encodeURIComponent(JSON.stringify(manifest))}`;
+
+const buildDynamicManifest = (settings: AdminPlatformSettings): Record<string, unknown> => {
+  const platformName = String(settings.platformName || "").trim() || DEFAULT_PLATFORM_NAME;
+  const shortName =
+    String(settings.pwaShortName || "").trim() ||
+    (platformName.length > 18 ? `${platformName.slice(0, 17).trim()}…` : platformName) ||
+    DEFAULT_PWA_SHORT_NAME;
+  const themeColor = resolvePlatformThemeColor(settings.themeColor || DEFAULT_THEME_COLOR);
+  const backgroundColor = resolveHexColor(
+    settings.pwaBackgroundColor || DEFAULT_PWA_BACKGROUND_COLOR,
+    DEFAULT_PWA_BACKGROUND_COLOR,
+  );
+  const description =
+    String(settings.siteDescription || "").trim() ||
+    DEFAULT_SITE_DESCRIPTION ||
+    DEFAULT_MANIFEST_DESCRIPTION;
+  const coursesShortcutLabel =
+    String(settings.pwaCoursesShortcutLabel || "").trim() || DEFAULT_PWA_COURSES_LABEL;
+  const gradesShortcutLabel =
+    String(settings.pwaGradesShortcutLabel || "").trim() || DEFAULT_PWA_GRADES_LABEL;
+  const icon192 = resolvePlatformTouchIconUrl(settings.touchIconUrl || settings.logoUrl);
+  const icon512 = resolvePlatformShareImageUrl(settings.shareImageUrl || settings.logoUrl);
+  const icon192Type = inferImageMimeType(icon192);
+  const icon512Type = inferImageMimeType(icon512);
+
+  return {
+    id: "/",
+    name: platformName,
+    short_name: shortName,
+    description,
+    start_url: "/",
+    scope: "/",
+    display: "standalone",
+    background_color: backgroundColor,
+    theme_color: themeColor,
+    orientation: "portrait",
+    icons: [
+      {
+        src: icon192,
+        sizes: "192x192",
+        type: icon192Type,
+        purpose: "any",
+      },
+      {
+        src: icon512,
+        sizes: "512x512",
+        type: icon512Type,
+        purpose: "any",
+      },
+    ],
+    shortcuts: [
+      {
+        name: coursesShortcutLabel,
+        short_name: coursesShortcutLabel,
+        url: "/courses",
+        icons: [{ src: icon192, sizes: "192x192", type: icon192Type }],
+      },
+      {
+        name: gradesShortcutLabel,
+        short_name: gradesShortcutLabel,
+        url: "/grades",
+        icons: [{ src: icon192, sizes: "192x192", type: icon192Type }],
+      },
+    ],
+  };
 };
 
 
@@ -115,6 +210,7 @@ const titleRules: TitleRule[] = [
   { path: "/student", title: "Students Dashboard" },
   { path: "/teacher", title: "Teacher Dashboard" },
   { path: "/institution", title: "Institution Dashboard" },
+  { path: "/institution/analytics", title: "Institution Analytics" },
   { path: "/courses", title: "Courses" },
   {
     path: "/courses/view/:courseCode",
@@ -223,6 +319,58 @@ function DocumentTitleManager() {
     document.title = getDocumentTitle(pathname, appName);
   }, [appName, pathname, user?.name]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      window.localStorage.setItem(ADMIN_PLATFORM_NAME_STORAGE_KEY, appName);
+      const rawStoredSettings = window.localStorage.getItem(ADMIN_PLATFORM_SETTINGS_STORAGE_KEY);
+      const parsedStoredSettings =
+        rawStoredSettings && rawStoredSettings.trim().length > 0
+          ? JSON.parse(rawStoredSettings)
+          : {};
+      window.localStorage.setItem(
+        ADMIN_PLATFORM_SETTINGS_STORAGE_KEY,
+        JSON.stringify({
+          ...(parsedStoredSettings && typeof parsedStoredSettings === "object"
+            ? parsedStoredSettings
+            : {}),
+          platformName: appName,
+        }),
+      );
+      document.cookie = `${ADMIN_PLATFORM_NAME_COOKIE}=${encodeURIComponent(appName)}; path=/; max-age=31536000; SameSite=Lax`;
+    } catch {
+      // Ignore storage write failures so title updates continue to work.
+    }
+  }, [appName]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
+
+    const message = {
+      type: "SET_PLATFORM_NAME",
+      platformName: appName,
+    };
+
+    const sendToWorker = async () => {
+      try {
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage(message);
+          return;
+        }
+
+        const registration = await navigator.serviceWorker.ready;
+        registration.active?.postMessage(message);
+        registration.waiting?.postMessage(message);
+        registration.installing?.postMessage(message);
+      } catch {
+        // Ignore service worker messaging failures so app rendering continues.
+      }
+    };
+
+    void sendToWorker();
+  }, [appName]);
+
   return null;
 }
 
@@ -230,8 +378,9 @@ function BrandAssetsManager() {
   const { settings } = useAdminPlatformSettings();
 
   useEffect(() => {
-    const faviconHref = resolvePlatformFaviconUrl(settings.logoUrl);
-    const touchIconHref = resolvePlatformTouchIconUrl(settings.logoUrl);
+    const faviconHref = resolvePlatformFaviconUrl(settings.faviconUrl || settings.logoUrl);
+    const touchIconHref = resolvePlatformTouchIconUrl(settings.touchIconUrl || settings.logoUrl);
+    const themeColor = resolvePlatformThemeColor(settings.themeColor);
     const faviconType = faviconHref.endsWith(".svg")
       ? "image/svg+xml"
       : faviconHref.endsWith(".ico")
@@ -270,7 +419,41 @@ function BrandAssetsManager() {
       "180x180",
     );
     appleTouch.href = touchIconHref;
-  }, [settings.logoUrl]);
+
+    const existingThemeColor = document.head.querySelector('meta[name="theme-color"]');
+    const themeMeta =
+      existingThemeColor instanceof HTMLMetaElement
+        ? existingThemeColor
+        : (() => {
+            const meta = document.createElement("meta");
+            meta.name = "theme-color";
+            document.head.appendChild(meta);
+            return meta;
+          })();
+    themeMeta.content = themeColor;
+  }, [settings.faviconUrl, settings.logoUrl, settings.themeColor, settings.touchIconUrl]);
+
+  return null;
+}
+
+function ManifestManager() {
+  const { settings } = useAdminPlatformSettings();
+
+  useEffect(() => {
+    const selector = 'link[rel="manifest"]';
+    const existing = document.head.querySelector(selector);
+    const manifestLink =
+      existing instanceof HTMLLinkElement
+        ? existing
+        : (() => {
+            const link = document.createElement("link");
+            link.rel = "manifest";
+            document.head.appendChild(link);
+            return link;
+          })();
+
+    manifestLink.href = toManifestDataUrl(buildDynamicManifest(settings));
+  }, [settings]);
 
   return null;
 }
@@ -305,6 +488,7 @@ function MaintenanceModeGate({ children }: { children: ReactNode }) {
   const maintenanceMode = settings.maintenanceMode === true;
   const isMaintenancePath = pathname === "/maintenance";
   const isAuthPath = pathname === "/auth";
+  const isAdminPath = pathname.startsWith("/admin");
   const isLegalPath =
     pathname === "/privacy-policy" ||
     pathname === "/terms-and-conditions" ||
@@ -330,7 +514,7 @@ function MaintenanceModeGate({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
-  if (isMaintenancePath || isAuthPath || isLegalPath) {
+  if (isMaintenancePath || isAuthPath || isLegalPath || isAdminPath) {
     return <>{children}</>;
   }
 
@@ -346,9 +530,10 @@ const App = () => (
             <Toaster />
             <Sonner />
             <BrowserRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
-              <DocumentTitleManager />
-              <BrandAssetsManager />
-              <MaintenanceModeGate>
+      <DocumentTitleManager />
+      <BrandAssetsManager />
+      <ManifestManager />
+      <MaintenanceModeGate>
                 <Suspense fallback={<div className="min-h-screen bg-background" />}>
                   <Routes>
               {/* ========== RUTAS PÚBLICAS ========== */}
@@ -434,6 +619,14 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/institution/analytics"
+                element={
+                  <ProtectedRoute requiredRole="institucion">
+                    <InstitutionAnalyticsPage />
+                  </ProtectedRoute>
+                }
+              />
 
               
 
@@ -510,7 +703,7 @@ const App = () => (
               <Route
                 path="/grades"
                 element={
-                  <ProtectedRoute requiredRole={["docente", "estudiante"]}>
+                  <ProtectedRoute requiredRole={["docente", "estudiante", "institucion"]}>
                     <GradesPage />
                   </ProtectedRoute>
                 }

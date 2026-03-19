@@ -1,6 +1,33 @@
 import { useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
+  DEFAULT_FOOTER_ABOUT_LABEL,
+  DEFAULT_FOOTER_ABOUT_HREF,
+  DEFAULT_FOOTER_CONTACT_LINK_LABEL,
+  DEFAULT_FOOTER_CONTACT_HREF,
+  DEFAULT_FOOTER_CONTACT_TITLE,
+  DEFAULT_FOOTER_COOKIES_LABEL,
+  DEFAULT_FOOTER_COOKIES_HREF,
+  DEFAULT_FOOTER_COPYRIGHT_TEMPLATE,
+  DEFAULT_FOOTER_DIRECT_CONTACT_LABEL,
+  DEFAULT_FOOTER_EYEBROW_LABEL,
+  DEFAULT_FOOTER_GENERAL_TITLE,
+  DEFAULT_FOOTER_HOME_LABEL,
+  DEFAULT_FOOTER_HOME_HREF,
+  DEFAULT_FOOTER_LEGAL_TITLE,
+  DEFAULT_FOOTER_PHONE_LABEL,
+  DEFAULT_FOOTER_PLANS_LABEL,
+  DEFAULT_FOOTER_PLANS_HREF,
+  DEFAULT_FOOTER_PRIVACY_LABEL,
+  DEFAULT_FOOTER_PRIVACY_HREF,
+  DEFAULT_FOOTER_SUPPORT_LABEL,
+  DEFAULT_FOOTER_TERMS_LABEL,
+  DEFAULT_FOOTER_TERMS_HREF,
+  DEFAULT_FOOTER_WHATSAPP_LABEL,
+  DEFAULT_PLATFORM_TAGLINE,
+  DEFAULT_PUBLIC_FOOTER_TAGLINE,
+  DEFAULT_PLATFORM_NAME,
+  applyPlatformNameTemplate,
   resolvePlatformLogoUrl,
   useAdminPlatformSettings,
 } from "@/lib/services/adminSettingsService";
@@ -26,10 +53,50 @@ export function PublicFooter({
 }: PublicFooterProps) {
   const { pathname } = useLocation();
   const { settings } = useAdminPlatformSettings();
-  const platformName = String(settings.platformName || "Socrattica").trim() || "Socrattica";
+  const platformName =
+    String(settings.platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME;
   const resolvedSummary = useMemo(
-    () => String(summary || "").replace(/Socrattica/g, platformName),
+    () => applyPlatformNameTemplate(summary, platformName),
     [summary, platformName],
+  );
+  const platformTagline =
+    String(settings.platformTagline || DEFAULT_PLATFORM_TAGLINE).trim() || DEFAULT_PLATFORM_TAGLINE;
+  const footerTagline = useMemo(
+    () =>
+      applyPlatformNameTemplate(
+        settings.publicFooterTagline || DEFAULT_PUBLIC_FOOTER_TAGLINE,
+        platformName,
+      ) || DEFAULT_PUBLIC_FOOTER_TAGLINE,
+    [platformName, settings.publicFooterTagline],
+  );
+  const footerEyebrowLabel =
+    String(settings.footerEyebrowLabel || DEFAULT_FOOTER_EYEBROW_LABEL).trim() ||
+    DEFAULT_FOOTER_EYEBROW_LABEL;
+  const footerContactTitle =
+    String(settings.footerContactTitle || DEFAULT_FOOTER_CONTACT_TITLE).trim() ||
+    DEFAULT_FOOTER_CONTACT_TITLE;
+  const footerSupportLabel =
+    String(settings.footerSupportLabel || DEFAULT_FOOTER_SUPPORT_LABEL).trim() ||
+    DEFAULT_FOOTER_SUPPORT_LABEL;
+  const footerDirectContactLabel =
+    String(settings.footerDirectContactLabel || DEFAULT_FOOTER_DIRECT_CONTACT_LABEL).trim() ||
+    DEFAULT_FOOTER_DIRECT_CONTACT_LABEL;
+  const footerPhoneLabel =
+    String(settings.footerPhoneLabel || DEFAULT_FOOTER_PHONE_LABEL).trim() ||
+    DEFAULT_FOOTER_PHONE_LABEL;
+  const footerWhatsAppLabel =
+    String(settings.footerWhatsAppLabel || DEFAULT_FOOTER_WHATSAPP_LABEL).trim() ||
+    DEFAULT_FOOTER_WHATSAPP_LABEL;
+  const footerCopyright = useMemo(
+    () =>
+      applyPlatformNameTemplate(
+        String(settings.footerCopyrightTemplate || DEFAULT_FOOTER_COPYRIGHT_TEMPLATE).replace(
+          /\{\{year\}\}/g,
+          String(new Date().getFullYear()),
+        ),
+        platformName,
+      ) || DEFAULT_FOOTER_COPYRIGHT_TEMPLATE.replace(/\{\{year\}\}/g, String(new Date().getFullYear())),
+    [platformName, settings.footerCopyrightTemplate],
   );
   const brandLogo = resolvePlatformLogoUrl(settings.logoUrl);
   const supportEmail = settings.supportEmail || "rcroman20@gmail.com";
@@ -53,29 +120,86 @@ export function PublicFooter({
   const aboutPath = pathname.startsWith("/acerca-de") ? "/acerca-de" : "/about";
 
   const footerSections = useMemo<FooterSection[]>(() => {
+    const homeHref = settings.footerHomeHref || DEFAULT_FOOTER_HOME_HREF;
+    const aboutHref = settings.footerAboutHref || aboutPath || DEFAULT_FOOTER_ABOUT_HREF;
+    const contactHref = settings.footerContactHref || DEFAULT_FOOTER_CONTACT_HREF;
+    const plansHref = settings.footerPlansHref || DEFAULT_FOOTER_PLANS_HREF;
+    const privacyHref = settings.footerPrivacyHref || DEFAULT_FOOTER_PRIVACY_HREF;
+    const termsHref = settings.footerTermsHref || DEFAULT_FOOTER_TERMS_HREF;
+    const cookiesHref = settings.footerCookiesHref || DEFAULT_FOOTER_COOKIES_HREF;
+
     const sharedLinks: FooterLinkItem[] = [
-      { label: "Home", to: "/" },
-      { label: "About", to: aboutPath },
-      { label: "Contact", to: "/contact" },
-      { label: "Plans", to: "/plans/starter-annual" },
+      {
+        label: String(settings.footerHomeLabel || DEFAULT_FOOTER_HOME_LABEL).trim() || DEFAULT_FOOTER_HOME_LABEL,
+        to: homeHref,
+      },
+      {
+        label: String(settings.footerAboutLabel || DEFAULT_FOOTER_ABOUT_LABEL).trim() || DEFAULT_FOOTER_ABOUT_LABEL,
+        to: aboutHref,
+      },
+      {
+        label:
+          String(settings.footerContactLinkLabel || DEFAULT_FOOTER_CONTACT_LINK_LABEL).trim() ||
+          DEFAULT_FOOTER_CONTACT_LINK_LABEL,
+        to: contactHref,
+      },
+      {
+        label: String(settings.footerPlansLabel || DEFAULT_FOOTER_PLANS_LABEL).trim() || DEFAULT_FOOTER_PLANS_LABEL,
+        to: plansHref,
+      },
     ];
 
     const sharedSection: FooterSection = {
-      title: "General",
+      title:
+        String(settings.footerGeneralTitle || DEFAULT_FOOTER_GENERAL_TITLE).trim() ||
+        DEFAULT_FOOTER_GENERAL_TITLE,
       links: sharedLinks,
     };
 
     const legalSection: FooterSection = {
-      title: "Legal",
+      title:
+        String(settings.footerLegalTitle || DEFAULT_FOOTER_LEGAL_TITLE).trim() ||
+        DEFAULT_FOOTER_LEGAL_TITLE,
       links: [
-        { label: "Privacy Policy", to: "/privacy-policy" },
-        { label: "Terms & Conditions", to: "/terms-and-conditions" },
-        { label: "Cookies Policy", to: "/cookies-policy" },
+        {
+          label:
+            String(settings.footerPrivacyLabel || DEFAULT_FOOTER_PRIVACY_LABEL).trim() ||
+            DEFAULT_FOOTER_PRIVACY_LABEL,
+          to: privacyHref,
+        },
+        {
+          label: String(settings.footerTermsLabel || DEFAULT_FOOTER_TERMS_LABEL).trim() || DEFAULT_FOOTER_TERMS_LABEL,
+          to: termsHref,
+        },
+        {
+          label:
+            String(settings.footerCookiesLabel || DEFAULT_FOOTER_COOKIES_LABEL).trim() ||
+            DEFAULT_FOOTER_COOKIES_LABEL,
+          to: cookiesHref,
+        },
       ],
     };
 
     return [sharedSection, legalSection];
-  }, [aboutPath]);
+  }, [
+    aboutPath,
+    settings.footerAboutLabel,
+    settings.footerAboutHref,
+    settings.footerContactLinkLabel,
+    settings.footerContactHref,
+    settings.footerCookiesLabel,
+    settings.footerCookiesHref,
+    settings.footerGeneralTitle,
+    settings.footerHomeLabel,
+    settings.footerHomeHref,
+    settings.footerLegalTitle,
+    settings.footerPlansLabel,
+    settings.footerPlansHref,
+    settings.footerPrivacyLabel,
+    settings.footerPrivacyHref,
+    settings.footerTermsLabel,
+    settings.footerTermsHref,
+  ]);
 
   return (
     <footer
@@ -93,10 +217,13 @@ export function PublicFooter({
             </span>
             <span>
               <span className="block text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
-                Platform
+                {footerEyebrowLabel}
               </span>
               <span className="block text-[13px] font-semibold uppercase tracking-[0.16em] text-white sm:text-sm sm:tracking-[0.18em]">
                 {platformName}
+              </span>
+              <span className="mt-1 block text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                {platformTagline}
               </span>
             </span>
           </Link>
@@ -136,14 +263,14 @@ export function PublicFooter({
 
           <div>
             <h3 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Contact
+              {footerContactTitle}
             </h3>
             <div className="mt-3 flex flex-col gap-2.5 text-sm leading-6">
               <a
                 href={`mailto:${supportEmail}`}
                 className="text-slate-300 transition hover:text-white"
               >
-                Support
+                {footerSupportLabel}
               </a>
 
               {hasDistinctContactEmail ? (
@@ -151,7 +278,7 @@ export function PublicFooter({
                   href={`mailto:${contactEmail}`}
                   className="text-slate-300 transition hover:text-white"
                 >
-                  Contact
+                  {footerDirectContactLabel}
                 </a>
               ) : null}
 
@@ -160,7 +287,7 @@ export function PublicFooter({
                   href={`tel:${supportPhone}`}
                   className="break-words text-slate-300 transition hover:text-white"
                 >
-                  <span className="font-medium text-slate-400">Phone:</span> {supportPhone}
+                  <span className="font-medium text-slate-400">{footerPhoneLabel}:</span> {supportPhone}
                 </a>
               ) : null}
 
@@ -171,7 +298,7 @@ export function PublicFooter({
                   rel="noreferrer"
                   className="break-words text-slate-300 transition hover:text-white"
                 >
-                  <span className="font-medium text-slate-400">WhatsApp:</span> {supportWhatsApp}
+                  <span className="font-medium text-slate-400">{footerWhatsAppLabel}:</span> {supportWhatsApp}
                 </a>
               ) : null}
             </div>
@@ -180,9 +307,9 @@ export function PublicFooter({
       </div>
 
       <div className="mt-6 flex flex-col gap-2 border-t border-slate-800 pt-4 text-center text-sm leading-6 text-slate-400 sm:flex-row sm:items-center sm:justify-between sm:text-left">
-        <p>© {new Date().getFullYear()} {platformName}. All rights reserved.</p>
+        <p>{footerCopyright}</p>
         <p className="max-w-xl sm:text-right">
-          Built for teachers, students, institutions, and academic operations.
+          {footerTagline}
         </p>
       </div>
     </footer>

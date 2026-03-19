@@ -964,12 +964,26 @@ exports.changeCourseEnrollmentWithPlan = onCall(async (request) => {
       actorUserData.requestedRole ||
       actorStudentData.requestedRole,
   );
+  const actorInstitutionId =
+    actorRole === "institucion"
+      ? String(actorUserData.institutionId || actorStudentData.institutionId || actorUserId).trim()
+      : "";
+  const courseInstitutionId = getInstitutionOwnerId(courseData);
   const canManageAsTeacher = Boolean(teacherId) && actorUserId === teacherId;
   const canManageAsSelf = actorUserId === studentId;
   const canManageAsAdminOwner =
     (actorRole === "admin" || adminContext.isOwner || adminContext.isDelegatedAdmin) &&
     getCourseManagerIds(courseData).has(actorUserId);
-  if (!canManageAsTeacher && !canManageAsSelf && !canManageAsAdminOwner) {
+  const canManageAsInstitutionOwner =
+    actorRole === "institucion" &&
+    Boolean(actorInstitutionId) &&
+    actorInstitutionId === courseInstitutionId;
+  if (
+    !canManageAsTeacher &&
+    !canManageAsSelf &&
+    !canManageAsAdminOwner &&
+    !canManageAsInstitutionOwner
+  ) {
     throw new HttpsError(
       "permission-denied",
       "You are not allowed to change this enrollment.",
@@ -977,7 +991,7 @@ exports.changeCourseEnrollmentWithPlan = onCall(async (request) => {
   }
 
   if (!teacherId) {
-    if (canManageAsSelf || canManageAsAdminOwner) {
+    if (canManageAsSelf || canManageAsAdminOwner || canManageAsInstitutionOwner) {
       const studentRef = db.collection("estudiantes").doc(studentId);
       await db.runTransaction(async (transaction) => {
         const [freshCourseSnap, studentSnap] = await Promise.all([

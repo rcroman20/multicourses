@@ -6,7 +6,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { cn } from '@/lib/utils';
 import { PublicFooter } from '@/components/common/PublicFooter';
-import { useAdminPlatformSettings } from '@/lib/services/adminSettingsService';
+import { PlatformAnnouncementBanner } from '@/components/common/PlatformAnnouncementBanner';
+import {
+  DEFAULT_PLATFORM_NAME,
+  useAdminPlatformSettings,
+} from '@/lib/services/adminSettingsService';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -29,11 +33,12 @@ type HeaderRule = {
 };
 
 const pageHeaderRules: HeaderRule[] = [
-  { path: '/', title: 'Home', subtitle: 'Welcome to Socrattica' },
+  { path: '/', title: 'Home', subtitle: 'Welcome to {{platformName}}' },
   { path: '/auth', title: 'Authentication', subtitle: 'Sign in to continue' },
   { path: '/student', title: 'Student Dashboard', subtitle: 'Your academic overview' },
   { path: '/teacher', title: 'Teacher Dashboard', subtitle: 'Your teaching overview' },
   { path: '/institution', title: 'Institution Dashboard', subtitle: 'Institution operations and academic oversight' },
+  { path: '/institution/analytics', title: 'Institution Analytics', subtitle: 'Academic oversight and institutional follow-up' },
   { path: '/courses/create', title: 'Create Course', subtitle: 'Set up a new course' },
   {
     path: '/courses/:courseCode/edit',
@@ -128,7 +133,7 @@ const getPageHeaderByPathname = (pathname: string): { title: string; subtitle: s
   }
 
   return {
-    title: 'Socrattica',
+    title: '{{platformName}}',
     subtitle: 'Learning management platform',
   };
 };
@@ -177,8 +182,10 @@ function getSectionSubtitle(sectionKey: string, role?: 'docente' | 'estudiante' 
 
   const institutionSubtitles: Record<string, string> = {
     dashboard: 'Institution dashboard overview',
+    analytics: 'Academic oversight and institutional follow-up',
     courses: 'Institution course coordination',
     students: 'Students linked to your institution',
+    grades: 'Institution grade supervision',
     profile: 'Account settings',
   };
 
@@ -195,6 +202,7 @@ function getSectionSubtitle(sectionKey: string, role?: 'docente' | 'estudiante' 
 
 function resolveSectionKey(pathname: string): string {
   if (pathname === '/teacher' || pathname === '/student' || pathname === '/institution') return 'dashboard';
+  if (pathname.startsWith('/institution/analytics')) return 'analytics';
   if (pathname.startsWith('/calendar')) return 'calendar';
   if (pathname.startsWith('/grades') || pathname.includes('/grade-sheets')) return 'grades';
   if (pathname.startsWith('/slides')) return 'slides';
@@ -221,9 +229,9 @@ function getFooterSummary(sectionKey: string, role?: 'docente' | 'estudiante' | 
           : 'student progress';
 
   const summaries: Record<string, string> = {
-    dashboard: `Keep ${roleLabel} aligned from one Socrattica workspace.`,
+    dashboard: `Keep ${roleLabel} aligned from one {{platformName}} workspace.`,
     calendar: 'Coordinate classes, deadlines, and academic events from one operational calendar.',
-    courses: 'Manage course structure, enrollment, and delivery with the same workspace flow used across Socrattica.',
+    courses: 'Manage course structure, enrollment, and delivery with the same workspace flow used across {{platformName}}.',
     assessments: 'Review activities, grading workflows, and academic follow-up from one consistent workspace.',
     exerciseBank: 'Organize practice content, quiz resources, and reusable question banks in one place.',
     slides: 'Keep presentations, weekly structure, and teaching materials connected in one learning workspace.',
@@ -231,16 +239,17 @@ function getFooterSummary(sectionKey: string, role?: 'docente' | 'estudiante' | 
     grades: 'Track grading, publishing, and score visibility in one academic workspace.',
     students: 'Manage rosters, student detail, and enrollment actions from one coordinated workspace.',
     statistics: 'Monitor academic performance, participation, and progress with a unified reporting view.',
+    analytics: 'Track institutional academic health, course ownership, and operational academic signals from one view.',
     notifications: 'Stay on top of alerts, communication, and pending actions without leaving the workspace.',
     admin: 'Support governance, permissions, reporting, and platform operations from one admin workspace.',
     profile: 'Keep account details, preferences, and identity settings updated in one secure workspace.',
   };
 
-  return summaries[sectionKey] ?? 'Keep your academic operations connected inside the Socrattica workspace.';
+  return summaries[sectionKey] ?? 'Keep your academic operations connected inside the {{platformName}} workspace.';
 }
 
 const applyPlatformName = (value: string, platformName: string): string =>
-  String(value || "").replace(/Socrattica/g, platformName);
+  String(value || "").replace(/Socrattica|\{\{platformName\}\}/g, platformName);
 
 function toMillis(value: unknown): number {
   if (!value) return 0;
@@ -339,7 +348,7 @@ export function DashboardLayout({
   const notificationsRef = useRef<HTMLDivElement | null>(null);
 
   const routeHeader = useMemo(() => getPageHeaderByPathname(pathname), [pathname]);
-  const platformName = String(platformSettings.platformName || "").trim() || "Socrattica";
+  const platformName = String(platformSettings.platformName || "").trim() || DEFAULT_PLATFORM_NAME;
   const resolvedTitle = applyPlatformName(title ?? routeHeader.title, platformName);
   const resolvedSubtitle = applyPlatformName(subtitle ?? routeHeader.subtitle, platformName);
   const userRole = user?.role as 'docente' | 'estudiante' | 'admin' | 'institucion' | undefined;
@@ -630,6 +639,7 @@ export function DashboardLayout({
           )}
         >
           <div className="flex-1">
+            <PlatformAnnouncementBanner className="mx-4 mb-4 border-slate-800 bg-slate-950 text-white shadow-[0_16px_36px_-24px_rgba(0,0,0,0.65)] lg:mx-5 [&_.text-xs]:text-slate-400 [&_p]:text-slate-100" />
             {children}
           </div>
           <PublicFooter summary={footerSummary} />

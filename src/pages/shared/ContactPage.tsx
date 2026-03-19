@@ -24,14 +24,20 @@ import {
 import { SeoHead } from "@/components/common/SeoHead";
 import { PublicTopNav } from "@/components/common/PublicTopNav";
 import { PublicFooter } from "@/components/common/PublicFooter";
-import { useAdminPlatformSettings } from "@/lib/services/adminSettingsService";
+import {
+  DEFAULT_PLATFORM_NAME,
+  resolvePlatformSiteUrl,
+  useAdminPlatformSettings,
+} from "@/lib/services/adminSettingsService";
 const inputClassName =
   "h-11 w-full rounded-lg border border-slate-300/60 bg-white px-4 text-sm text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100";
 
 export default function ContactPage() {
   const navigate = useNavigate();
   const { settings } = useAdminPlatformSettings();
-  const platformName = String(settings.platformName || "Socrattica").trim() || "Socrattica";
+  const platformName =
+    String(settings.platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME;
+  const siteUrl = resolvePlatformSiteUrl(settings.siteUrl);
   const supportEmail = settings.supportEmail || "rcroman20@gmail.com";
   const contactEmail = settings.contactEmail || supportEmail;
   const supportPhone = String(settings.supportPhone || "").trim();
@@ -127,14 +133,14 @@ export default function ContactPage() {
           "@context": "https://schema.org",
           "@type": "ContactPage",
           name: `Contact ${platformName}`,
-          url: "https://socrattica.web.app/contact",
+          url: `${siteUrl}/contact`,
           description:
             `Contact page for ${platformName} support, teacher approvals, payments, and institutional onboarding.`,
           mainEntity: {
             "@type": "Organization",
             name: platformName,
             email: supportEmail,
-            url: "https://socrattica.web.app/",
+            url: `${siteUrl}/`,
             contactPoint: {
               "@type": "ContactPoint",
               contactType: "customer support",

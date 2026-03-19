@@ -3,7 +3,11 @@ import { Link, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { PublicFooter } from "@/components/common/PublicFooter";
 import { PublicTopNav } from "@/components/common/PublicTopNav";
-import { useAdminPlatformSettings } from "@/lib/services/adminSettingsService";
+import {
+  DEFAULT_PLATFORM_NAME,
+  applyPlatformNameTemplate,
+  useAdminPlatformSettings,
+} from "@/lib/services/adminSettingsService";
 import { isAdminEmail } from "@/lib/services/adminAccessService";
 
 const resolveHomePath = (role?: string): string => {
@@ -16,10 +20,17 @@ export default function MaintenancePage() {
   const { search } = useLocation();
   const { user, isAuthenticated } = useAuth();
   const { settings } = useAdminPlatformSettings();
-  const platformName = String(settings.platformName || "Socrattica").trim() || "Socrattica";
+  const platformName =
+    String(settings.platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME;
   const maintenanceMode = settings.maintenanceMode === true;
   const maintenanceCtaLabel = String(settings.maintenanceCtaLabel || "").trim() || "Request support";
   const maintenanceCtaHref = String(settings.maintenanceCtaHref || "").trim() || "/contact";
+  const maintenanceTitle =
+    applyPlatformNameTemplate(settings.maintenanceTitle, platformName).trim() ||
+    `${platformName} is temporarily under maintenance`;
+  const maintenanceMessage =
+    applyPlatformNameTemplate(settings.maintenanceMessage, platformName).trim() ||
+    "Student and teacher workspaces are temporarily paused while the admin team applies updates.";
   const isAdmin = user?.role === "admin" || isAdminEmail(user?.email);
   const isPreviewMode = new URLSearchParams(search).get("preview") === "1";
 
@@ -51,10 +62,10 @@ export default function MaintenancePage() {
             </div>
 
             <h1 className="mt-3 text-2xl font-extrabold text-slate-900 sm:text-3xl">
-              {platformName} is temporarily under maintenance
+              {maintenanceTitle}
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-700 sm:text-base">
-              Student and teacher workspaces are temporarily paused while the admin team applies updates.
+              {maintenanceMessage}
             </p>
 
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -106,7 +117,9 @@ export default function MaintenancePage() {
           </section>
         </div>
 
-        <PublicFooter summary="Maintenance updates keep Socrattica stable, secure, and ready for day-to-day academic operations." />
+        <PublicFooter
+          summary={`Maintenance updates keep ${platformName} stable, secure, and ready for day-to-day academic operations.`}
+        />
       </div>
     </div>
   );

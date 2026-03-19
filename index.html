@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
 
-    <title>Socrattica</title>
+    <title>Multicourses</title>
     <meta
       name="description"
-      content="Socrattica is an academic platform for teachers, students, and institutions with course management, academic tracking, approval workflows, and plan control."
+      content="Multicourses is an academic platform for teachers, students, and institutions with course management, academic tracking, approval workflows, and plan control."
     />
     <meta
       name="keywords"
-      content="academic platform, LMS, course management, teacher dashboard, student dashboard, education software, Socrattica"
+      content="academic platform, LMS, course management, teacher dashboard, student dashboard, education software, Multicourses"
     />
     <meta name="author" content="Roberto Roman" />
     <meta name="theme-color" content="#2563eb" />
@@ -24,32 +24,171 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="robots" content="index, follow" />
 
-    <link rel="canonical" href="https://socrattica.web.app/" />
+    <link rel="canonical" href="https://multicourses.web.app/" />
     <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml" />
 
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="es_CO" />
-    <meta property="og:site_name" content="Socrattica" />
-    <meta property="og:title" content="Socrattica" />
+    <meta property="og:site_name" content="Multicourses" />
+    <meta property="og:title" content="Multicourses" />
     <meta
       property="og:description"
       content="Academic platform for course management, teacher workflows, student tracking, and institutional operations."
     />
-    <meta property="og:url" content="https://socrattica.web.app/" />
-    <meta property="og:image" content="https://socrattica.web.app/icon-512.png" />
+    <meta property="og:url" content="https://multicourses.web.app/" />
+    <meta property="og:image" content="https://multicourses.web.app/icon-512.png" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Socrattica" />
+    <meta name="twitter:title" content="Multicourses" />
     <meta
       name="twitter:description"
       content="Academic platform for course management, teacher workflows, student tracking, and institutional operations."
     />
-    <meta name="twitter:image" content="https://socrattica.web.app/icon-512.png" />
+    <meta name="twitter:image" content="https://multicourses.web.app/icon-512.png" />
 
     <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg" />
     <link rel="shortcut icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <script>
+      (() => {
+        const SETTINGS_STORAGE_KEY = "admin-platform-settings-cache";
+        const DEFAULT_PLATFORM_NAME = "Multicourses";
+        const DEFAULT_THEME_COLOR = "#2563eb";
+        const DEFAULT_BACKGROUND_COLOR = "#ffffff";
+        const DEFAULT_SHORT_NAME = "Multicourses";
+        const DEFAULT_COURSES_LABEL = "Courses";
+        const DEFAULT_GRADES_LABEL = "Grades";
+        const DEFAULT_DESCRIPTION =
+          "Academic operations platform for teachers, students, admins, and institutions.";
+        const DEFAULT_TOUCH_ICON = "/apple-touch-icon.png";
+        const DEFAULT_SHARE_IMAGE = "/icon-512.png";
+
+        const normalizeString = (value, fallback = "") => {
+          const normalized = String(value || "").trim();
+          return normalized || fallback;
+        };
+
+        const normalizeHexColor = (value, fallback) =>
+          /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(value || "").trim())
+            ? String(value).trim()
+            : fallback;
+
+        const inferImageType = (value) => {
+          const normalized = String(value || "").trim().toLowerCase();
+          if (normalized.endsWith(".svg")) return "image/svg+xml";
+          if (normalized.endsWith(".webp")) return "image/webp";
+          if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) return "image/jpeg";
+          if (normalized.endsWith(".ico")) return "image/x-icon";
+          return "image/png";
+        };
+
+        let storedSettings = null;
+        try {
+          const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+          storedSettings = raw ? JSON.parse(raw) : null;
+        } catch {
+          storedSettings = null;
+        }
+
+        const platformName = normalizeString(
+          storedSettings && typeof storedSettings === "object" ? storedSettings.platformName : "",
+          DEFAULT_PLATFORM_NAME,
+        );
+        const shortName =
+          platformName.length > 18 ? `${platformName.slice(0, 17).trim()}…` : platformName;
+        const touchIcon = normalizeString(
+          storedSettings && typeof storedSettings === "object"
+            ? storedSettings.touchIconUrl || storedSettings.logoUrl
+            : "",
+          DEFAULT_TOUCH_ICON,
+        );
+        const shareImage = normalizeString(
+          storedSettings && typeof storedSettings === "object"
+            ? storedSettings.shareImageUrl || storedSettings.logoUrl
+            : "",
+          DEFAULT_SHARE_IMAGE,
+        );
+        const description = normalizeString(
+          storedSettings && typeof storedSettings === "object" ? storedSettings.siteDescription : "",
+          DEFAULT_DESCRIPTION,
+        );
+        const themeColor = normalizeHexColor(
+          storedSettings && typeof storedSettings === "object" ? storedSettings.themeColor : "",
+          DEFAULT_THEME_COLOR,
+        );
+        const backgroundColor = normalizeHexColor(
+          storedSettings && typeof storedSettings === "object"
+            ? storedSettings.pwaBackgroundColor
+            : "",
+          DEFAULT_BACKGROUND_COLOR,
+        );
+        const manifestShortName = normalizeString(
+          storedSettings && typeof storedSettings === "object"
+            ? storedSettings.pwaShortName
+            : "",
+          shortName || DEFAULT_SHORT_NAME,
+        );
+        const coursesShortcutLabel = normalizeString(
+          storedSettings && typeof storedSettings === "object"
+            ? storedSettings.pwaCoursesShortcutLabel
+            : "",
+          DEFAULT_COURSES_LABEL,
+        );
+        const gradesShortcutLabel = normalizeString(
+          storedSettings && typeof storedSettings === "object"
+            ? storedSettings.pwaGradesShortcutLabel
+            : "",
+          DEFAULT_GRADES_LABEL,
+        );
+
+        const manifest = {
+          id: "/",
+          name: platformName,
+          short_name: manifestShortName,
+          description,
+          start_url: "/",
+          scope: "/",
+          display: "standalone",
+          background_color: backgroundColor,
+          theme_color: themeColor,
+          orientation: "portrait",
+          icons: [
+            {
+              src: touchIcon,
+              sizes: "192x192",
+              type: inferImageType(touchIcon),
+              purpose: "any",
+            },
+            {
+              src: shareImage,
+              sizes: "512x512",
+              type: inferImageType(shareImage),
+              purpose: "any",
+            },
+          ],
+          shortcuts: [
+            {
+              name: coursesShortcutLabel,
+              short_name: coursesShortcutLabel,
+              url: "/courses",
+              icons: [{ src: touchIcon, sizes: "192x192", type: inferImageType(touchIcon) }],
+            },
+            {
+              name: gradesShortcutLabel,
+              short_name: gradesShortcutLabel,
+              url: "/grades",
+              icons: [{ src: touchIcon, sizes: "192x192", type: inferImageType(touchIcon) }],
+            },
+          ],
+        };
+
+        const manifestLink = document.createElement("link");
+        manifestLink.rel = "manifest";
+        manifestLink.href =
+          `data:application/manifest+json;charset=utf-8,${encodeURIComponent(JSON.stringify(manifest))}`;
+        document.head.appendChild(manifestLink);
+      })();
+    </script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -60,8 +199,8 @@
       {
         "@context": "https://schema.org",
         "@type": "WebApplication",
-        "name": "Socrattica",
-        "url": "https://socrattica.web.app/",
+        "name": "Multicourses",
+        "url": "https://multicourses.web.app/",
         "description": "Academic platform for teachers, students, and institutions with course management, approvals, and plan control",
         "applicationCategory": "EducationalApplication",
         "operatingSystem": "Web",
@@ -72,7 +211,7 @@
         },
         "author": {
           "@type": "Organization",
-          "name": "Socrattica Platform"
+          "name": "Multicourses Platform"
         },
         "countriesSupported": ["CO"],
         "inLanguage": ["es", "en"]

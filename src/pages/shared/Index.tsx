@@ -33,7 +33,10 @@ import {
 } from "@/lib/services/teacherPlanService";
 import { INSTITUTION_PLAN_OPTIONS } from "@/lib/services/institutionPlanService";
 import { submitPricingContactRequest } from "@/lib/services/pricingContactService";
-import { useAdminPlatformSettings } from "@/lib/services/adminSettingsService";
+import {
+  DEFAULT_PLATFORM_NAME,
+  useAdminPlatformSettings,
+} from "@/lib/services/adminSettingsService";
 
 type LandingAudience = "teacher" | "student";
 
@@ -364,7 +367,7 @@ const teacherPricingMatrixRows: PricingMatrixRow[] = [
 
 export default function Index() {
   const { settings } = useAdminPlatformSettings();
-  const platformName = String(settings.platformName || "").trim() || "Socrattica";
+  const platformName = String(settings.platformName || "").trim() || DEFAULT_PLATFORM_NAME;
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
   const resolveHomePath = (role?: string): string => {
@@ -537,9 +540,15 @@ export default function Index() {
     <div className="relative min-h-screen overflow-x-hidden bg-slate-100 px-4 py-2 sm:px-6 lg:px-8">
       <SeoHead
         title="Academic platform for teachers and students"
-        description={`${platformName} helps teachers run courses, students follow academic progress, and institutions manage approvals, plans, and operational control in one platform.`}
+        description={
+          String(settings.siteDescription || "").trim() ||
+          `${platformName} helps teachers run courses, students follow academic progress, and institutions manage approvals, plans, and operational control in one platform.`
+        }
         canonicalPath="/"
-        keywords="academic platform, LMS, teacher tools, student dashboard, course management, institutional education software"
+        keywords={
+          String(settings.siteKeywords || "").trim() ||
+          "academic platform, LMS, teacher tools, student dashboard, course management, institutional education software"
+        }
       />
       {/* Background decorative elements */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">

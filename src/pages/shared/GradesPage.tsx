@@ -89,10 +89,11 @@ interface StudentWithGrades {
   };
   completedAssessments: number;
   totalAssessments: number;
-  firstTermAverage: number;
-  secondTermAverage: number;
-  firstTermEquivalence: number;
-  secondTermEquivalence: number;
+  termSummaries: Array<{
+    term: string;
+    average: number;
+    equivalence: number;
+  }>;
 }
 
 interface AssessmentGradeItem {
@@ -118,7 +119,6 @@ const firestoreTimestampToDate = (timestamp: any): Date => {
 };
 
 const DISPLAY_MAX_SCORE = 5.0;
-type SupportedTerm ="1st Term" |"2nd Term";
 
 const toFiniteNumber = (value: unknown): number | null => {
   if (typeof value ==="number" && Number.isFinite(value)) return value;
@@ -302,11 +302,9 @@ const getGradingPeriodOrder = (period: string): number => {
   return Number.isFinite(termNumber) ? termNumber : -2;
 };
 
-const getSupportedTerm = (period: string): SupportedTerm | null => {
+const getSupportedTerm = (period: string): string | null => {
   const normalized = normalizeGradingPeriod(period);
-  if (normalized ==="1st Term") return"1st Term";
-  if (normalized ==="2nd Term") return"2nd Term";
-  return null;
+  return /^\d+(st|nd|rd|th)\s+term$/i.test(normalized) ? normalized : null;
 };
 
 const getTermEquivalences = (
@@ -315,7 +313,18 @@ const getTermEquivalences = (
       activities?: unknown[];
     }
   >
-): Record<SupportedTerm, number> => {
+): Record<string, number> => {
+  const terms = Array.from(
+    new Set(
+      sheets
+        .map((sheet) => getSupportedTerm(sheet.gradingPeriod))
+        .filter((term): term is string => Boolean(term)),
+    ),
+  ).sort((left, right) => getGradingPeriodOrder(right) - getGradingPeriodOrder(left));
+
+  if (terms.length === 0) return {};
+
+  const zeroMap = Object.fromEntries(terms.map((term) => [term, 0])) as Record<string, number>;
   const weightedTotal = sheets.reduce(
     (sum, sheet) => sum + Math.max(0, Number(sheet.weightPercentage) || 0),
     0
@@ -329,14 +338,12 @@ const getTermEquivalences = (
         acc[term] += Math.max(0, Number(sheet.weightPercentage) || 0);
         return acc;
       },
-      {"1st Term": 0,"2nd Term": 0 } as Record<SupportedTerm, number>
+      { ...zeroMap }
     );
   }
 
-  const termActivityCounts: Record<SupportedTerm, number> = {"1st Term": 0,"2nd Term": 0,
-  };
-  const termSheetCounts: Record<SupportedTerm, number> = {"1st Term": 0,"2nd Term": 0,
-  };
+  const termActivityCounts = { ...zeroMap };
+  const termSheetCounts = { ...zeroMap };
 
   sheets.forEach((sheet) => {
     const term = getSupportedTerm(sheet.gradingPeriod);
@@ -349,24 +356,28 @@ const getTermEquivalences = (
     termActivityCounts[term] += Math.max(0, activityCount);
   });
 
-  const totalActivities =
-    termActivityCounts["1st Term"] + termActivityCounts["2nd Term"];
+  const totalActivities = Object.values(termActivityCounts).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
 
   if (totalActivities > 0) {
-    return {"1st Term": (termActivityCounts["1st Term"] / totalActivities) * 100,"2nd Term": (termActivityCounts["2nd Term"] / totalActivities) * 100,
-    };
+    return Object.fromEntries(
+      terms.map((term) => [term, (termActivityCounts[term] / totalActivities) * 100]),
+    );
   }
 
-  const totalSheets = termSheetCounts["1st Term"] + termSheetCounts["2nd Term"];
+  const totalSheets = Object.values(termSheetCounts).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
   if (totalSheets > 0) {
-    return {"1st Term": (termSheetCounts["1st Term"] / totalSheets) * 100,"2nd Term": (termSheetCounts["2nd Term"] / totalSheets) * 100,
-    };
+    return Object.fromEntries(
+      terms.map((term) => [term, (termSheetCounts[term] / totalSheets) * 100]),
+    );
   }
 
-  if (sheets.length === 0) {
-    return {"1st Term": 0,"2nd Term": 0 };
-  }
-  return {"1st Term": 0,"2nd Term": 0 };
+  return { ...zeroMap };
 };
 
 const calculateNormalizedSheetAverage = (
@@ -464,10 +475,11 @@ interface StudentCourseMetrics {
   totalWeightPercentage: number;
   completedActivities: number;
   totalActivities: number;
-  firstTermAverage: number;
-  secondTermAverage: number;
-  firstTermEquivalence: number;
-  secondTermEquivalence: number;
+  termSummaries: Array<{
+    term: string;
+    average: number;
+    equivalence: number;
+  }>;
 }
 
 interface WeightDistributionGroup {
@@ -511,6 +523,7 @@ export default function GradesPage() {
   const { courses, selectedCourseId, setSelectedCourseId, assessments, grades } = useAcademic();
   const [gradeSheets, setGradeSheets] = useState<GradeSheet[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [courseStudents, setCourseStudents] = useState<Record<string, string>>(
     {},
   );
@@ -523,7 +536,9 @@ export default function GradesPage() {
     Record<string, boolean>
   >({});
 
-  const isTeacher = user?.role ==="docente";
+  const isTeacher = user?.role === "docente";
+  const isInstitution = user?.role === "institucion";
+  const isTeacherView = isTeacher || isInstitution;
 
   const userCourses = useMemo(() => {
     if (!user) return [];
@@ -592,10 +607,12 @@ export default function GradesPage() {
     const fetchGradeSheets = async () => {
       if (!selectedCourseId || !user) {
         setGradeSheets([]);
+        setLoadError("");
         return;
       }
 
       setIsLoading(true);
+      setLoadError("");
 
       try {
         const gradeSheetsRef = collection(firebaseDB,"gradeSheets");
@@ -603,7 +620,7 @@ export default function GradesPage() {
         const selectedCourseNameKey = normalizeText(selectedCourse?.name || "");
         const selectedCourseIdKey = String(selectedCourseId || "").trim();
 
-        const [userDocSnapshot, studentDocSnapshot] = !isTeacher
+        const [userDocSnapshot, studentDocSnapshot] = !isTeacherView
           ? await Promise.all([
               getDoc(doc(firebaseDB, "usuarios", user.id)),
               getDoc(doc(firebaseDB, "estudiantes", user.id)),
@@ -635,7 +652,7 @@ export default function GradesPage() {
         const currentUserNameKey = normalizeText(user.name).replace(/\s+/g, " ");
 
         const matchesCurrentStudent = (payload: Record<string, unknown>): boolean => {
-          if (isTeacher) return true;
+          if (isTeacherView) return true;
 
           const nestedStudent =
             payload.student && typeof payload.student === "object"
@@ -733,8 +750,8 @@ export default function GradesPage() {
         querySnapshot.forEach((doc) => {
           const data = doc.data() as Record<string, unknown>;
 
-          if (!isTeacher && !isSheetPublished(data)) return;
-          if (!isTeacher && !matchesSelectedCourse(data)) return;
+          if (!isTeacherView && !isSheetPublished(data)) return;
+          if (!isTeacherView && !matchesSelectedCourse(data)) return;
 
           const rawActivities = Array.isArray(data.activities)
             ? data.activities
@@ -807,7 +824,7 @@ export default function GradesPage() {
           rawStudents.forEach((studentPayload) => {
             if (!studentPayload || typeof studentPayload !== "object") return;
             const student = studentPayload as Record<string, unknown>;
-            if (!isTeacher && !matchesCurrentStudent(student)) return;
+            if (!isTeacherView && !matchesCurrentStudent(student)) return;
 
             const studentId = String(
               student.studentId ??
@@ -828,7 +845,7 @@ export default function GradesPage() {
                 `Student ${studentId ? studentId.slice(-1) : "Unknown"}`,
             ).trim();
 
-            if (isTeacher && studentId) studentIdsToFetch.add(studentId);
+            if (isTeacherView && studentId) studentIdsToFetch.add(studentId);
 
             const grades: Record<
               string,
@@ -879,7 +896,7 @@ export default function GradesPage() {
               ) ?? 0;
 
             students.push({
-              studentId: !isTeacher
+              studentId: !isTeacherView
                 ? user.id
                 : studentId || `unknown_${doc.id}_${students.length + 1}`,
               userId:
@@ -894,7 +911,7 @@ export default function GradesPage() {
               grades,
               total: Math.max(0, Math.min(5.0, parsedTotal)),
               status: String(student.status || student.estado || "pending"),
-              matchesCurrentUser: !isTeacher ? true : undefined,
+              matchesCurrentUser: !isTeacherView ? true : undefined,
             });
           });
 
@@ -928,7 +945,7 @@ export default function GradesPage() {
           return dateB - dateA;
         });
 
-        if (isTeacher && studentIdsToFetch.size > 0) {
+        if (isTeacherView && studentIdsToFetch.size > 0) {
           const studentNames = await fetchStudentNames(
             Array.from(studentIdsToFetch),
           );
@@ -945,14 +962,28 @@ export default function GradesPage() {
         }
 
         setGradeSheets(sheets);
-      } catch {
+      } catch (error) {
+        const code =
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          typeof (error as { code?: unknown }).code === "string"
+            ? String((error as { code: string }).code).toLowerCase()
+            : "";
+
+        setGradeSheets([]);
+        setLoadError(
+          code.includes("permission-denied")
+            ? "This account cannot read grade sheets for the selected course yet. Deploy the latest Firestore rules to enable institution grade supervision."
+            : "We could not load the grade sheets for this course right now.",
+        );
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchGradeSheets();
-  }, [selectedCourse, selectedCourseId, user, isTeacher]);
+  }, [selectedCourse, selectedCourseId, user, isTeacherView]);
 
   const formatGradingPeriod = (period: string): string => {
     return normalizeGradingPeriod(period);
@@ -1016,7 +1047,7 @@ export default function GradesPage() {
           (
             metric
           ): metric is {
-            term: SupportedTerm | null;
+            term: string | null;
             weight: number;
             hasGrades: boolean;
             gradedActivities: number;
@@ -1069,7 +1100,12 @@ export default function GradesPage() {
           totalActivities > 0 ? (completedActivities / totalActivities) * 100 : 0;
       }
 
-      const buildTermAverage = (term: SupportedTerm): number | null => {
+      const courseTermEquivalences = getTermEquivalences(sheets);
+      const orderedTerms = Object.keys(courseTermEquivalences).sort(
+        (left, right) => getGradingPeriodOrder(right) - getGradingPeriodOrder(left),
+      );
+
+      const buildTermAverage = (term: string): number | null => {
         const termMetrics = sheetMetrics.filter(
           (metric) => metric.term === term && metric.hasGrades
         );
@@ -1128,20 +1164,19 @@ export default function GradesPage() {
         );
       };
 
-      const firstTermAverage = buildTermAverage("1st Term");
-      const secondTermAverage = buildTermAverage("2nd Term");
-      const termAveragesForFinal = [firstTermAverage, secondTermAverage].filter(
-        (value): value is number => value !== null
-      );
+      const termSummaries = orderedTerms.map((term) => ({
+        term,
+        average: Number((buildTermAverage(term) ?? 0).toFixed(1)),
+        equivalence: Number((courseTermEquivalences[term] ?? 0).toFixed(1)),
+      }));
+      const termAveragesForFinal = termSummaries
+        .map((summary) => summary.average)
+        .filter((value) => value > 0);
       const termBasedFinalGrade =
         termAveragesForFinal.length > 0
           ? termAveragesForFinal.reduce((sum, grade) => sum + grade, 0) /
             termAveragesForFinal.length
           : currentGrade;
-      const termShare =
-        termAveragesForFinal.length > 0 ? 100 / termAveragesForFinal.length : 0;
-      const firstTermEquivalence = firstTermAverage !== null ? termShare : 0;
-      const secondTermEquivalence = secondTermAverage !== null ? termShare : 0;
 
       return {
         currentGrade: Number(clamp(termBasedFinalGrade, 0, DISPLAY_MAX_SCORE).toFixed(1)),
@@ -1150,17 +1185,14 @@ export default function GradesPage() {
         totalWeightPercentage: Number(totalConfiguredWeight.toFixed(1)),
         completedActivities,
         totalActivities,
-        firstTermAverage: Number((firstTermAverage ?? 0).toFixed(1)),
-        secondTermAverage: Number((secondTermAverage ?? 0).toFixed(1)),
-        firstTermEquivalence: Number(firstTermEquivalence.toFixed(1)),
-        secondTermEquivalence: Number(secondTermEquivalence.toFixed(1)),
+        termSummaries,
       };
     },
     []
   );
 
   const studentAssessmentItems = useMemo((): AssessmentGradeItem[] => {
-    if (!user || isTeacher || !selectedCourseId) return [];
+    if (!user || isTeacherView || !selectedCourseId) return [];
 
     const courseAssessmentMap = new Map<string, Assessment>(
       assessments
@@ -1203,10 +1235,10 @@ export default function GradesPage() {
       })
       .filter((item): item is AssessmentGradeItem => item !== null)
       .sort((a, b) => b.percentage - a.percentage);
-  }, [assessments, grades, isTeacher, selectedCourseId, user]);
+  }, [assessments, grades, isTeacherView, selectedCourseId, user]);
 
   const filteredStudentAssessmentItems = useMemo(() => {
-    if (isTeacher) return [];
+    if (isTeacherView) return [];
 
     const normalizedQuery = normalizeText(searchTerm).replace(/\s+/g, " ");
     if (!normalizedQuery) return studentAssessmentItems;
@@ -1218,10 +1250,10 @@ export default function GradesPage() {
 
       return searchableValues.some((value) => value.includes(normalizedQuery));
     });
-  }, [isTeacher, searchTerm, studentAssessmentItems]);
+  }, [isTeacherView, searchTerm, studentAssessmentItems]);
 
   const assessmentFallbackData = useMemo(() => {
-    if (!user || isTeacher || !selectedCourseId) return null;
+    if (!user || isTeacherView || !selectedCourseId) return null;
 
     const courseAssessments = assessments.filter((assessment) => assessment.courseId === selectedCourseId);
     if (courseAssessments.length === 0) return null;
@@ -1280,15 +1312,12 @@ export default function GradesPage() {
           0,
         ).toFixed(1),
       ),
-      firstTermAverage: 0,
-      secondTermAverage: 0,
-      firstTermEquivalence: 0,
-      secondTermEquivalence: 0,
+      termSummaries: [],
     };
-  }, [assessments, grades, isTeacher, selectedCourseId, user]);
+  }, [assessments, grades, isTeacherView, selectedCourseId, user]);
 
   const studentData = useMemo(() => {
-    if (!user || isTeacher || !selectedCourseId || gradeSheets.length === 0)
+    if (!user || isTeacherView || !selectedCourseId || gradeSheets.length === 0)
       return assessmentFallbackData;
 
     const publishedSheets = gradeSheets.filter((sheet) => sheet.isPublished);
@@ -1315,15 +1344,12 @@ export default function GradesPage() {
       minGradeToPass: metrics.currentGrade >= 3.6 ? 0 : 3.6,
       status,
       totalWeightPercentage: metrics.totalWeightPercentage,
-      firstTermAverage: metrics.firstTermAverage,
-      secondTermAverage: metrics.secondTermAverage,
-      firstTermEquivalence: metrics.firstTermEquivalence,
-      secondTermEquivalence: metrics.secondTermEquivalence,
+      termSummaries: metrics.termSummaries,
     };
-  }, [assessmentFallbackData, user, isTeacher, selectedCourseId, gradeSheets, calculateStudentCourseMetrics]);
+  }, [assessmentFallbackData, user, isTeacherView, selectedCourseId, gradeSheets, calculateStudentCourseMetrics]);
 
   const studentsWithGrades = useMemo((): StudentWithGrades[] => {
-    if (!isTeacher || !selectedCourse) return [];
+    if (!isTeacherView || !selectedCourse) return [];
 
     const courseTermEquivalences = getTermEquivalences(gradeSheets);
 
@@ -1356,10 +1382,11 @@ export default function GradesPage() {
             },
             completedAssessments: 0,
             totalAssessments: 0,
-            firstTermAverage: 0,
-            secondTermAverage: 0,
-            firstTermEquivalence: courseTermEquivalences["1st Term"],
-            secondTermEquivalence: courseTermEquivalences["2nd Term"],
+            termSummaries: Object.entries(courseTermEquivalences).map(([term, equivalence]) => ({
+              term,
+              average: 0,
+              equivalence: Number(equivalence.toFixed(1)),
+            })),
           };
         }
 
@@ -1381,17 +1408,14 @@ export default function GradesPage() {
           },
           completedAssessments: metrics.completedActivities,
           totalAssessments: metrics.totalActivities,
-          firstTermAverage: metrics.firstTermAverage,
-          secondTermAverage: metrics.secondTermAverage,
-          firstTermEquivalence: metrics.firstTermEquivalence,
-          secondTermEquivalence: metrics.secondTermEquivalence,
+          termSummaries: metrics.termSummaries,
         };
       })
       .filter(Boolean) as StudentWithGrades[];
-  }, [isTeacher, selectedCourse, courseStudents, gradeSheets, calculateStudentCourseMetrics]);
+  }, [isTeacherView, selectedCourse, courseStudents, gradeSheets, calculateStudentCourseMetrics]);
 
   const filteredStudentSheets = useMemo(() => {
-    if (isTeacher) return [];
+    if (isTeacherView) return [];
 
     const normalizedQuery = normalizeText(searchTerm).replace(/\s+/g, " ");
     if (!normalizedQuery) return gradeSheets;
@@ -1410,7 +1434,7 @@ export default function GradesPage() {
 
       return searchableValues.some((value) => value.includes(normalizedQuery));
     });
-  }, [gradeSheets, isTeacher, searchTerm]);
+  }, [gradeSheets, isTeacherView, searchTerm]);
 
   const getCourseCode = (): string => {
     if (!selectedCourse) return"";
@@ -1462,13 +1486,19 @@ export default function GradesPage() {
     return filtered;
   }, [studentsWithGrades, filterByStatus, searchTerm, sortBy, sortOrder]);
   const teacherStats = useMemo(() => {
-    const passing = filteredStudents.filter(
+    const studentsWithGradeData = filteredStudents.filter(
+      (student) =>
+        student.totalAssessments > 0 ||
+        student.completedAssessments > 0 ||
+        student.systemProgress.currentGrade > 0,
+    );
+    const passing = studentsWithGradeData.filter(
       (s) => s.systemProgress.status ==="passing",
     ).length;
-    const atRisk = filteredStudents.filter(
+    const atRisk = studentsWithGradeData.filter(
       (s) => s.systemProgress.status ==="at-risk",
     ).length;
-    const failing = filteredStudents.filter(
+    const failing = studentsWithGradeData.filter(
       (s) => s.systemProgress.status ==="failing",
     ).length;
     const totalStudents = filteredStudents.length;
@@ -1479,11 +1509,11 @@ export default function GradesPage() {
       failing,
       totalStudents,
       averageGrade:
-        totalStudents > 0
-          ? filteredStudents.reduce(
+        studentsWithGradeData.length > 0
+          ? studentsWithGradeData.reduce(
               (sum, s) => sum + s.systemProgress.currentGrade,
               0,
-            ) / totalStudents
+            ) / studentsWithGradeData.length
           : 0,
       publishedSheets: gradeSheets.filter((s) => s.isPublished).length,
       totalActivities: gradeSheets.reduce(
@@ -1493,22 +1523,44 @@ export default function GradesPage() {
       totalWeightPercentage: weightValidation.total,
     };
   }, [filteredStudents, gradeSheets, weightValidation]);
+
+  const visibleTermColumns = useMemo(
+    () =>
+      Object.keys(getTermEquivalences(gradeSheets)).sort(
+        (left, right) => getGradingPeriodOrder(right) - getGradingPeriodOrder(left),
+      ),
+    [gradeSheets],
+  );
+
   const exportToExcel = () => {
     if (!selectedCourse || filteredStudents.length === 0) return;
 
-    const exportData = filteredStudents.map((student) => ({
-      Student: student.name,
-      Average: student.systemProgress.currentGrade,"1st Term Avg": student.firstTermAverage,"1st Term Equiv (%)": student.firstTermEquivalence,"2nd Term Avg": student.secondTermAverage,"2nd Term Equiv (%)": student.secondTermEquivalence,
-      Status:
+    const exportData = filteredStudents.map((student) => {
+      const baseRow: Record<string, string | number> = {
+        Student: student.name,
+        Average: student.systemProgress.currentGrade,
+      };
+
+      visibleTermColumns.forEach((term) => {
+        const summary = student.termSummaries.find((entry) => entry.term === term);
+        baseRow[`${term} Avg`] = summary?.average ?? 0;
+        baseRow[`${term} Equiv (%)`] = summary?.equivalence ?? 0;
+      });
+
+      baseRow.Status =
         student.systemProgress.status ==="passing"
           ?"Passing"
           : student.systemProgress.status ==="at-risk"
             ?"At Risk"
-            :"Failing","Completed Activities": student.completedAssessments,"Total Activities": student.totalAssessments,"Completion Percentage":
-        student.totalAssessments > 0
+            :"Failing";
+      baseRow["Completed Activities"] = student.completedAssessments;
+      baseRow["Total Activities"] = student.totalAssessments;
+      baseRow["Completion Percentage"] = student.totalAssessments > 0
           ? `${((student.completedAssessments / student.totalAssessments) * 100).toFixed(1)}%`
-          :"0.0%",
-    }));
+          :"0.0%";
+
+      return baseRow;
+    });
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(exportData);
@@ -1662,12 +1714,18 @@ export default function GradesPage() {
                         Grades Workspace
                       </div>
                       <h2 className="mt-3 text-xl font-extrabold leading-tight text-slate-900 sm:text-2xl">
-                        {isTeacher ?"Academic performance center" :"My academic progress"}
+                        {isTeacher
+                          ? "Academic performance center"
+                          : isInstitution
+                            ? "Institution grade supervision"
+                            : "My academic progress"}
                       </h2>
                       <p className="mt-1.5 max-w-3xl text-sm text-slate-600">
                         {isTeacher
-                          ?"Review student performance, adjust filters, and track grade-sheet weights."
-                          :"Track your averages, weighted periods, and activity completion in one place."}
+                          ? "Review student performance, adjust filters, and track grade-sheet weights."
+                          : isInstitution
+                            ? "Review course-level performance, student status, and published grading coverage."
+                            : "Track your averages, weighted periods, and activity completion in one place."}
                       </p>
                       {selectedCourse && (
                         <p className="mt-2 text-xs font-medium text-slate-500">
@@ -1687,7 +1745,7 @@ export default function GradesPage() {
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {isTeacher ? (
+                    {isTeacherView ? (
                       <>
                         <div className="min-w-0 rounded-xl border border-slate-200/60 bg-white/90 p-2.5">
                           <div className="flex items-center justify-between gap-2">
@@ -1782,7 +1840,7 @@ export default function GradesPage() {
                 </div>
               </section>
 
-        {isTeacher && selectedCourse && (
+        {isTeacherView && selectedCourse && (
           <section className="order-2 rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-800">Student status distribution</h3>
@@ -1854,7 +1912,7 @@ export default function GradesPage() {
                   <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
-                    placeholder={isTeacher ?"Search students..." :"Search grades..."}
+                    placeholder={isTeacherView ? "Search students..." : "Search grades..."}
                     className="w-full rounded-xl border border-slate-200/60 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium text-slate-700 transition-all focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -1886,30 +1944,34 @@ export default function GradesPage() {
               </div>
             </div>
 
-            {isTeacher && selectedCourseId && (
+            {isTeacherView && selectedCourseId && (
               <div className="flex flex-wrap items-center gap-2">
-                <Link
-                  to={`/courses/${getCourseCode()}/grade-sheets`}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                >
-                  <FileSpreadsheet className="h-4 w-4" />
-                  <span>Manage</span>
-                </Link>
+                {isTeacher && (
+                  <Link
+                    to={`/courses/${getCourseCode()}/grade-sheets`}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <FileSpreadsheet className="h-4 w-4" />
+                    <span>Manage</span>
+                  </Link>
+                )}
                 <button
                   onClick={exportToExcel}
                   disabled={filteredStudents.length === 0}
                   className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-200/60 disabled:hover:bg-white disabled:hover:text-slate-700"
                 >
                   <Download className="h-4 w-4" />
-                  <span>Export</span>
+                  <span>{isInstitution ? "Export overview" : "Export"}</span>
                 </button>
-                <button
-                  onClick={() => setShowFilter(true)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                >
-                  <Filter className="h-4 w-4" />
-                  <span>Filters</span>
-                </button>
+                {isTeacher && (
+                  <button
+                    onClick={() => setShowFilter(true)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <Filter className="h-4 w-4" />
+                    <span>Filters</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1926,14 +1988,34 @@ export default function GradesPage() {
             </h3>
             <p className="mt-2 text-sm text-slate-600">
               {isTeacher
-                ?"You have no courses assigned as a teacher. Contact the administrator."
-                :"You are not enrolled in any course. Contact your teacher."}
+                ? "You have no courses assigned as a teacher. Contact the administrator."
+                : isInstitution
+                  ? "Your institution has no linked courses yet. Create or assign one from the course workspace."
+                  : "You are not enrolled in any course. Contact your teacher."}
             </p>
           </div>
         )}
 
+        {!isLoading && loadError && selectedCourse && (
+          <div className="order-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white text-amber-700">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-amber-900">
+                  Grade sheets unavailable
+                </h3>
+                <p className="mt-1 text-sm text-amber-800">
+                  {loadError}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         
-        {isTeacher &&
+        {isTeacherView &&
           selectedCourseId &&
           filteredStudents.length === 0 &&
           studentsWithGrades.length > 0 && (
@@ -1964,7 +2046,7 @@ export default function GradesPage() {
           )}
 
         
-        {!isLoading && !isTeacher && selectedCourse && (
+        {!isLoading && !isTeacherView && selectedCourse && (
           <div className="order-3 grid gap-3">
             <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
               {studentData ? (
@@ -2049,33 +2131,24 @@ export default function GradesPage() {
                       </p>
                     </div>
 
-                    <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
-                      <p className="text-xs font-semibold text-blue-600 tracking-wide mb-2">
-                        1st Term Avg
-                      </p>
-                      <p className="text-lg font-bold text-gray-900 text-center md:text-left">
-                        {studentData.firstTermAverage > 0
-                          ? formatGrade(studentData.firstTermAverage)
-                          :"--"}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {studentData.firstTermEquivalence.toFixed(0)}% equivalent
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
-                      <p className="text-xs font-semibold text-blue-600 tracking-wide mb-2">
-                        2nd Term Avg
-                      </p>
-                      <p className="text-lg font-bold text-gray-900 text-center md:text-left">
-                        {studentData.secondTermAverage > 0
-                          ? formatGrade(studentData.secondTermAverage)
-                          :"--"}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {studentData.secondTermEquivalence.toFixed(0)}% equivalent
-                      </p>
-                    </div>
+                    {studentData.termSummaries.map((termSummary) => (
+                      <div
+                        key={termSummary.term}
+                        className="rounded-xl border border-sky-100 bg-sky-50 p-3"
+                      >
+                        <p className="text-xs font-semibold text-blue-600 tracking-wide mb-2">
+                          {termSummary.term} Avg
+                        </p>
+                        <p className="text-lg font-bold text-gray-900 text-center md:text-left">
+                          {termSummary.average > 0
+                            ? formatGrade(termSummary.average)
+                            : "--"}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {termSummary.equivalence.toFixed(0)}% equivalent
+                        </p>
+                      </div>
+                    ))}
                   </div>
                 </>
               ) : (
@@ -2567,7 +2640,7 @@ export default function GradesPage() {
         
 
         
-        {!isLoading && isTeacher && selectedCourse && (
+        {!isLoading && isTeacherView && selectedCourse && (
           <div className="order-4 grid gap-3">
        
 
@@ -2665,12 +2738,14 @@ export default function GradesPage() {
                               ))}
                           </button>
                         </th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          1st Term
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          2nd Term
-                        </th>
+                        {visibleTermColumns.map((term) => (
+                          <th
+                            key={term}
+                            className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500"
+                          >
+                            {term}
+                          </th>
+                        ))}
                         <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
                           <button
                             onClick={() => handleSortClick("status")}
@@ -2695,14 +2770,6 @@ export default function GradesPage() {
                         const finalGradePalette = getGradePalette(
                           student.systemProgress.currentGrade,
                         );
-                        const firstTermPalette =
-                          student.firstTermAverage > 0
-                            ? getGradePalette(student.firstTermAverage)
-                            : null;
-                        const secondTermPalette =
-                          student.secondTermAverage > 0
-                            ? getGradePalette(student.secondTermAverage)
-                            : null;
 
                         return (
                         <tr
@@ -2735,44 +2802,38 @@ export default function GradesPage() {
                              
                             </div>
                           </td>
-                          <td className="px-4 py-3 align-middle text-center">
-                            <div className="flex flex-col items-center">
-                              <span
-                                className={cn(
-                                  "text-sm font-bold",
-                                  firstTermPalette
-                                    ? firstTermPalette.gradeText
-                                    : "text-gray-400",
-                                )}
+                          {visibleTermColumns.map((term) => {
+                            const termSummary = student.termSummaries.find(
+                              (summary) => summary.term === term,
+                            );
+                            const termPalette =
+                              termSummary && termSummary.average > 0
+                                ? getGradePalette(termSummary.average)
+                                : null;
+
+                            return (
+                              <td
+                                key={`${student.id}-${term}`}
+                                className="px-4 py-3 align-middle text-center"
                               >
-                                {student.firstTermAverage > 0
-                                  ? formatGrade(student.firstTermAverage)
-                                  :"--"}
-                              </span>
-                              <span className="text-xs text-gray-500">
-                                {student.firstTermEquivalence.toFixed(0)}%
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 align-middle text-center">
-                            <div className="flex flex-col items-center">
-                              <span
-                                className={cn(
-                                  "text-sm font-bold",
-                                  secondTermPalette
-                                    ? secondTermPalette.gradeText
-                                    : "text-gray-400",
-                                )}
-                              >
-                                {student.secondTermAverage > 0
-                                  ? formatGrade(student.secondTermAverage)
-                                  :"--"}
-                              </span>
-                              <span className="text-xs text-gray-500">
-                                {student.secondTermEquivalence.toFixed(0)}%
-                              </span>
-                            </div>
-                          </td>
+                                <div className="flex flex-col items-center">
+                                  <span
+                                    className={cn(
+                                      "text-sm font-bold",
+                                      termPalette ? termPalette.gradeText : "text-gray-400",
+                                    )}
+                                  >
+                                    {termSummary && termSummary.average > 0
+                                      ? formatGrade(termSummary.average)
+                                      : "--"}
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    {termSummary ? termSummary.equivalence.toFixed(0) : 0}%
+                                  </span>
+                                </div>
+                              </td>
+                            );
+                          })}
                           <td className="px-4 py-3 align-middle text-center">
                             <Badge
                               className={getStatusBadgeClass(
@@ -2922,20 +2983,22 @@ export default function GradesPage() {
                                   >
                                     {formatWeightPercentage(sheet.weightPercentage || 0)}%
                                   </span>
-                                  <Link
-                                    to={`/courses/${getCourseCode()}/grade-sheets/${sheet.id}/edit`}
-                                    onClick={() => {
-                                      console.log("Navigating to edit:", {
-                                        courseCode: getCourseCode(),
-                                        sheetId: sheet.id,
-                                        sheetCourseCode: sheet.courseCode,
-                                        sheetCourseId: sheet.courseId,
-                                      });
-                                    }}
-                                    className="text-xs font-medium text-slate-500 hover:text-slate-700 hover:underline"
-                                  >
-                                    Edit
-                                  </Link>
+                                  {isTeacher && (
+                                    <Link
+                                      to={`/courses/${getCourseCode()}/grade-sheets/${sheet.id}/edit`}
+                                      onClick={() => {
+                                        console.log("Navigating to edit:", {
+                                          courseCode: getCourseCode(),
+                                          sheetId: sheet.id,
+                                          sheetCourseCode: sheet.courseCode,
+                                          sheetCourseId: sheet.courseId,
+                                        });
+                                      }}
+                                      className="text-xs font-medium text-slate-500 hover:text-slate-700 hover:underline"
+                                    >
+                                      Edit
+                                    </Link>
+                                  )}
                                 </div>
                               </div>
                             ))}
@@ -3003,24 +3066,27 @@ export default function GradesPage() {
             )}
 
             
-            {gradeSheets.length === 0 && (
+            {!loadError && gradeSheets.length === 0 && (
               <div className="rounded-2xl border border-slate-200/60 bg-white p-6 text-center shadow-sm">
                 <div className="mx-auto mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-600">
                   <FileSpreadsheet className="h-4 w-4 text-blue-400" />
                 </div>
                 <h3 className="text-lg font-bold text-slate-900">
-                  No grade sheets
+                  {isInstitution ? "No grade sheets available" : "No grade sheets"}
                 </h3>
                 <p className="mx-auto mt-2 max-w-lg text-sm text-slate-600">
-                  No grade sheets have been created for this course yet. Start
-                  by creating your first grade sheet to manage grades.
+                  {isInstitution
+                    ? "This course does not have any grade sheets yet. The assigned teacher needs to create one before the institution can review grades here."
+                    : "No grade sheets have been created for this course yet. Start by creating your first grade sheet to manage grades."}
                 </p>
-                <Link to={`/courses/${getCourseCode()}/grade-sheets`}>
-                  <Button className="inline-flex h-10 items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700">
-                    <FileSpreadsheet className="h-4 w-4" />
-                    <span>Create Grade Sheet</span>
-                  </Button>
-                </Link>
+                {isTeacher && (
+                  <Link to={`/courses/${getCourseCode()}/grade-sheets`}>
+                    <Button className="inline-flex h-10 items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-700">
+                      <FileSpreadsheet className="h-4 w-4" />
+                      <span>Create Grade Sheet</span>
+                    </Button>
+                  </Link>
+                )}
               </div>
             )}
 

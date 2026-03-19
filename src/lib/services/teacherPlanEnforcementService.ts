@@ -60,7 +60,9 @@ type TeacherPlanContext = {
   status: string;
 };
 
-const normalizeUserRole = (value: unknown): "docente" | "estudiante" | "admin" | "" => {
+const normalizeUserRole = (
+  value: unknown,
+): "docente" | "estudiante" | "admin" | "institucion" | "" => {
   const normalized = String(value || "").trim().toLowerCase();
   if (
     normalized === "docente" ||
@@ -81,6 +83,15 @@ const normalizeUserRole = (value: unknown): "docente" | "estudiante" | "admin" |
   }
   if (normalized === "admin" || normalized === "administrator") {
     return "admin";
+  }
+  if (
+    normalized === "institucion" ||
+    normalized === "institución" ||
+    normalized === "institution" ||
+    normalized === "organization" ||
+    normalized === "organizacion"
+  ) {
+    return "institucion";
   }
   return "";
 };
@@ -289,6 +300,9 @@ const getCourseManagerIds = (courseData: Record<string, unknown>): Set<string> =
       .filter(Boolean),
   );
 
+const getInstitutionOwnerId = (courseData: Record<string, unknown>): string =>
+  String(courseData.createdByInstitutionId || courseData.institutionId || "").trim();
+
 const getTeacherPlanContext = async (teacherId: string): Promise<TeacherPlanContext> => {
   const [userSnap, studentSnap] = await Promise.all([
     getDoc(doc(firebaseDB, "usuarios", teacherId)),
@@ -479,19 +493,33 @@ async function changeCourseEnrollmentWithPlanFallback(
       actorUserData.requestedRole ||
       actorStudentData.requestedRole,
   );
+  const actorInstitutionId =
+    actorRole === "institucion"
+      ? String(actorUserData.institutionId || actorStudentData.institutionId || actorUserId).trim()
+      : "";
+  const courseInstitutionId = getInstitutionOwnerId(courseData);
   const canManageAsTeacher = Boolean(teacherId) && actorUserId === teacherId;
   const canManageAsSelf = actorUserId === studentId;
   const canManageAsAdminOwner =
     actorRole === "admin" && getCourseManagerIds(courseData).has(actorUserId);
+  const canManageAsInstitutionOwner =
+    actorRole === "institucion" &&
+    Boolean(actorInstitutionId) &&
+    actorInstitutionId === courseInstitutionId;
 
-  if (!canManageAsTeacher && !canManageAsSelf && !canManageAsAdminOwner) {
+  if (
+    !canManageAsTeacher &&
+    !canManageAsSelf &&
+    !canManageAsAdminOwner &&
+    !canManageAsInstitutionOwner
+  ) {
     throw new Error("You are not allowed to change this enrollment.");
   }
 
   if (!teacherId) {
-    if (canManageAsSelf || canManageAsAdminOwner) {
+    if (canManageAsSelf || canManageAsAdminOwner || canManageAsInstitutionOwner) {
       const courseUpdate =
-        canManageAsSelf && !canManageAsAdminOwner
+        canManageAsSelf && !canManageAsAdminOwner && !canManageAsInstitutionOwner
           ? {
               enrolledStudents:
                 action === "enroll" ? arrayUnion(studentId) : arrayRemove(studentId),
@@ -514,7 +542,11 @@ async function changeCourseEnrollmentWithPlanFallback(
         courseId,
         studentId,
         action,
-        planName: canManageAsSelf ? "Self enrollment" : "Admin managed",
+        planName: canManageAsSelf
+          ? "Self enrollment"
+          : canManageAsInstitutionOwner
+            ? "Institution managed"
+            : "Admin managed",
         studentLimit: 0,
       };
     }

@@ -42,7 +42,10 @@ import {
   getInstitutionPlanQuote,
 } from "@/lib/services/institutionPlanService";
 import { purgeUserDataInSparkMode } from "@/lib/services/accountDeletionService";
-import { useAdminPlatformSettings } from "@/lib/services/adminSettingsService";
+import {
+  DEFAULT_PLATFORM_NAME,
+  useAdminPlatformSettings,
+} from "@/lib/services/adminSettingsService";
 import { PublicTopNav } from "@/components/common/PublicTopNav";
 import { PublicFooter } from "@/components/common/PublicFooter";
 
@@ -111,7 +114,8 @@ export default function TeacherApprovalWaitingPage() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const { settings } = useAdminPlatformSettings();
-  const platformName = String(settings.platformName || "Socrattica").trim() || "Socrattica";
+  const platformName =
+    String(settings.platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME;
   const supportEmail = settings.supportEmail || "rcroman20@gmail.com";
   const contactEmail = settings.contactEmail || supportEmail;
   const allowTeacherSelfRequest = settings.allowTeacherSelfRequest !== false;

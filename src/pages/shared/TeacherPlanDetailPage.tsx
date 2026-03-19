@@ -18,7 +18,11 @@ import {
   getTeacherPlanPath,
   resolveTeacherPlanId,
 } from "@/lib/services/teacherPlanService";
-import { useAdminPlatformSettings } from "@/lib/services/adminSettingsService";
+import {
+  DEFAULT_PLATFORM_NAME,
+  resolvePlatformSiteUrl,
+  useAdminPlatformSettings,
+} from "@/lib/services/adminSettingsService";
 import { SeoHead } from "@/components/common/SeoHead";
 import { PublicTopNav } from "@/components/common/PublicTopNav";
 import { PublicFooter } from "@/components/common/PublicFooter";
@@ -30,7 +34,8 @@ const cardClassName = "rounded-2xl border border-slate-200/60 bg-white p-4 shado
 
 export default function TeacherPlanDetailPage() {
   const { settings } = useAdminPlatformSettings();
-  const platformName = String(settings.platformName || "").trim() || "Socrattica";
+  const platformName = String(settings.platformName || "").trim() || DEFAULT_PLATFORM_NAME;
+  const siteUrl = resolvePlatformSiteUrl(settings.siteUrl);
   const navigate = useNavigate();
   const { planId } = useParams<{ planId: string }>();
   const resolvedPlanId = useMemo(() => resolveTeacherPlanId(planId), [planId]);
@@ -101,13 +106,13 @@ export default function TeacherPlanDetailPage() {
             name: platformName,
           },
           category: "Educational software subscription",
-          url: `https://socrattica.web.app${getTeacherPlanPath(selectedPlan.id)}`,
+          url: `${siteUrl}${getTeacherPlanPath(selectedPlan.id)}`,
           offers: {
             "@type": "Offer",
             price: String(selectedPlan.priceCop),
             priceCurrency: "COP",
             availability: "https://schema.org/InStock",
-            url: `https://socrattica.web.app${getTeacherPlanPath(selectedPlan.id)}`,
+            url: `${siteUrl}${getTeacherPlanPath(selectedPlan.id)}`,
           },
         }}
       />

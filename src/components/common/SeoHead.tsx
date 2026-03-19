@@ -1,11 +1,15 @@
 import { useEffect } from "react";
 import {
+  DEFAULT_SITE_DESCRIPTION,
+  DEFAULT_PLATFORM_NAME,
+  DEFAULT_SITE_URL,
+  resolvePlatformSiteUrl,
   resolvePlatformShareImageUrl,
   useAdminPlatformSettings,
 } from "@/lib/services/adminSettingsService";
 
-const DEFAULT_SITE_NAME = "Socrattica";
-const SITE_URL = "https://socrattica.web.app";
+const DEFAULT_SITE_NAME = DEFAULT_PLATFORM_NAME;
+export const SITE_URL = DEFAULT_SITE_URL;
 type SeoHeadProps = {
   title: string;
   description: string;
@@ -35,12 +39,18 @@ export function SeoHead({
 
   useEffect(() => {
     const siteName = String(settings.platformName || "").trim() || DEFAULT_SITE_NAME;
-    const logoCandidate = resolvePlatformShareImageUrl(settings.logoUrl);
+    const siteUrl = resolvePlatformSiteUrl(settings.siteUrl);
+    const logoCandidate = resolvePlatformShareImageUrl(settings.shareImageUrl || settings.logoUrl);
     const socialImage = /^https?:\/\//i.test(logoCandidate)
       ? logoCandidate
-      : `${SITE_URL}${logoCandidate.startsWith("/") ? logoCandidate : `/${logoCandidate}`}`;
-    const canonicalUrl = `${SITE_URL}${canonicalPath}`;
+      : `${siteUrl}${logoCandidate.startsWith("/") ? logoCandidate : `/${logoCandidate}`}`;
+    const canonicalUrl = `${siteUrl}${canonicalPath}`;
     const computedTitle = `${title} | ${siteName}`;
+    const resolvedDescription =
+      String(description || "").trim() ||
+      String(settings.siteDescription || "").trim() ||
+      DEFAULT_SITE_DESCRIPTION;
+    const resolvedKeywords = String(keywords || "").trim() || String(settings.siteKeywords || "").trim();
 
     document.title = computedTitle;
 
@@ -49,7 +59,7 @@ export function SeoHead({
       meta.name = "description";
       return meta;
     });
-    descriptionMeta.content = description;
+    descriptionMeta.content = resolvedDescription;
 
     const robotsMeta = ensureMeta('meta[name="robots"]', () => {
       const meta = document.createElement("meta");
@@ -58,13 +68,13 @@ export function SeoHead({
     });
     robotsMeta.content = robots;
 
-    if (keywords) {
+    if (resolvedKeywords) {
       const keywordsMeta = ensureMeta('meta[name="keywords"]', () => {
         const meta = document.createElement("meta");
         meta.name = "keywords";
         return meta;
       });
-      keywordsMeta.content = keywords;
+      keywordsMeta.content = resolvedKeywords;
     }
 
     const canonicalLink = (() => {
@@ -89,7 +99,7 @@ export function SeoHead({
       meta.setAttribute("property", "og:description");
       return meta;
     });
-    ogDescription.content = description;
+    ogDescription.content = resolvedDescription;
 
     const ogUrl = ensureMeta('meta[property="og:url"]', () => {
       const meta = document.createElement("meta");
@@ -117,7 +127,7 @@ export function SeoHead({
       meta.name = "twitter:description";
       return meta;
     });
-    twitterDescription.content = description;
+    twitterDescription.content = resolvedDescription;
 
     const twitterImage = ensureMeta('meta[name="twitter:image"]', () => {
       const meta = document.createElement("meta");
@@ -139,7 +149,20 @@ export function SeoHead({
       script.text = JSON.stringify(structuredData);
       document.head.appendChild(script);
     }
-  }, [canonicalPath, description, keywords, robots, settings.logoUrl, settings.platformName, structuredData, title]);
+  }, [
+    canonicalPath,
+    description,
+    keywords,
+    robots,
+    settings.logoUrl,
+    settings.platformName,
+    settings.shareImageUrl,
+    settings.siteDescription,
+    settings.siteKeywords,
+    settings.siteUrl,
+    structuredData,
+    title,
+  ]);
 
   return null;
 }

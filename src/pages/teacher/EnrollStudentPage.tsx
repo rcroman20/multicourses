@@ -97,6 +97,9 @@ export default function EnrollStudentPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
   const isTeacher = user?.role === 'docente';
+  const isInstitution = user?.role === 'institucion';
+  const canManageEnrollment = isTeacher || isInstitution;
+  const institutionId = (user?.institutionId || user?.id || '').trim();
   const isInstitutionAccount = student?.role === 'institucion';
   const teacherPlanName = (user?.teacherPlanName || "No assigned plan").trim();
   const teacherPlanStudentLimit =
@@ -130,15 +133,22 @@ export default function EnrollStudentPage() {
         getDoc(userRef),
       ]);
       
-      if (!studentSnap.exists()) {
+      if (!studentSnap.exists() && !userSnap.exists()) {
         navigate('/students/list');
         return;
       }
 
-      const studentData = studentSnap.data() as Record<string, any>;
+      const studentData = studentSnap.exists() ? (studentSnap.data() as Record<string, any>) : {};
       const userData = userSnap.exists() ? (userSnap.data() as Record<string, any>) : {};
+      const mergedCourses = Array.from(
+        new Set(
+          [studentData.courses, userData.courses]
+            .flatMap((value) => (Array.isArray(value) ? value : []))
+            .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+        ),
+      );
       const studentObj: Student = {
-        id: studentSnap.id,
+        id: studentId!,
         idNumber: studentData.idNumber || userData.idNumber || userData.identification || '',
         email: studentData.email || userData.email || '',
         name: studentData.name || userData.name || 'Student',
@@ -146,40 +156,44 @@ export default function EnrollStudentPage() {
         whatsApp: studentData.whatsApp || userData.whatsApp || userData.whatsapp || userData.phone || '',
         avatarUrl: studentData.avatarUrl || userData.avatarUrl || '',
         avatarEmoji: studentData.avatarEmoji || userData.avatarEmoji || '',
-        courses: studentData.courses || [], // Cambiado a courses
+        courses: mergedCourses,
       };
 
       setStudent(studentObj);
-      setStudentCourses(studentData.courses || []); // Cambiado a courses
+      setStudentCourses(mergedCourses);
 
-      // Fetch all courses (only for teachers)
-      if (isTeacher) {
+      if (canManageEnrollment) {
         const coursesRef = collection(firebaseDB, 'cursos');
-        const coursesQuery = query(
-          coursesRef,
-          where('teacherId', '==', user?.id)
-        );
-        const coursesSnapshot = await getDocs(coursesQuery);
-        
-        const coursesList: Course[] = [];
-        coursesSnapshot.forEach((doc) => {
-          const data = doc.data();
-          coursesList.push({
-            id: doc.id,
-            name: data.name || data.nombre || 'Unnamed Course',
-            code: data.code || data.codigo || 'N/A',
-            description: data.description || '',
-            semester: data.semester || '',
-            group: data.group || '',
-            enrolledStudents: data.enrolledStudents || [],
-            teacherId: data.teacherId,
-            teacherName: data.teacherName || '',
-            status: data.status || 'active',
-            credits: data.credits || 0,
+        const courseSnapshots = isTeacher
+          ? [await getDocs(query(coursesRef, where('teacherId', '==', user?.id)))]
+          : institutionId
+            ? await Promise.all([
+                getDocs(query(coursesRef, where('institutionId', '==', institutionId))),
+                getDocs(query(coursesRef, where('createdByInstitutionId', '==', institutionId))),
+              ])
+            : [];
+
+        const coursesMap = new Map<string, Course>();
+        courseSnapshots.forEach((snapshot) => {
+          snapshot.forEach((courseDoc) => {
+            const data = courseDoc.data();
+            coursesMap.set(courseDoc.id, {
+              id: courseDoc.id,
+              name: data.name || data.nombre || 'Unnamed Course',
+              code: data.code || data.codigo || 'N/A',
+              description: data.description || '',
+              semester: data.semester || '',
+              group: data.group || '',
+              enrolledStudents: Array.isArray(data.enrolledStudents) ? data.enrolledStudents : [],
+              teacherId: data.teacherId || '',
+              teacherName: data.teacherName || '',
+              status: data.status || 'active',
+              credits: data.credits || 0,
+            });
           });
         });
 
-        setCourses(coursesList);
+        setCourses(Array.from(coursesMap.values()));
       }
 
     } catch (err) {
@@ -216,13 +230,14 @@ export default function EnrollStudentPage() {
   };
 
   const enrollStudentInCourse = async (courseId: string) => {
-    if (!student || !isTeacher) return;
+    if (!student || !canManageEnrollment) return;
     if (student.role === "institucion") {
       setError("Institution accounts cannot be enrolled in courses.");
       return;
     }
 
     if (
+      isTeacher &&
       teacherPlanExpiresAt &&
       !Number.isNaN(teacherPlanExpiresAt.getTime()) &&
       teacherPlanExpiresAt.getTime() < Date.now()
@@ -233,7 +248,7 @@ export default function EnrollStudentPage() {
       return;
     }
 
-    if (teacherPlanStudentLimit) {
+    if (isTeacher && teacherPlanStudentLimit) {
       const uniqueStudentIds = new Set<string>();
       for (const course of courses) {
         for (const enrolledId of course.enrolledStudents || []) {
@@ -297,7 +312,7 @@ export default function EnrollStudentPage() {
   };
 
   const unenrollStudentFromCourse = async (courseId: string) => {
-    if (!student || !isTeacher) return;
+    if (!student || !canManageEnrollment) return;
     if (student.role === "institucion") {
       setError("Institution accounts cannot be enrolled in courses.");
       return;
@@ -467,7 +482,7 @@ export default function EnrollStudentPage() {
                     Enroll Student
                   </h2>
                   <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                    Assign and manage this student across your active courses from one place.
+                    Assign and manage this student across your accessible courses from one place.
                   </p>
                 </div>
 
@@ -777,20 +792,34 @@ export default function EnrollStudentPage() {
               </section>
 
               <aside className="space-y-3 xl:sticky xl:top-24 xl:self-start">
-                <section className="rounded-2xl border border-sky-200 bg-sky-50 p-3 shadow-sm">
-                  <h4 className="text-sm font-semibold text-slate-900">Active Teacher Plan</h4>
-                  <p className="mt-1 text-xs text-slate-700">
-                    {teacherPlanName} · {teacherPlanPriceText}
-                  </p>
-                  <div className="mt-2 space-y-1 text-xs text-slate-600">
-                    <p>
-                      Student limit: {teacherPlanStudentLimit ?? "Unlimited"} (remaining{" "}
-                      {remainingStudentSlots ?? "Unlimited"})
+                {isTeacher ? (
+                  <section className="rounded-2xl border border-sky-200 bg-sky-50 p-3 shadow-sm">
+                    <h4 className="text-sm font-semibold text-slate-900">Active Teacher Plan</h4>
+                    <p className="mt-1 text-xs text-slate-700">
+                      {teacherPlanName} · {teacherPlanPriceText}
                     </p>
-                    <p>Managed students: {managedStudentCount}</p>
-                    <p>Expires: {teacherPlanExpiresText}</p>
-                  </div>
-                </section>
+                    <div className="mt-2 space-y-1 text-xs text-slate-600">
+                      <p>
+                        Student limit: {teacherPlanStudentLimit ?? "Unlimited"} (remaining{" "}
+                        {remainingStudentSlots ?? "Unlimited"})
+                      </p>
+                      <p>Managed students: {managedStudentCount}</p>
+                      <p>Expires: {teacherPlanExpiresText}</p>
+                    </div>
+                  </section>
+                ) : (
+                  <section className="rounded-2xl border border-cyan-200 bg-cyan-50 p-3 shadow-sm">
+                    <h4 className="text-sm font-semibold text-slate-900">Institution Scope</h4>
+                    <p className="mt-1 text-xs text-slate-700">
+                      You can manage enrollment for courses owned by your institution.
+                    </p>
+                    <div className="mt-2 space-y-1 text-xs text-slate-600">
+                      <p>Institution ID: {institutionId || 'Unavailable'}</p>
+                      <p>Managed courses: {courses.length}</p>
+                      <p>Managed students: {managedStudentCount}</p>
+                    </div>
+                  </section>
+                )}
 
                 <section className="rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm">
                   <h4 className="mb-2 text-sm font-semibold text-slate-900">Enrollment Summary</h4>

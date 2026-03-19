@@ -1,4 +1,5 @@
-const CACHE_NAME = "socrattica-v2";
+const CACHE_NAME = "socrattica-v3";
+const PLATFORM_NAME_CACHE_URL = "/__platform-name";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -61,6 +62,33 @@ self.addEventListener("fetch", (event) => {
         .catch(() => caches.match("/offline.html"));
     })
   );
+});
+
+self.addEventListener("message", (event) => {
+  const data = event.data;
+  if (!data || typeof data !== "object") return;
+
+  if (data.type === "SET_PLATFORM_NAME") {
+    const platformName =
+      typeof data.platformName === "string" && data.platformName.trim()
+        ? data.platformName.trim()
+        : "";
+    if (!platformName) return;
+
+    event.waitUntil(
+      caches.open(CACHE_NAME).then((cache) =>
+        cache.put(
+          PLATFORM_NAME_CACHE_URL,
+          new Response(JSON.stringify({ platformName }), {
+            headers: {
+              "Content-Type": "application/json",
+              "Cache-Control": "no-store",
+            },
+          }),
+        ),
+      ),
+    );
+  }
 });
 
 self.addEventListener("notificationclick", (event) => {

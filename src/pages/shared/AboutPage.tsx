@@ -18,7 +18,11 @@ import {
 import { SeoHead } from "@/components/common/SeoHead";
 import { PublicTopNav } from "@/components/common/PublicTopNav";
 import { PublicFooter } from "@/components/common/PublicFooter";
-import { useAdminPlatformSettings } from "@/lib/services/adminSettingsService";
+import {
+  DEFAULT_PLATFORM_NAME,
+  resolvePlatformSiteUrl,
+  useAdminPlatformSettings,
+} from "@/lib/services/adminSettingsService";
 
 type AboutCopy = {
   badge: string;
@@ -52,10 +56,10 @@ type SnapshotCard = {
 };
 
 const EN_COPY: AboutCopy = {
-  badge: "About Socrattica",
+  badge: "About {{platformName}}",
   title: "A platform built to run modern academic workflows",
   subtitle:
-    "Socrattica brings students, teachers, and admins together in one academic platform.",
+    "{{platformName}} brings students, teachers, and admins together in one academic platform.",
   back: "Back to landing",
   creatorLabel: "Creator",
   createdYearLabel: "Created in",
@@ -64,9 +68,9 @@ const EN_COPY: AboutCopy = {
   teacherOps: "Platform operations article",
   platformArticle:
     "Teacher operations: Teachers can design courses, publish content, evaluate student performance, and manage classroom activity from a single workspace. Instead of switching between disconnected tools, they can follow a consistent operational flow that supports planning, grading, communication, and ongoing academic decision-making. Student experience: Students get a focused learning environment where each class has clear context, grades are easier to understand, and materials remain accessible when needed. Weekly visibility helps reduce missed deadlines and gives learners a practical way to stay organized across all active courses. Admin governance: Administrative teams can oversee the full teacher approval lifecycle, track rejected requests with reasons, monitor payment status, and enable or pause access with control. This governance layer helps institutions keep accountability high while preserving operational continuity and data safety.",
-  differentiatorTitle: "What makes Socrattica different",
+  differentiatorTitle: "What makes {{platformName}} different",
   differentiatorParagraphs: [
-    "Socrattica gives institutions one shared workflow for students, teachers, and administrators, so daily academic operations no longer depend on disconnected apps, repeated data entry, or unclear handoffs between teams. From course setup to grading follow-up, every role works in the same environment with the same context, which improves communication, reduces avoidable mistakes, and keeps execution consistent across classrooms. Instead of spending time reconciling information between tools, teams can focus on teaching quality, student progress, and institutional outcomes.",
+    "{{platformName}} gives institutions one shared workflow for students, teachers, and administrators, so daily academic operations no longer depend on disconnected apps, repeated data entry, or unclear handoffs between teams. From course setup to grading follow-up, every role works in the same environment with the same context, which improves communication, reduces avoidable mistakes, and keeps execution consistent across classrooms. Instead of spending time reconciling information between tools, teams can focus on teaching quality, student progress, and institutional outcomes.",
     "Teacher access is managed through a clear approval and payment validation flow before advanced tools are enabled, creating a transparent and reliable process for both educators and admin teams. Once active, institutions can monitor course activity, pending academic tasks, and performance signals from a single operational view, making it easier to detect issues early and act with confidence. This governance model helps schools maintain control without slowing down growth, while giving teachers and students a more predictable and trustworthy experience.",
     "Growth is structured through defined plans with a clear upgrade path, so organizations can expand courses and student capacity without rebuilding internal workflows each time demand increases. As usage evolves, institutions can scale in an orderly way, preserving process stability and staff productivity. When operational pauses are needed, access can be managed safely without deleting records, protecting academic history, audit continuity, and long-term institutional memory.",
   ],
@@ -108,10 +112,10 @@ const EN_COPY: AboutCopy = {
 };
 
 const ES_COPY: AboutCopy = {
-  badge: "Acerca de Socrattica",
+  badge: "Acerca de {{platformName}}",
   title: "Una plataforma creada para flujos académicos modernos",
   subtitle:
-    "Socrattica conecta la experiencia del estudiante, la operación docente y la gobernanza administrativa en un solo sistema, para que las instituciones dejen de depender de herramientas aisladas y puedan ejecutar su operación académica con más claridad, control y consistencia.",
+    "{{platformName}} conecta la experiencia del estudiante, la operación docente y la gobernanza administrativa en un solo sistema, para que las instituciones dejen de depender de herramientas aisladas y puedan ejecutar su operación académica con más claridad, control y consistencia.",
   back: "Volver al inicio",
   creatorLabel: "Creador",
   createdYearLabel: "Año de creación",
@@ -120,9 +124,9 @@ const ES_COPY: AboutCopy = {
   teacherOps: "Artículo de operación de plataforma",
   platformArticle:
     "Operación docente: Los docentes pueden diseñar cursos, publicar contenido, evaluar el rendimiento estudiantil y gestionar la actividad del aula desde un único espacio de trabajo. En lugar de cambiar entre herramientas desconectadas, pueden seguir un flujo operativo coherente que respalda la planeación, la calificación, la comunicación y la toma de decisiones académicas continua. Experiencia del estudiante: Los estudiantes obtienen un entorno de aprendizaje enfocado donde cada clase tiene un contexto claro, las notas son más fáciles de entender y los materiales siguen accesibles cuando se necesitan. La visibilidad semanal ayuda a reducir entregas perdidas y ofrece una forma práctica de mantenerse organizados en todos los cursos activos. Gobernanza administrativa: Los equipos administrativos pueden supervisar el ciclo completo de aprobación docente, registrar rechazos con su motivo, monitorear el estado de pagos y habilitar o pausar accesos con control. Esta capa de gobernanza ayuda a mantener alta la trazabilidad y la responsabilidad institucional, al mismo tiempo que preserva la continuidad operativa y la seguridad de los datos.",
-  differentiatorTitle: "Qué hace diferente a Socrattica",
+  differentiatorTitle: "Qué hace diferente a {{platformName}}",
   differentiatorParagraphs: [
-    "Socrattica ofrece un flujo unificado para estudiantes, docentes y administradores, eliminando la dependencia de herramientas separadas y reduciendo la fricción operativa diaria. Con un solo entorno de trabajo, cada rol mantiene claridad sobre tareas, prioridades y seguimiento académico.",
+    "{{platformName}} ofrece un flujo unificado para estudiantes, docentes y administradores, eliminando la dependencia de herramientas separadas y reduciendo la fricción operativa diaria. Con un solo entorno de trabajo, cada rol mantiene claridad sobre tareas, prioridades y seguimiento académico.",
     "El acceso docente se gestiona con aprobación y validación de pago antes de habilitar funciones avanzadas, lo que hace el proceso más transparente y controlado. Además, el equipo puede revisar actividad de cursos, avance académico y señales operativas desde un mismo panel para tomar decisiones con mayor rapidez.",
     "La capacidad crece por medio de planes definidos y una ruta de escalado clara, permitiendo aumentar cursos y estudiantes sin rehacer procesos internos. Cuando se requiere pausar acceso, la plataforma conserva los registros académicos y protege la continuidad institucional.",
   ],
@@ -164,7 +168,7 @@ const ES_COPY: AboutCopy = {
 };
 
 const replaceBrandInString = (value: string, platformName: string): string =>
-  value.replace(/Socrattica/g, platformName);
+  value.replace(/Socrattica|\{\{platformName\}\}/g, platformName);
 
 function replaceBrandInValue<T>(value: T, platformName: string): T {
   if (typeof value === "string") {
@@ -201,7 +205,8 @@ const statPillClassName =
 export default function AboutPage() {
   const { settings, isLoading: isSettingsLoading } = useAdminPlatformSettings();
   const platformName =
-    String(settings.platformName || "").trim() || "Socrattica";
+    String(settings.platformName || "").trim() || DEFAULT_PLATFORM_NAME;
+  const siteUrl = resolvePlatformSiteUrl(settings.siteUrl);
   const navigate = useNavigate();
   const location = useLocation();
   const isSpanish = location.pathname === "/acerca-de";
@@ -333,14 +338,14 @@ export default function AboutPage() {
           "@context": "https://schema.org",
           "@type": "AboutPage",
           name: copy.badge,
-          url: `https://socrattica.web.app${isSpanish ? "/acerca-de" : "/about"}`,
+          url: `${siteUrl}${isSpanish ? "/acerca-de" : "/about"}`,
           description: isSpanish
             ? `Página institucional de ${platformName} con misión, visión y propuesta de valor.`
             : `Official ${platformName} about page with mission, vision, and platform value proposition.`,
           mainEntity: {
             "@type": "Organization",
             name: platformName,
-            url: "https://socrattica.web.app/",
+            url: `${siteUrl}/`,
           },
         }}
       />

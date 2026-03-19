@@ -3,7 +3,10 @@ import { Link } from "react-router-dom";
 import { SeoHead } from "@/components/common/SeoHead";
 import { PublicTopNav } from "@/components/common/PublicTopNav";
 import { PublicFooter } from "@/components/common/PublicFooter";
-import { useAdminPlatformSettings } from "@/lib/services/adminSettingsService";
+import {
+  DEFAULT_PLATFORM_NAME,
+  useAdminPlatformSettings,
+} from "@/lib/services/adminSettingsService";
 
 const LAST_UPDATED = "March 15, 2026";
 
@@ -117,7 +120,7 @@ const sections: TermsSection[] = [
 
 export default function TermsConditionsPage() {
   const { settings } = useAdminPlatformSettings();
-  const platformName = String(settings.platformName || "").trim() || "Socrattica";
+  const platformName = String(settings.platformName || "").trim() || DEFAULT_PLATFORM_NAME;
   const supportEmail = String(settings.supportEmail || "").trim() || "rcroman20@gmail.com";
 
   return (

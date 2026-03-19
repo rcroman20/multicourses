@@ -1,6 +1,10 @@
 import { Link, NavLink } from "react-router-dom";
 import { Sparkles } from "lucide-react";
+import { PlatformAnnouncementBanner } from "@/components/common/PlatformAnnouncementBanner";
 import {
+  DEFAULT_PLATFORM_TAGLINE,
+  DEFAULT_PUBLIC_WORKSPACE_LABEL,
+  DEFAULT_PLATFORM_NAME,
   resolvePlatformLogoUrl,
   useAdminPlatformSettings,
 } from "@/lib/services/adminSettingsService";
@@ -31,8 +35,14 @@ export function PublicTopNav({
   className = "",
 }: PublicTopNavProps) {
   const { settings } = useAdminPlatformSettings();
-  const platformName = String(settings.platformName || "Socrattica").trim() || "Socrattica";
+  const platformName =
+    String(settings.platformName || DEFAULT_PLATFORM_NAME).trim() || DEFAULT_PLATFORM_NAME;
   const brandLogo = resolvePlatformLogoUrl(settings.logoUrl);
+  const platformTagline =
+    String(settings.platformTagline || DEFAULT_PLATFORM_TAGLINE).trim() || DEFAULT_PLATFORM_TAGLINE;
+  const publicWorkspaceLabel =
+    String(settings.publicWorkspaceLabel || DEFAULT_PUBLIC_WORKSPACE_LABEL).trim() ||
+    DEFAULT_PUBLIC_WORKSPACE_LABEL;
 
   return (
     <div className={`mb-4 space-y-3 ${className}`.trim()}>
@@ -49,8 +59,9 @@ export function PublicTopNav({
               <span className="block text-sm font-semibold leading-none text-slate-900">{platformName}</span>
               <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
                 <Sparkles className="h-3.5 w-3.5" />
-                Public Workspace
+                {publicWorkspaceLabel}
               </span>
+             
             </span>
           </Link>
 
@@ -70,6 +81,7 @@ export function PublicTopNav({
           </div>
         </div>
       </nav>
+      <PlatformAnnouncementBanner />
     </div>
   );
 }

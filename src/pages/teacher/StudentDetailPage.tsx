@@ -191,6 +191,9 @@ export default function StudentDetailPage() {
   });
 
   const isTeacher = user?.role === 'docente';
+  const isInstitution = user?.role === 'institucion';
+  const canManageEnrollment = isTeacher || isInstitution;
+  const institutionId = (user?.institutionId || user?.id || '').trim();
   const studentRoleDisplay = student ? getStudentRoleDisplay(student) : "student";
   const isInstitutionAccount = studentRoleDisplay === "institution";
   const detailTitle =
@@ -366,9 +369,8 @@ export default function StudentDetailPage() {
       // Fetch student assessments
       await fetchStudentAssessments(studentId!);
 
-      // Fetch all courses (only for teachers)
-      if (isTeacher) {
-        await fetchTeacherCourses(studentObj.courses || []);
+      if (canManageEnrollment) {
+        await fetchManagerCourses(studentObj.courses || []);
       }
 
     } catch (err) {
@@ -378,31 +380,38 @@ export default function StudentDetailPage() {
     }
   };
 
-  const fetchTeacherCourses = async (studentCourseIds: string[]) => {
+  const fetchManagerCourses = async (studentCourseIds: string[]) => {
     try {
       const coursesRef = collection(firebaseDB, 'cursos');
-      const teacherCoursesQuery = query(
-        coursesRef,
-        where('teacherId', '==', user?.id)
-      );
-      const coursesSnapshot = await getDocs(teacherCoursesQuery);
-      
-      const coursesList: Course[] = [];
-      coursesSnapshot.forEach((doc) => {
-        const data = doc.data();
-        coursesList.push({
-          id: doc.id,
-          name: data.name || data.nombre || 'Unnamed Course',
-          code: data.code || data.codigo || 'N/A',
-          description: data.description || '',
-          semester: data.semester || '',
-          group: data.group || '',
-          enrolledStudents: data.enrolledStudents || [],
-          teacherId: data.teacherId,
-          teacherName: data.teacherName || '',
-          status: data.status || 'active',
+      const courseSnapshots = isTeacher
+        ? [await getDocs(query(coursesRef, where('teacherId', '==', user?.id)))]
+        : institutionId
+          ? await Promise.all([
+              getDocs(query(coursesRef, where('institutionId', '==', institutionId))),
+              getDocs(query(coursesRef, where('createdByInstitutionId', '==', institutionId))),
+            ])
+          : [];
+
+      const coursesMap = new Map<string, Course>();
+      courseSnapshots.forEach((snapshot) => {
+        snapshot.forEach((courseDoc) => {
+          const data = courseDoc.data();
+          coursesMap.set(courseDoc.id, {
+            id: courseDoc.id,
+            name: data.name || data.nombre || 'Unnamed Course',
+            code: data.code || data.codigo || 'N/A',
+            description: data.description || '',
+            semester: data.semester || '',
+            group: data.group || '',
+            enrolledStudents: Array.isArray(data.enrolledStudents) ? data.enrolledStudents : [],
+            teacherId: data.teacherId || '',
+            teacherName: data.teacherName || '',
+            status: data.status || 'active',
+          });
         });
       });
+
+      const coursesList = Array.from(coursesMap.values());
 
       setCourses(coursesList);
 
@@ -580,7 +589,11 @@ export default function StudentDetailPage() {
   };
 
   const enrollStudentInCourse = async (courseId: string) => {
-    if (!student || !isTeacher) return;
+    if (!student || !canManageEnrollment) return;
+    if (isInstitutionAccount) {
+      setError("Institution accounts cannot be enrolled in courses.");
+      return;
+    }
 
     setIsUpdating(true);
     try {
@@ -618,7 +631,11 @@ export default function StudentDetailPage() {
   };
 
   const unenrollStudentFromCourse = async (courseId: string) => {
-    if (!student || !isTeacher) return;
+    if (!student || !canManageEnrollment) return;
+    if (isInstitutionAccount) {
+      setError("Institution accounts cannot be enrolled in courses.");
+      return;
+    }
 
     if (!confirm('Are you sure you want to unenroll this student from the course?')) {
       return;
@@ -1055,7 +1072,7 @@ export default function StudentDetailPage() {
         </div>
 
         {/* Course Management Section (Only for Teachers) */}
-        {isTeacher && (
+        {canManageEnrollment && (
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {/* Enrolled Courses */}
             <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">

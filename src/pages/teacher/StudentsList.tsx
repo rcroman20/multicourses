@@ -110,6 +110,11 @@ const isTeacherRecord = (data: Record<string, unknown>): boolean => {
   return role === "docente" || (requestedRole === "docente" && approval === "approved");
 };
 
+const isAdminOrInstitutionRecord = (data: Record<string, unknown>): boolean => {
+  const role = normalizeUserRole(data.role);
+  return role === "admin" || role === "institucion";
+};
+
 const recordMatchesInstitution = (
   data: Record<string, unknown>,
   institutionKey: string,
@@ -194,6 +199,7 @@ interface Student {
   avatarEmoji?: string;
   createdAt?: Date;
   courses: string[];
+  hasAnyCourse: boolean;
   canDelete: boolean;
 }
 
@@ -477,11 +483,13 @@ export default function StudentsPage() {
           });
         }
       } else if (isTeacher && user?.id && !isAdmin) {
-        const [ownedCoursesSnapshot, allCoursesSnapshot] = await Promise.all([
+        const [ownedCoursesSnapshot, allCoursesSnapshot, allUsersSnapshot, allStudentsSnapshot] = await Promise.all([
           getDocs(
             query(collection(firebaseDB, "cursos"), where("teacherId", "==", user.id)),
           ),
           getDocs(collection(firebaseDB, "cursos")),
+          getDocs(collection(firebaseDB, "usuarios")),
+          getDocs(collection(firebaseDB, "estudiantes")),
         ]);
 
         allCoursesSnapshot.forEach((courseDoc) => {
@@ -500,7 +508,6 @@ export default function StudentsPage() {
           });
         });
 
-        const targetStudentIds = new Set<string>();
         ownedCoursesSnapshot.forEach((courseDoc) => {
           const courseData = courseDoc.data() as Record<string, any>;
           const courseId = courseDoc.id;
@@ -519,40 +526,24 @@ export default function StudentsPage() {
           enrolled.forEach((entry) => {
             const enrolledId = typeof entry === "string" ? entry : entry?.id;
             if (!enrolledId || typeof enrolledId !== "string") return;
-            targetStudentIds.add(enrolledId);
             if (!coursesByUserId.has(enrolledId)) coursesByUserId.set(enrolledId, new Set());
             coursesByUserId.get(enrolledId)?.add(courseId);
           });
         });
 
-        const studentEntries = await Promise.all(
-          Array.from(targetStudentIds).map(async (studentId) => {
-            const [userDoc, studentDoc] = await Promise.all([
-              getDoc(doc(firebaseDB, "usuarios", studentId)),
-              getDoc(doc(firebaseDB, "estudiantes", studentId)),
-            ]);
-            return { studentId, userDoc, studentDoc };
-          }),
-        );
+        allUsersSnapshot.forEach((userDoc) => {
+          const studentId = userDoc.id;
+          const data = userDoc.data() as Record<string, unknown>;
+          if (isTeacherRecord(data) || isAdminOrInstitutionRecord(data)) return;
 
-        studentEntries.forEach(({ studentId, userDoc, studentDoc }) => {
           userIds.add(studentId);
-          if (userDoc.exists()) {
-            usersById.set(studentId, userDoc.data() as Record<string, any>);
-          }
-          if (studentDoc.exists()) {
-            studentsById.set(studentId, studentDoc.data() as Record<string, any>);
-          }
+          usersById.set(studentId, data as Record<string, any>);
         });
 
-        const studentsSnapshot = await getDocs(collection(firebaseDB, "estudiantes"));
-        studentsSnapshot.forEach((studentDoc) => {
+        allStudentsSnapshot.forEach((studentDoc) => {
           const studentId = studentDoc.id;
-          if (userIds.has(studentId)) return;
-          if (usersWithAnyCourse.has(studentId)) return;
-
           const data = studentDoc.data() as Record<string, unknown>;
-          if (isTeacherRecord(data)) return;
+          if (isTeacherRecord(data) || isAdminOrInstitutionRecord(data)) return;
 
           userIds.add(studentId);
           studentsById.set(studentId, data as Record<string, any>);
@@ -705,6 +696,14 @@ export default function StudentsPage() {
           avatarEmoji: userData.avatarEmoji || studentData.avatarEmoji || "",
           createdAt,
           courses: Array.from(new Set([...directCourses, ...inferredCourses])),
+          hasAnyCourse:
+            directCourses.length > 0 ||
+            inferredCourses.length > 0 ||
+            usersWithAnyCourse.has(id) ||
+            (Array.isArray(studentData.courses) &&
+              studentData.courses.some((courseId) => typeof courseId === "string" && courseId.trim())) ||
+            (Array.isArray(userData.courses) &&
+              userData.courses.some((courseId) => typeof courseId === "string" && courseId.trim())),
           canDelete: roleDisplay === "student",
         };
       });
@@ -752,13 +751,13 @@ export default function StudentsPage() {
     () =>
       students.filter((student) => {
         if (getStudentRoleDisplay(student) === "institution") return false;
-        return isTeacherDisplay(student) || student.courses.length > 0;
+        return isTeacherDisplay(student) || student.hasAnyCourse;
       }),
     [students],
   );
 
   const studentsWithoutCourses = useMemo(() => {
-    const withoutCourses = students.filter((student) => !student.courses || student.courses.length === 0);
+    const withoutCourses = students.filter((student) => !student.hasAnyCourse);
 
     if (isTeacher) return withoutCourses;
 
@@ -771,15 +770,12 @@ export default function StudentsPage() {
   const baseStudents = useMemo(() => {
     if (isTeacher) {
       return students.filter((student) => {
-        if (getStudentRoleDisplay(student) === "institution") return false;
+        const roleDisplay = getStudentRoleDisplay(student);
+        if (roleDisplay === "institution" || roleDisplay === "admin") return false;
         if (isTeacherDisplay(student)) {
           return sameInstitutionTeacherIds.has(student.id);
         }
-        if (!myCourseStudentIds.has(student.id)) return false;
-
-        const courseIds = Array.isArray(student.courses) ? student.courses : [];
-        if (courseIds.length === 0) return true;
-        return courseIds.some((courseId) => myTeacherCourseIds.has(courseId));
+        return true;
       });
     }
     if (isInstitution) return studentsWithCourses;
@@ -920,7 +916,7 @@ export default function StudentsPage() {
     if (roleFilter === "institucion") return "Institution Accounts";
     if (roleFilter === "docente") return "Teachers";
     if (roleFilter === "estudiante") return "Students";
-    return "My Students";
+    return "Student Directory";
   })();
   const primarySectionSubtitle = (() => {
     if (roleFilter === "institucion") {
@@ -1680,7 +1676,9 @@ export default function StudentsPage() {
                             </div>
                           ) : (
                             <div className="mt-2 text-xs text-slate-400">
-                              No courses assigned
+                              {isTeacher && student.hasAnyCourse
+                                ? "Enrolled in other courses"
+                                : "No courses assigned"}
                             </div>
                           )}
                         </div>

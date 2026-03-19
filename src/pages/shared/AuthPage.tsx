@@ -24,8 +24,12 @@ import {
 import { z } from "zod";
 import { firebaseAuth, firebaseDB } from "@/lib/firebase";
 import { PublicFooter } from "@/components/common/PublicFooter";
+import { PlatformAnnouncementBanner } from "@/components/common/PlatformAnnouncementBanner";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import {
+  DEFAULT_PLATFORM_TAGLINE,
+  DEFAULT_PUBLIC_WORKSPACE_LABEL,
+  DEFAULT_PLATFORM_NAME,
   resolvePlatformLogoUrl,
   useAdminPlatformSettings,
 } from "@/lib/services/adminSettingsService";
@@ -300,7 +304,12 @@ const ForgotPasswordModal = ({
 
 export default function AuthPage() {
   const { settings } = useAdminPlatformSettings();
-  const platformName = String(settings.platformName || "").trim() || "Socrattica";
+  const platformName = String(settings.platformName || "").trim() || DEFAULT_PLATFORM_NAME;
+  const platformTagline =
+    String(settings.platformTagline || DEFAULT_PLATFORM_TAGLINE).trim() || DEFAULT_PLATFORM_TAGLINE;
+  const publicWorkspaceLabel =
+    String(settings.publicWorkspaceLabel || DEFAULT_PUBLIC_WORKSPACE_LABEL).trim() ||
+    DEFAULT_PUBLIC_WORKSPACE_LABEL;
   const brandLogo = resolvePlatformLogoUrl(settings.logoUrl);
   const maintenanceMode = settings.maintenanceMode === true;
   const maintenanceCtaLabel = String(settings.maintenanceCtaLabel || "").trim() || "Request support";
@@ -755,6 +764,7 @@ export default function AuthPage() {
 
         <div className="relative mx-auto flex w-full max-w-[1320px] flex-col">
           <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
+            <PlatformAnnouncementBanner className="mb-4" />
 <div className="grid grid-cols-1 gap-4 xl:items-start xl:grid-cols-[minmax(0,1.05fr)_460px]">              <section className="relative self-start overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-5 shadow-sm lg:p-6">
                 <div className="pointer-events-none absolute -left-[70px] -top-[90px] h-[180px] w-[180px] rounded-full bg-sky-300/25" />
                 <div className="pointer-events-none absolute -right-[90px] -bottom-[90px] h-[200px] w-[200px] rounded-full bg-indigo-300/20" />
@@ -763,7 +773,7 @@ export default function AuthPage() {
                   <div className="space-y-5">
                     <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
                       <Sparkles className="h-3.5 w-3.5" />
-                      Academic Workspace
+                      {publicWorkspaceLabel}
                     </div>
 
                     <div className="flex flex-col items-center gap-3 text-center">
@@ -772,7 +782,7 @@ export default function AuthPage() {
                       </div>
                       <div>
                         <h1 className="text-[2rem] font-bold leading-tight text-slate-900">{platformName}</h1>
-                        <p className="mt-1 text-sm text-slate-500">Designed by Roberto Román</p>
+                        <p className="mt-1 text-sm text-slate-500">{platformTagline}</p>
                       </div>
                     </div>
 
@@ -1207,7 +1217,7 @@ export default function AuthPage() {
             </div>
           </div>
           <PublicFooter
-            summary="Access Socrattica securely to manage courses, teaching workflows, and student progress from one academic workspace."
+            summary={`Access ${platformName} securely to manage courses, teaching workflows, and student progress from one academic workspace.`}
           />
         </div>
       </div>
