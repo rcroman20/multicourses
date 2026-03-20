@@ -80,7 +80,6 @@ const AdminInstitutionsPage = lazy(() => import("./pages/admin/AdminInstitutions
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage"));
 const AdminReportsPage = lazy(() => import("./pages/admin/AdminReportsPage"));
 const AdminBackupsPage = lazy(() => import("./pages/admin/AdminBackupsPage"));
-const AdminAuditLogPage = lazy(() => import("./pages/admin/AdminAuditLogPage"));
 const AdminInstitutionDetailPage = lazy(() => import("./pages/admin/AdminInstitutionDetailPage"));
 const AdminPermissionsPage = lazy(() => import("./pages/admin/AdminPermissionsPage"));
 const AdminNotificationsPage = lazy(() => import("./pages/admin/AdminNotificationsPage"));
@@ -280,7 +279,6 @@ const titleRules: TitleRule[] = [
   { path: "/admin/users", title: "Users Directory" },
   { path: "/admin/reports", title: "Reports" },
   { path: "/admin/backups", title: "Backups" },
-  { path: "/admin/audit-log", title: "Audit Log" },
   { path: "/admin/notifications", title: "Notifications" },
   { path: "/admin/permissions", title: "Permissions" },
   { path: "*", title: "Page Not Found" },
@@ -843,14 +841,6 @@ const App = () => (
                 element={
                   <AdminPermissionRoute permission="manageBackups">
                     <AdminBackupsPage />
-                  </AdminPermissionRoute>
-                }
-              />
-              <Route
-                path="/admin/audit-log"
-                element={
-                  <AdminPermissionRoute permission="exportReports">
-                    <AdminAuditLogPage />
                   </AdminPermissionRoute>
                 }
               />

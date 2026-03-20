@@ -218,6 +218,40 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     [courses, selectedCourseId],
   );
 
+  const findCourseIdByUnitId = (unitId: string): string => {
+    const normalizedUnitId = typeof unitId === 'string' ? unitId.trim() : '';
+    if (!normalizedUnitId) return '';
+    return units.find((unit) => unit.id === normalizedUnitId)?.courseId || '';
+  };
+
+  const findCourseIdByWeekId = (weekId: string): string => {
+    const normalizedWeekId = typeof weekId === 'string' ? weekId.trim() : '';
+    if (!normalizedWeekId) return '';
+
+    for (const unit of units) {
+      if ((unit.weeks || []).some((week) => week.id === normalizedWeekId)) {
+        return unit.courseId || '';
+      }
+    }
+
+    return '';
+  };
+
+  const findCourseIdBySlideId = (slideId: string): string => {
+    const normalizedSlideId = typeof slideId === 'string' ? slideId.trim() : '';
+    if (!normalizedSlideId) return '';
+
+    for (const unit of units) {
+      for (const week of unit.weeks || []) {
+        if ((week.slides || []).some((slide) => slide.id === normalizedSlideId)) {
+          return unit.courseId || '';
+        }
+      }
+    }
+
+    return '';
+  };
+
   const setSelectedCourseId = useCallback((courseId: string) => {
     const next = courseId || '';
     if (selectedCourseStorageKey) {
@@ -575,15 +609,46 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
   const refreshUnits = async (courseId?: string) => {
     setLoadingFlag('units', true);
     try {
-      let loadedUnits: Unit[] = [];
-      
       if (courseId) {
-        loadedUnits = await unitService.getByCourse(courseId);
-      } else {
-        loadedUnits = await unitService.getAll();
+        const loadedUnits = await unitService.getByCourse(courseId);
+        setUnits((currentUnits) => {
+          const nextUnits = [
+            ...currentUnits.filter((unit) => unit.courseId !== courseId),
+            ...loadedUnits,
+          ];
+          return nextUnits.sort((left, right) => (left.order || 0) - (right.order || 0));
+        });
+        return;
       }
-      
-      setUnits(loadedUnits);
+
+      const courseIds = Array.from(
+        new Set(
+          courses
+            .map((course) => String(course.id || '').trim())
+            .filter(Boolean),
+        ),
+      );
+
+      if (courseIds.length === 0) {
+        setUnits([]);
+        return;
+      }
+
+      const loadedUnits = await Promise.all(
+        courseIds.map(async (currentCourseId) => {
+          try {
+            return await unitService.getByCourse(currentCourseId);
+          } catch {
+            return [];
+          }
+        }),
+      );
+
+      setUnits(
+        loadedUnits
+          .flat()
+          .sort((left, right) => (left.order || 0) - (right.order || 0)),
+      );
     } catch (error) {
     } finally {
       setLoadingFlag('units', false);
@@ -606,7 +671,7 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Configurar listener en tiempo real para unidades
+  // Cargar unidades solo para los cursos visibles del usuario.
   useEffect(() => {
     if (!userId || courses.length === 0) {
       setUnits([]);
@@ -636,22 +701,9 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    loadUnitsForUserCourses();
-    
-    const unsubscribe = onSnapshot(
-      collection(firebaseDB, 'unidades'),
-      async () => {
-        await loadUnitsForUserCourses();
-      },
-      (error) => {
-        if (error.code === 'failed-precondition') {
-        }
-      }
-    );
+    void loadUnitsForUserCourses();
 
-    return () => {
-      unsubscribe();
-    };
+    return undefined;
   }, [courses, setLoadingFlag, userId]);
 
   useEffect(() => {
@@ -1017,9 +1069,16 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
 
   const updateUnit = async (unitId: string, updates: Partial<Omit<Unit, 'id' | 'createdAt'>>): Promise<void> => {
     try {
+      const targetCourseId =
+        (typeof updates.courseId === 'string' ? updates.courseId.trim() : '') ||
+        findCourseIdByUnitId(unitId);
       await unitService.update(unitId, updates);
       
       setTimeout(() => {
+        if (targetCourseId) {
+          refreshUnits(targetCourseId);
+          return;
+        }
         refreshUnits();
       }, 500);
     } catch (error) {
@@ -1029,9 +1088,14 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
 
   const deleteUnit = async (unitId: string): Promise<void> => {
     try {
+      const targetCourseId = findCourseIdByUnitId(unitId);
       await unitService.delete(unitId);
       
       setTimeout(() => {
+        if (targetCourseId) {
+          refreshUnits(targetCourseId);
+          return;
+        }
         refreshUnits();
       }, 500);
     } catch (error) {
@@ -1041,9 +1105,14 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
 
   const addWeek = async (weekData: Omit<Week, 'id' | 'slides' | 'createdAt'>): Promise<string> => {
     try {
+      const targetCourseId = findCourseIdByUnitId(weekData.unitId);
       const weekId = await weekService.create(weekData);
       
       setTimeout(() => {
+        if (targetCourseId) {
+          refreshUnits(targetCourseId);
+          return;
+        }
         refreshUnits();
       }, 500);
       
@@ -1055,9 +1124,14 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
 
   const addSlide = async (slideData: Omit<Slide, 'id' | 'createdAt'>): Promise<string> => {
     try {
+      const targetCourseId = findCourseIdByWeekId(slideData.weekId);
       const slideId = await slideService.create(slideData);
       
       setTimeout(() => {
+        if (targetCourseId) {
+          refreshUnits(targetCourseId);
+          return;
+        }
         refreshUnits();
       }, 500);
       
@@ -1069,9 +1143,14 @@ export function AcademicProvider({ children }: { children: ReactNode }) {
 
   const deleteSlide = async (slideId: string): Promise<void> => {
     try {
+      const targetCourseId = findCourseIdBySlideId(slideId);
       await slideService.delete(slideId);
       
       setTimeout(() => {
+        if (targetCourseId) {
+          refreshUnits(targetCourseId);
+          return;
+        }
         refreshUnits();
       }, 500);
     } catch (error) {

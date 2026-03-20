@@ -245,18 +245,31 @@ export const notificationService = {
       expiresAt,
     };
 
-    const chunkSize = 400;
+    let deliveredCount = 0;
+    let firstError: unknown = null;
+    const chunkSize = 25;
     for (let index = 0; index < recipientIds.length; index += chunkSize) {
-      const batch = writeBatch(firebaseDB);
       const chunk = recipientIds.slice(index, index + chunkSize);
-      chunk.forEach((recipientId) => {
-        const notificationRef = doc(notificationsCollection(recipientId));
-        batch.set(notificationRef, payload);
+      const results = await Promise.allSettled(
+        chunk.map((recipientId) => addDoc(notificationsCollection(recipientId), payload)),
+      );
+
+      results.forEach((result) => {
+        if (result.status === "fulfilled") {
+          deliveredCount += 1;
+          return;
+        }
+        if (!firstError) {
+          firstError = result.reason;
+        }
       });
-      await batch.commit();
     }
 
-    return recipientIds.length;
+    if (deliveredCount === 0 && firstError) {
+      throw firstError;
+    }
+
+    return deliveredCount;
   },
 
   async ensureWelcomeNotification(userId: string) {

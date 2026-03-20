@@ -17,11 +17,6 @@ import { toast } from "sonner";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  getAdminAuditLogEntries,
-  appendAdminAuditLog,
-  type AdminAuditLogEntry,
-} from "@/lib/services/adminAuditLogService";
-import {
   getAdminDirectoryDataset,
   type AdminDirectoryUserRecord,
 } from "@/lib/services/adminDirectoryService";
@@ -83,10 +78,17 @@ const isPlanExpiringSoon = (teacher: AdminDirectoryUserRecord): boolean => {
 };
 
 const teacherCandidates = (users: AdminDirectoryUserRecord[]) =>
-  users.filter((entry) => entry.role === "docente" || entry.requestedRole === "docente");
+  users.filter(
+    (entry) =>
+      entry.hasStoredAccount &&
+      (entry.role === "docente" || entry.requestedRole === "docente"),
+  );
 
 const studentCandidates = (users: AdminDirectoryUserRecord[]) =>
-  users.filter((entry) => entry.role === "estudiante");
+  users.filter((entry) => entry.hasStoredAccount && entry.role === "estudiante");
+
+const adminCandidates = (users: AdminDirectoryUserRecord[]) =>
+  users.filter((entry) => entry.hasStoredAccount && entry.role === "admin");
 
 const notificationTemplates: NotificationTemplate[] = [
   {
@@ -126,6 +128,24 @@ const notificationTemplates: NotificationTemplate[] = [
     toneClassName: "border-sky-200 bg-sky-50 text-sky-700",
   },
   {
+    key: "teacher-approval-pending",
+    label: "Teacher approval pending",
+    audience: "teachers",
+    type: "info",
+    description: "Teachers still waiting for approval review.",
+    eligibleUsers: (users) =>
+      teacherCandidates(users).filter((entry) => entry.teacherApprovalStatus === "pending"),
+    build: ({ user }) => ({
+      title: user ? `Approval review pending for ${user.name}` : "Approval review pending",
+      message: user
+        ? `${user.name}, your teacher access request is still under review. Keep your profile details up to date and monitor your workspace for the next admin update.`
+        : "Your teacher access request is still under review. Keep your profile details up to date and monitor your workspace for the next admin update.",
+      link: "/teacher-approval-waiting",
+    }),
+    icon: BellRing,
+    toneClassName: "border-sky-200 bg-sky-50 text-sky-700",
+  },
+  {
     key: "plan-expiring-soon",
     label: "Plan expiring soon",
     audience: "teachers",
@@ -146,6 +166,42 @@ const notificationTemplates: NotificationTemplate[] = [
     toneClassName: "border-rose-200 bg-rose-50 text-rose-700",
   },
   {
+    key: "teacher-no-active-courses",
+    label: "Teacher without active courses",
+    audience: "teachers",
+    type: "warning",
+    description: "Teachers with no active courses at the moment.",
+    eligibleUsers: (users) =>
+      teacherCandidates(users).filter((entry) => entry.activeCoursesCount === 0),
+    build: ({ user }) => ({
+      title: user ? `Course activity reminder for ${user.name}` : "Course activity reminder",
+      message: user
+        ? `${user.name}, your workspace currently has no active courses linked to your teacher account. Review your course setup or contact admin support if this should already be active.`
+        : "Your workspace currently has no active courses linked to your teacher account. Review your course setup or contact admin support if this should already be active.",
+      link: "/teacher/courses",
+    }),
+    icon: GraduationCap,
+    toneClassName: "border-amber-200 bg-amber-50 text-amber-700",
+  },
+  {
+    key: "teacher-profile-required",
+    label: "Teacher profile required",
+    audience: "teachers",
+    type: "warning",
+    description: "Teachers missing institution or profile setup details.",
+    eligibleUsers: (users) =>
+      teacherCandidates(users).filter((entry) => entry.institutionMissing),
+    build: ({ user }) => ({
+      title: user ? `Profile update required for ${user.name}` : "Profile update required",
+      message: user
+        ? `${user.name}, your teacher profile is still missing institution details. Update your profile information so your account can be managed correctly by the admin team.`
+        : "Your teacher profile is still missing institution details. Update your profile information so your account can be managed correctly by the admin team.",
+      link: "/profile",
+    }),
+    icon: Sparkles,
+    toneClassName: "border-cyan-200 bg-cyan-50 text-cyan-700",
+  },
+  {
     key: "mandatory-action-required",
     label: "Mandatory action required",
     audience: "all",
@@ -154,9 +210,12 @@ const notificationTemplates: NotificationTemplate[] = [
     eligibleUsers: (users) =>
       users.filter(
         (entry) =>
-          entry.institutionMissing ||
-          entry.teacherPlanStatus === "pending_payment" ||
-          (entry.role === "estudiante" && entry.enrolledCoursesCount === 0),
+          entry.hasStoredAccount &&
+          (
+            entry.institutionMissing ||
+            entry.teacherPlanStatus === "pending_payment" ||
+            (entry.role === "estudiante" && entry.enrolledCoursesCount === 0)
+          ),
       ),
     build: ({ user }) => ({
       title: user ? `Mandatory action required for ${user.name}` : "Mandatory action required",
@@ -187,6 +246,41 @@ const notificationTemplates: NotificationTemplate[] = [
     toneClassName: "border-indigo-200 bg-indigo-50 text-indigo-700",
   },
   {
+    key: "student-course-activation",
+    label: "Student course activation",
+    audience: "students",
+    type: "success",
+    description: "Students who already have active course enrollment.",
+    eligibleUsers: (users) =>
+      studentCandidates(users).filter((entry) => entry.enrolledCoursesCount > 0),
+    build: ({ user }) => ({
+      title: user ? `Courses ready for ${user.name}` : "Your courses are ready",
+      message: user
+        ? `${user.name}, your academic access is active and your enrolled courses are available in the student workspace. Open your dashboard to continue with your pending work.`
+        : "Your academic access is active and your enrolled courses are available in the student workspace. Open your dashboard to continue with your pending work.",
+      link: "/student",
+    }),
+    icon: CheckCircle2,
+    toneClassName: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  },
+  {
+    key: "student-engagement-reminder",
+    label: "Student engagement reminder",
+    audience: "students",
+    type: "info",
+    description: "Broad reminder for all students with stored accounts.",
+    eligibleUsers: (users) => studentCandidates(users),
+    build: ({ user }) => ({
+      title: user ? `Academic reminder for ${user.name}` : "Academic reminder",
+      message: user
+        ? `${user.name}, review your notifications, activities and course updates today so you stay on track with your academic schedule.`
+        : "Review your notifications, activities and course updates today so you stay on track with your academic schedule.",
+      link: "/student",
+    }),
+    icon: MessageSquare,
+    toneClassName: "border-sky-200 bg-sky-50 text-sky-700",
+  },
+  {
     key: "institution-data-required",
     label: "Institution data required",
     audience: "students",
@@ -204,23 +298,69 @@ const notificationTemplates: NotificationTemplate[] = [
     icon: Sparkles,
     toneClassName: "border-cyan-200 bg-cyan-50 text-cyan-700",
   },
+  {
+    key: "admin-operations-brief",
+    label: "Admin operations brief",
+    audience: "admins",
+    type: "info",
+    description: "Internal admin notice for governance or follow-up tasks.",
+    eligibleUsers: (users) => adminCandidates(users),
+    build: ({ user }) => ({
+      title: user ? `Admin update for ${user.name}` : "Admin operations update",
+      message: user
+        ? `${user.name}, a new internal admin follow-up item is ready for review. Open the admin workspace to verify operational priorities and pending actions.`
+        : "A new internal admin follow-up item is ready for review. Open the admin workspace to verify operational priorities and pending actions.",
+      link: "/admin",
+    }),
+    icon: ShieldCheck,
+    toneClassName: "border-violet-200 bg-violet-50 text-violet-700",
+  },
 ];
-
-const formatDateTime = (value: Date | null): string => {
-  if (!value) return "Not available";
-  return value.toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
 
 const getTypeBadgeClassName = (type: NotificationType): string => {
   if (type === "success") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (type === "warning") return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-sky-200 bg-sky-50 text-sky-700";
+};
+
+const getTypeIcon = (type: NotificationType) => {
+  if (type === "success") return CheckCircle2;
+  if (type === "warning") return AlertTriangle;
+  return BellRing;
+};
+
+const getPreviewTheme = (type: NotificationType) => {
+  if (type === "success") {
+    return {
+      surface: "bg-emerald-50/70",
+      accentBg: "bg-emerald-100",
+      accentText: "text-emerald-700",
+      badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      chip: "bg-emerald-50 text-emerald-700",
+      mutedPanel: "bg-emerald-50/60",
+      softBorder: "border-emerald-200/70",
+    };
+  }
+  if (type === "warning") {
+    return {
+      surface: "bg-amber-50/80",
+      accentBg: "bg-amber-100",
+      accentText: "text-amber-700",
+      badge: "border-amber-200 bg-amber-50 text-amber-700",
+      chip: "bg-amber-50 text-amber-700",
+      mutedPanel: "bg-amber-50/60",
+      softBorder: "border-amber-200/70",
+    };
+  }
+  return {
+    surface: "bg-sky-50/70",
+    accentBg: "bg-sky-100",
+    accentText: "text-sky-700",
+    badge: "border-sky-200 bg-sky-50 text-sky-700",
+    chip: "bg-sky-50 text-sky-700",
+    mutedPanel: "bg-slate-50",
+    softBorder: "border-sky-200/60",
+  };
 };
 
 const getAudienceLabel = (value: BroadcastAudience): string => {
@@ -235,21 +375,28 @@ const buildRecipientIds = (
   audience: BroadcastAudience,
 ): string[] => {
   if (audience === "teachers") {
-    return users.filter((entry) => entry.role === "docente").map((entry) => entry.userId);
+    return users
+      .filter((entry) => entry.hasStoredAccount && entry.role === "docente")
+      .map((entry) => entry.userId);
   }
   if (audience === "students") {
-    return users.filter((entry) => entry.role === "estudiante").map((entry) => entry.userId);
+    return users
+      .filter((entry) => entry.hasStoredAccount && entry.role === "estudiante")
+      .map((entry) => entry.userId);
   }
   if (audience === "admins") {
-    return users.filter((entry) => entry.role === "admin").map((entry) => entry.userId);
+    return users
+      .filter((entry) => entry.hasStoredAccount && entry.role === "admin")
+      .map((entry) => entry.userId);
   }
-  return users.map((entry) => entry.userId);
+  return users
+    .filter((entry) => entry.hasStoredAccount)
+    .map((entry) => entry.userId);
 };
 
 export default function AdminNotificationsPage() {
   const { user } = useAuth();
   const [users, setUsers] = useState<AdminDirectoryUserRecord[]>([]);
-  const [recentBroadcasts, setRecentBroadcasts] = useState<AdminAuditLogEntry[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -263,10 +410,7 @@ export default function AdminNotificationsPage() {
 
   const loadData = async () => {
     setLoading(true);
-    const [directoryResult, auditResult] = await Promise.allSettled([
-      getAdminDirectoryDataset(),
-      getAdminAuditLogEntries(200),
-    ]);
+    const [directoryResult] = await Promise.allSettled([getAdminDirectoryDataset()]);
 
     if (directoryResult.status === "fulfilled") {
       setUsers(directoryResult.value.users);
@@ -274,21 +418,6 @@ export default function AdminNotificationsPage() {
     } else {
       setUsers([]);
       setWarnings(["Could not load notification audience data."]);
-    }
-
-    if (auditResult.status === "fulfilled") {
-      setRecentBroadcasts(
-        auditResult.value
-          .filter((entry) => entry.category === "notification")
-          .slice(0, 12),
-      );
-    } else {
-      setRecentBroadcasts([]);
-      setWarnings((current) =>
-        current.includes("Could not load broadcast history.")
-          ? current
-          : [...current, "Could not load broadcast history."],
-      );
     }
 
     setLoading(false);
@@ -300,10 +429,10 @@ export default function AdminNotificationsPage() {
 
   const counts = useMemo(
     () => ({
-      all: users.length,
-      teachers: users.filter((entry) => entry.role === "docente").length,
-      students: users.filter((entry) => entry.role === "estudiante").length,
-      admins: users.filter((entry) => entry.role === "admin").length,
+      all: users.filter((entry) => entry.hasStoredAccount).length,
+      teachers: users.filter((entry) => entry.hasStoredAccount && entry.role === "docente").length,
+      students: users.filter((entry) => entry.hasStoredAccount && entry.role === "estudiante").length,
+      admins: users.filter((entry) => entry.hasStoredAccount && entry.role === "admin").length,
     }),
     [users],
   );
@@ -335,6 +464,32 @@ export default function AdminNotificationsPage() {
     }
     return recipientIds;
   }, [eligibleUsers, recipientIds, selectedTemplate, selectedUser]);
+
+  const effectiveRecipients = useMemo(
+    () =>
+      users.filter(
+        (entry) => entry.hasStoredAccount && effectiveRecipientIds.includes(entry.userId),
+      ),
+    [effectiveRecipientIds, users],
+  );
+
+  const previewRecipients = useMemo(() => effectiveRecipients.slice(0, 5), [effectiveRecipients]);
+  const PreviewTypeIcon = getTypeIcon(type);
+  const previewTheme = getPreviewTheme(type);
+  const draftTitle = title.trim() || "Your notification title";
+  const draftMessage =
+    message.trim() ||
+    "Write a clear, direct message so recipients understand what changed and what action they should take next.";
+  const draftLink = link.trim();
+  const previewTimestamp = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const audienceLabel = selectedTemplate
+    ? selectedUser
+      ? `${selectedUser.name}`
+      : `${getAudienceLabel(selectedTemplate.audience)} with matching conditions`
+    : getAudienceLabel(audience);
 
   const applyTemplate = (
     template: NotificationTemplate,
@@ -384,15 +539,9 @@ export default function AdminNotificationsPage() {
         link: link.trim() || undefined,
       });
 
-      await appendAdminAuditLog({
-        actorEmail: user?.email || "admin",
-        actorName: user?.name || "Admin",
-        action: "Sent broadcast notification",
-        category: "notification",
-        targetType: "broadcast",
-        targetLabel: title.trim(),
-        detail: `${selectedTemplate?.label || getAudienceLabel(audience)} • ${deliveredCount} recipients • ${type}${link.trim() ? ` • ${link.trim()}` : ""}`,
-      }).catch(() => undefined);
+      if (deliveredCount === 0) {
+        throw new Error("Could not deliver the notification to any valid recipient.");
+      }
 
       setTitle("");
       setMessage("");
@@ -401,7 +550,11 @@ export default function AdminNotificationsPage() {
       setAudience("all");
       setSelectedTemplateKey("");
       setSelectedUserId("");
-      toast.success(`Notification delivered to ${deliveredCount} recipients.`);
+      toast.success(
+        deliveredCount === effectiveRecipientIds.length
+          ? `Notification delivered to ${deliveredCount} recipients.`
+          : `Notification delivered to ${deliveredCount} of ${effectiveRecipientIds.length} recipients.`,
+      );
       await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not send notifications.");
@@ -418,9 +571,9 @@ export default function AdminNotificationsPage() {
 
         <div className="relative border border-slate-200/60 bg-white p-4 shadow-[0_12px_35px_-24px_rgba(15,23,42,0.45)] lg:p-6">
           <section className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4 shadow-sm">
-              <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-sky-200/35" />
-              <div className="pointer-events-none absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-indigo-200/35" />
+            <section className="relative overflow-hidden rounded-2xl border border-slate-200/60 bg-slate-50/70 p-4 shadow-sm">
+              <div className="pointer-events-none absolute -left-16 -top-20 h-40 w-40 rounded-full bg-sky-200/20" />
+              <div className="pointer-events-none absolute -bottom-24 -right-20 h-48 w-48 rounded-full bg-indigo-200/20" />
 
               <div className="relative space-y-4">
                 <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-sky-700">
@@ -475,122 +628,227 @@ export default function AdminNotificationsPage() {
                 </div>
               </div>
             </section>
-
-            <section className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm xl:col-span-1">
+ 
+            <section className="grid grid-cols-1 gap-5 2xl:grid-cols-[minmax(460px,560px)_minmax(0,1fr)]">
+              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
                 <div className="mb-3">
                   <p className="text-sm font-semibold text-slate-900">Broadcast Composer</p>
                   <p className="text-xs text-slate-500">Deliver a notification directly to the in-app bell and notification center.</p>
                 </div>
 
-                <div className="space-y-3">
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      Quick templates
-                    </p>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                      {notificationTemplates.map((template) => {
-                        const TemplateIcon = template.icon;
-                        return (
-                          <button
-                            key={template.key}
-                            type="button"
-                            onClick={() => applyTemplate(template)}
-                            className="rounded-xl border border-slate-200/60 bg-slate-50 p-3 text-left transition hover:border-slate-300/60 hover:bg-white"
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-slate-200/60 bg-slate-50/80 p-3">
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Template source
+                          </p>
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                            {selectedTemplate ? "Guided" : "Manual"}
+                          </span>
+                        </div>
+                        <div className="max-w-xl">
+                          <select
+                            value={selectedTemplateKey}
+                            onChange={(event) => {
+                              const nextKey = event.target.value;
+                              if (!nextKey) {
+                                setSelectedTemplateKey("");
+                                setSelectedUserId("");
+                                return;
+                              }
+                              const nextTemplate =
+                                notificationTemplates.find((entry) => entry.key === nextKey) || null;
+                              if (!nextTemplate) return;
+                              applyTemplate(nextTemplate, null);
+                            }}
+                            className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
                           >
-                            <div className="flex items-start gap-2">
-                              <div
-                                className={`inline-flex h-8 w-8 items-center justify-center rounded-full border ${template.toneClassName}`}
-                              >
-                                <TemplateIcon className="h-4 w-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-sm font-semibold text-slate-900">{template.label}</p>
-                                <p className="mt-0.5 text-xs text-slate-500">
-                                  {getAudienceLabel(template.audience)} • {template.type}
-                                </p>
-                                <p className="mt-1 text-xs text-slate-500">{template.description}</p>
-                              </div>
+                            <option value="">Custom message</option>
+                            {notificationTemplates.map((template) => (
+                              <option key={template.key} value={template.key}>
+                                {template.label} • {getAudienceLabel(template.audience)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200/60 bg-white p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Template reach
+                        </p>
+                        <p className="mt-2 text-2xl font-extrabold leading-none text-slate-900">
+                          {selectedTemplate ? eligibleUsers.length : effectiveRecipientIds.length}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {selectedTemplate ? "eligible users" : "recipients in current scope"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 rounded-xl border border-slate-200/60 bg-white p-3">
+                      {selectedTemplate ? (
+                        <div className="flex items-start gap-3">
+                          <div
+                            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${selectedTemplate.toneClassName}`}
+                          >
+                            <selectedTemplate.icon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-semibold text-slate-900">{selectedTemplate.label}</p>
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                                {getAudienceLabel(selectedTemplate.audience)}
+                              </span>
+                              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${getTypeBadgeClassName(selectedTemplate.type)}`}>
+                                {selectedTemplate.type}
+                              </span>
                             </div>
-                          </button>
-                        );
-                      })}
+                            <p className="mt-1 text-xs leading-5 text-slate-600">
+                              {selectedTemplate.description}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">Custom broadcast</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-600">
+                              Use your own title, message, audience and route when the announcement needs a fully custom delivery.
+                            </p>
+                          </div>
+                          <div className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
+                            Freeform
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,280px)_minmax(0,220px)]">
+                    <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Audience
+                      </p>
+                      <select
+                        value={audience}
+                        onChange={(event) => setAudience(event.target.value as BroadcastAudience)}
+                        className="mt-2 w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                      >
+                        <option value="all">All users ({counts.all})</option>
+                        <option value="teachers">Teachers ({counts.teachers})</option>
+                        <option value="students">Students ({counts.students})</option>
+                        <option value="admins">Admins ({counts.admins})</option>
+                      </select>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Type
+                      </p>
+                      <select
+                        value={type}
+                        onChange={(event) => setType(event.target.value as NotificationType)}
+                        className="mt-2 w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                      >
+                        <option value="info">Info</option>
+                        <option value="success">Success</option>
+                        <option value="warning">Warning</option>
+                      </select>
                     </div>
                   </div>
 
                   {selectedTemplate ? (
-                    <select
-                      value={selectedUserId}
-                      onChange={(event) => setSelectedUserId(event.target.value)}
-                      className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
-                    >
-                      <option value="">
-                        All eligible users ({eligibleUsers.length})
-                      </option>
-                      {eligibleUsers.map((entry) => (
-                        <option key={entry.userId} value={entry.userId}>
-                          {entry.name} • {entry.role} • {entry.teacherPlanLabel || "No plan"}
+                    <div className="max-w-xl rounded-xl border border-slate-200/60 bg-slate-50 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Delivery scope
+                      </p>
+                      <select
+                        value={selectedUserId}
+                        onChange={(event) => setSelectedUserId(event.target.value)}
+                        className="mt-2 w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                      >
+                        <option value="">
+                          All eligible users ({eligibleUsers.length})
                         </option>
-                      ))}
-                    </select>
+                        {eligibleUsers.map((entry) => (
+                          <option key={entry.userId} value={entry.userId}>
+                            {entry.name} • {entry.role} • {entry.teacherPlanLabel || "No plan"}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   ) : null}
 
-                  <select
-                    value={audience}
-                    onChange={(event) => setAudience(event.target.value as BroadcastAudience)}
-                    className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
-                  >
-                    <option value="all">All users ({counts.all})</option>
-                    <option value="teachers">Teachers ({counts.teachers})</option>
-                    <option value="students">Students ({counts.students})</option>
-                    <option value="admins">Admins ({counts.admins})</option>
-                  </select>
+                  <div className="grid grid-cols-1 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_260px]">
+                    <div className="space-y-3">
+                      <div className="max-w-xl space-y-1.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Title
+                        </p>
+                        <input
+                          type="text"
+                          value={title}
+                          onChange={(event) => setTitle(event.target.value)}
+                          placeholder="Notification title"
+                          className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                        />
+                      </div>
 
-                  <select
-                    value={type}
-                    onChange={(event) => setType(event.target.value as NotificationType)}
-                    className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
-                  >
-                    <option value="info">Info</option>
-                    <option value="success">Success</option>
-                    <option value="warning">Warning</option>
-                  </select>
+                      <div className="space-y-1.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Message body
+                        </p>
+                        <textarea
+                          rows={7}
+                          value={message}
+                          onChange={(event) => setMessage(event.target.value)}
+                          placeholder="Write the message recipients will see in their notification center."
+                          className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                        />
+                      </div>
+                    </div>
 
-                  <input
-                    type="text"
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
-                    placeholder="Notification title"
-                    className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
-                  />
+                    <div className="max-w-full rounded-2xl border border-slate-200/60 bg-slate-50 p-3 xl:h-full xl:justify-self-end">
+                      <div className="flex h-full flex-col gap-3">
+                        <div className="flex flex-1 flex-col rounded-xl border border-slate-200/60 bg-white p-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Destination route
+                          </p>
+                          <div className="mt-3 flex flex-1">
+                            <input
+                              type="text"
+                              value={link}
+                              onChange={(event) => setLink(event.target.value)}
+                              placeholder="Optional link, e.g. /admin/dashboard"
+                              className="h-full min-h-[88px] w-full rounded-xl border border-slate-200/60 bg-slate-50 px-3 py-3 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                            />
+                          </div>
+                        </div>
 
-                  <textarea
-                    rows={5}
-                    value={message}
-                    onChange={(event) => setMessage(event.target.value)}
-                    placeholder="Message..."
-                    className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
-                  />
-
-                  <input
-                    type="text"
-                    value={link}
-                    onChange={(event) => setLink(event.target.value)}
-                    placeholder="Optional link, e.g. /admin/dashboard"
-                    className="w-full rounded-xl border border-slate-200/60 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100"
-                  />
-
-                  <div className="rounded-xl border border-slate-200/60 bg-slate-50 p-3 text-xs text-slate-600">
-                    This message will appear in the notification bell and the personal notifications view of the selected audience.
-                    {selectedTemplate ? ` Eligible now: ${eligibleUsers.length}.` : ""}
-                    {selectedUser ? ` Current target: ${selectedUser.name}.` : ""}
+                        <div className="flex flex-1">
+                          <div className="flex w-full flex-1 flex-col rounded-xl border border-slate-200/60 bg-white p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                              Delivery notes
+                            </p>
+                            <p className="mt-2 text-xs leading-5 text-slate-600">
+                              This message will appear in the notification bell and the personal notifications view of the selected audience.
+                              {selectedTemplate ? ` Eligible now: ${eligibleUsers.length}.` : ""}
+                              {selectedUser ? ` Current target: ${selectedUser.name}.` : ""}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   <button
                     type="button"
                     disabled={sending}
                     onClick={() => void handleSend()}
-                    className="w-full rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex w-fit rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <span className="inline-flex items-center gap-1.5">
                       <Send className="h-3.5 w-3.5" />
@@ -600,52 +858,203 @@ export default function AdminNotificationsPage() {
                 </div>
               </article>
 
-              <article className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm xl:col-span-2">
-                <div className="mb-3">
-                  <p className="text-sm font-semibold text-slate-900">Broadcast History</p>
-                  <p className="text-xs text-slate-500">Recent notification pushes recorded in the audit log.</p>
-                </div>
+              <div className="space-y-4">
+                <section className={`rounded-2xl border border-slate-200/60 ${previewTheme.surface} p-4 shadow-sm sm:p-5`}>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Notification Preview</p>
+                      <p className="text-xs text-slate-500">
+                        Same visual language as the teacher workspace, adapted for delivery review.
+                      </p>
+                    </div>
+                    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${previewTheme.badge}`}>
+                      {type}
+                    </span>
+                  </div>
 
-                {loading ? (
-                  <div className="flex min-h-[240px] items-center justify-center">
-                    <Loader2 className="h-8 w-8 animate-spin text-sky-600" />
-                  </div>
-                ) : warnings.length > 0 && recentBroadcasts.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
-                    <AlertTriangle className="mx-auto h-9 w-9 text-slate-400" />
-                    <p className="mt-2 text-sm font-medium text-slate-700">{warnings[0]}</p>
-                  </div>
-                ) : recentBroadcasts.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-6 text-center">
-                    <BellRing className="mx-auto h-9 w-9 text-slate-400" />
-                    <p className="mt-2 text-sm font-medium text-slate-700">No broadcasts yet</p>
-                    <p className="text-xs text-slate-500">Send your first notification to start the log.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {recentBroadcasts.map((entry) => (
-                      <article key={entry.id} className="rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-semibold text-slate-900">{entry.targetLabel || "Broadcast notification"}</p>
-                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getTypeBadgeClassName(
-                            entry.detail.toLowerCase().includes("warning")
-                              ? "warning"
-                              : entry.detail.toLowerCase().includes("success")
-                                ? "success"
-                                : "info",
-                          )}`}>
-                            notification
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(260px,300px)]">
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className={`flex h-8 w-8 items-center justify-center rounded-xl ${previewTheme.accentBg}`}>
+                              <BellRing className={`h-4 w-4 ${previewTheme.accentText}`} />
+                            </div>
+                            <div>
+                              <h2 className="text-base font-bold text-slate-900">Notification Center</h2>
+                              <p className="text-xs text-slate-500">Recipient-facing preview</p>
+                            </div>
+                          </div>
+                          <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                            {effectiveRecipientIds.length} users
                           </span>
                         </div>
-                        <p className="mt-1 text-xs text-slate-600">{entry.detail || "Broadcast delivered."}</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {entry.actorName} • {formatDateTime(entry.createdAt)}
-                        </p>
-                      </article>
-                    ))}
+
+                        <div className={`rounded-xl border ${previewTheme.softBorder} ${previewTheme.mutedPanel} p-3`}>
+                          <div className="mb-3 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                            <span>Now</span>
+                            <span>{previewTimestamp}</span>
+                          </div>
+
+                          <div className="flex items-start gap-3 rounded-xl border border-slate-200/60 bg-white px-3 py-3 transition-colors">
+                            <div className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border ${previewTheme.badge}`}>
+                              <PreviewTypeIcon className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold text-slate-900">{draftTitle}</p>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${previewTheme.chip}`}>
+                                  {type}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-slate-600">
+                                {audienceLabel} • delivered in-app
+                              </p>
+                              <p className="mt-2 text-sm leading-6 text-slate-600">{draftMessage}</p>
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                                  {audienceLabel}
+                                </span>
+                                {draftLink ? (
+                                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${previewTheme.chip}`}>
+                                    {draftLink}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className={`flex h-8 w-8 items-center justify-center rounded-xl ${previewTheme.accentBg}`}>
+                              <Send className={`h-4 w-4 ${previewTheme.accentText}`} />
+                            </div>
+                            <div>
+                              <h2 className="text-base font-bold text-slate-900">Delivery Summary</h2>
+                              <p className="text-xs text-slate-500">Audience, template and reach</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-wide text-slate-500">Audience</p>
+                            <p className="mt-1 text-xs font-semibold leading-5 text-slate-900">{audienceLabel}</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-wide text-slate-500">Reach now</p>
+                            <p className="mt-1 text-xs font-semibold leading-5 text-slate-900">{effectiveRecipientIds.length}</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-wide text-slate-500">Template</p>
+                            <p className="mt-1 text-xs font-semibold leading-5 text-slate-900">
+                              {selectedTemplate?.label || "Custom"}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200/60 bg-slate-50 px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-wide text-slate-500">Link mode</p>
+                            <p className="mt-1 text-xs font-semibold leading-5 text-slate-900">
+                              {draftLink ? "Deep link" : "Bell only"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex h-full flex-col xl:justify-stretch">
+                      <div className="flex h-full flex-col rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm xl:min-h-full">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className={`flex h-8 w-8 items-center justify-center rounded-xl ${previewTheme.accentBg}`}>
+                              <Users className={`h-4 w-4 ${previewTheme.accentText}`} />
+                            </div>
+                            <div>
+                              <h2 className="text-base font-bold text-slate-900">Recipient Sample</h2>
+                              <p className="text-xs text-slate-500">Who is currently included</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-1 flex-col">
+                          {loading ? (
+                            <div className="flex flex-1 items-center justify-center rounded-xl border border-slate-200/60 bg-slate-50 py-6">
+                              <Loader2 className="h-5 w-5 animate-spin text-sky-600" />
+                            </div>
+                          ) : previewRecipients.length > 0 ? (
+                            <div className="flex flex-1 flex-col space-y-2">
+                              {previewRecipients.map((entry) => (
+                                <div
+                                  key={entry.userId}
+                                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-200/60 bg-slate-50/60 px-3 py-2.5 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-semibold text-slate-900">{entry.name}</p>
+                                    <p className="mt-1 text-xs text-slate-600">{entry.email || "No email"}</p>
+                                  </div>
+                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${previewTheme.badge}`}>
+                                    {entry.role}
+                                  </span>
+                                </div>
+                              ))}
+                              <div className="mt-auto pt-1">
+                                {effectiveRecipients.length > previewRecipients.length ? (
+                                  <p className="text-xs text-slate-500">
+                                    +{effectiveRecipients.length - previewRecipients.length} more recipients in this delivery.
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-4 text-center">
+                              <div>
+                                <p className="text-sm font-medium text-slate-700">No recipients available</p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  No valid recipients match the current filters yet.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                )}
-              </article>
+                </section>
+
+                <div className="max-w-md">
+                  <article className="self-start rounded-2xl border border-slate-200/60 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">Data Warnings</p>
+                        <p className="text-xs text-slate-500">Audience issues detected while loading admin data.</p>
+                      </div>
+                      <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                        <AlertTriangle className="h-4 w-4" />
+                      </div>
+                    </div>
+
+                    {warnings.length > 0 ? (
+                      <div className="mt-4 space-y-2">
+                        {warnings.map((warning) => (
+                          <div
+                            key={warning}
+                            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                          >
+                            {warning}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                        Audience data loaded cleanly. No warnings detected for this broadcast.
+                      </div>
+                    )}
+                  </article>
+                </div>
+              </div>
+
             </section>
           </section>
         </div>

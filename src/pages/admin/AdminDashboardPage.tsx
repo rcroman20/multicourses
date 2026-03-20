@@ -275,14 +275,6 @@ const adminModules: AdminModuleCard[] = [
     iconTone: "bg-violet-100 text-violet-700",
   },
   {
-    key: "auditLog",
-    title: "Audit Log",
-    description: "Administrative traceability",
-    href: "/admin/audit-log",
-    icon: FileText,
-    iconTone: "bg-slate-100 text-slate-700",
-  },
-  {
     key: "backups",
     title: "Backups",
     description: "Snapshot monitoring",
@@ -311,6 +303,7 @@ export default function AdminDashboardPage() {
   const [newInboxCount, setNewInboxCount] = useState<number | null>(null);
   const [pendingDeletionQueueCount, setPendingDeletionQueueCount] = useState<number | null>(null);
   const [directoryUsersCount, setDirectoryUsersCount] = useState<number | null>(null);
+  const [directoryTeachersCount, setDirectoryTeachersCount] = useState<number | null>(null);
   const [missingInstitutionUsersCount, setMissingInstitutionUsersCount] = useState<number | null>(null);
   const [paymentPendingUsersCount, setPaymentPendingUsersCount] = useState<number | null>(null);
   const [onboardingWarnings, setOnboardingWarnings] = useState<string[]>([]);
@@ -372,6 +365,9 @@ export default function AdminDashboardPage() {
         if (!isMounted) return;
 
         setDirectoryUsersCount(dataset.users.length);
+        setDirectoryTeachersCount(
+          dataset.users.filter((entry) => entry.role === "docente").length,
+        );
         setMissingInstitutionUsersCount(
           dataset.users.filter((entry) => entry.institutionMissing).length,
         );
@@ -381,6 +377,7 @@ export default function AdminDashboardPage() {
       } catch {
         if (!isMounted) return;
         setDirectoryUsersCount(0);
+        setDirectoryTeachersCount(0);
         setMissingInstitutionUsersCount(0);
         setPaymentPendingUsersCount(0);
       }
@@ -633,6 +630,7 @@ export default function AdminDashboardPage() {
       ).size,
     [courses],
   );
+  const totalTeachers = directoryTeachersCount ?? totalTeachersInScope;
   const coursesWithoutTeacher = useMemo(
     () => courses.filter((course) => String(course.teacherId || "").trim().length === 0).length,
     [courses],
@@ -1112,9 +1110,6 @@ export default function AdminDashboardPage() {
       if (module.key === "reports") {
         return canAccessDelegatedAdminPermission("exportReports", user?.email);
       }
-      if (module.key === "auditLog") {
-        return canAccessDelegatedAdminPermission("exportReports", user?.email);
-      }
       if (module.key === "backups") {
         return canAccessDelegatedAdminPermission("manageBackups", user?.email);
       }
@@ -1242,7 +1237,7 @@ export default function AdminDashboardPage() {
                       <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
                         <GraduationCap className="h-4 w-4" />
                       </div>
-                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{totalTeachersInScope}</p>
+                      <p className="shrink-0 text-lg font-extrabold leading-5 text-slate-900">{totalTeachers}</p>
                     </div>
                     <p className="mt-1 text-[11px] font-semibold leading-4 text-slate-500">Teachers</p>
                   </div>

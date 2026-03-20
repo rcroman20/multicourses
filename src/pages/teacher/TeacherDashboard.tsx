@@ -38,7 +38,6 @@ import {
   getDoc,
   getDocs,
   limit,
-  onSnapshot,
   query,
   where,
   Timestamp,
@@ -580,7 +579,7 @@ const chunkValues = (values: string[], size = 10): string[][] => {
 
 export default function TeacherDashboard() {
   const { user, isAuthenticated } = useAuth();
-  const { selectedCourseId, setSelectedCourseId } = useAcademic();
+  const { courses: academicCourses, selectedCourseId, setSelectedCourseId } = useAcademic();
   const navigate = useNavigate();
 
   const [gradeSheets, setGradeSheets] = useState<GradeSheet[]>([]);
@@ -592,7 +591,6 @@ export default function TeacherDashboard() {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [courseWeeks, setCourseWeeks] = useState<CourseWeek[]>([]);
   const [courseFiles, setCourseFiles] = useState<CourseFile[]>([]);
-  const [courses, setCourses] = useState<Course[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBackupCenter, setShowBackupCenter] = useState(false);
@@ -617,6 +615,13 @@ export default function TeacherDashboard() {
   const [loadingMandatoryCourseQuizProgress, setLoadingMandatoryCourseQuizProgress] =
     useState(false);
   const backfilledCourseIdsRef = useRef<Set<string>>(new Set());
+  const courses = useMemo(
+    () =>
+      academicCourses.filter(
+        (course) => String(course.teacherId || "").trim() === String(user?.id || "").trim(),
+      ),
+    [academicCourses, user?.id],
+  );
   const selectedCourse = useMemo(
     () => courses.find((course) => course.id === selectedCourseId) || null,
     [courses, selectedCourseId],
@@ -955,7 +960,7 @@ export default function TeacherDashboard() {
         setLoading(true);
 
         try {
-          const loadedCourses = await fetchCourses();
+          const loadedCourses = courses;
           const assessmentsPromise = fetchAssessments(loadedCourses);
           const mandatoryProgressPromise = fetchMandatoryCourseQuizProgress();
 
@@ -993,34 +998,12 @@ export default function TeacherDashboard() {
 
     if (isAuthenticated && user?.role === "docente") {
       void loadAllData();
-
-      const teacherCoursesQuery = query(
-        collection(firebaseDB, "cursos"),
-        where("teacherId", "==", user.id),
-      );
-
-      const unsubscribe = onSnapshot(
-        teacherCoursesQuery,
-        () => {
-          if (!active) return;
-          void loadAllData();
-        },
-        () => {
-          if (!active) return;
-          setLoading(false);
-        },
-      );
-
-      return () => {
-        active = false;
-        unsubscribe();
-      };
     }
 
     return () => {
       active = false;
     };
-  }, [isAuthenticated, user]);
+  }, [courses, isAuthenticated, user?.id, user?.role]);
 
   useEffect(() => {
     if (courses.length === 0) {
@@ -1305,44 +1288,6 @@ export default function TeacherDashboard() {
     if (timestamp instanceof Timestamp) return timestamp.toDate();
     if (typeof timestamp === "string") return new Date(timestamp);
     return new Date();
-  };
-
-  const fetchCourses = async (): Promise<Course[]> => {
-    try {
-      const coursesRef = collection(firebaseDB, "cursos");
-      const q = query(coursesRef, where("teacherId", "==", user?.id));
-      const querySnapshot = await getDocs(q);
-
-      const coursesData: Course[] = [];
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        coursesData.push({
-          id: doc.id,
-          name: data.name || "",
-          code: data.code || "",
-          group: data.group || "",
-          enrolledStudents: data.enrolledStudents || [],
-          credits: data.credits || 0,
-          description: data.description || "",
-          teacherId: data.teacherId || "",
-          teacherName: data.teacherName || "",
-          semester: data.semester || "",
-          status: data.status || "active",
-          createdAt: data.createdAt || Timestamp.now(),
-          classSchedule: normalizeCourseClassSchedule(data.classSchedule),
-          classDays: normalizeTextField(data.classDays),
-          classTime: normalizeTextField(data.classTime),
-          scheduleText: normalizeTextField(data.scheduleText),
-          classRoom: normalizeTextField(data.classRoom),
-          location: normalizeTextField(data.location),
-        });
-      });
-
-      setCourses(coursesData);
-      return coursesData;
-    } catch {
-      return [];
-    }
   };
 
   const fetchGradeSheets = async (teacherCourses: Course[] = []) => {

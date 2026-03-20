@@ -30,7 +30,6 @@ import {
   FileBarChart2,
   KeyRound,
   ArchiveRestore,
-  FileSearch,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
@@ -251,12 +250,6 @@ export function Sidebar({
       roles: ['admin'],
     },
     {
-      label: 'Audit Log',
-      href: '/admin/audit-log',
-      icon: <FileSearch className="h-4 w-4" />,
-      roles: ['admin'],
-    },
-    {
       label: 'Backups',
       href: '/admin/backups',
       icon: <ArchiveRestore className="h-4 w-4" />,
@@ -409,9 +402,6 @@ export function Sidebar({
         return canAccessDelegatedAdminPermission("manageUsersDirectory", user.email);
       }
       if (item.label === 'Reports') {
-        return canAccessDelegatedAdminPermission("exportReports", user.email);
-      }
-      if (item.label === 'Audit Log') {
         return canAccessDelegatedAdminPermission("exportReports", user.email);
       }
       if (item.label === 'Backups') {

@@ -204,6 +204,16 @@ export const getInstitutionPlanDefinition = (
   return resolvedPlanId ? INSTITUTION_PLAN_DEFINITIONS[resolvedPlanId] : null;
 };
 
+export const getInstitutionPlanExpiryDate = (
+  planId?: InstitutionPlanId | null,
+  assignedAt: Date = new Date(),
+): Date => {
+  const definition = getInstitutionPlanDefinition(planId);
+  const expiresAt = new Date(assignedAt);
+  expiresAt.setMonth(expiresAt.getMonth() + (definition?.durationMonths || 12));
+  return expiresAt;
+};
+
 const toPositiveWholeNumber = (value: unknown): number => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;

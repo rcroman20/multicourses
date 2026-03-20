@@ -21,7 +21,8 @@ import type { Unit, Week, Slide } from '@/types/academic';
 const unitsCollection = collection(firebaseDB, 'unidades');
 const weeksCollection = collection(firebaseDB, 'semanas');
 const slidesCollection = collection(firebaseDB, 'diapositivas');
-const unitsCache = new Map<string, Unit[]>();
+const UNIT_CACHE_TTL_MS = 60 * 1000;
+const unitsCache = new Map<string, { units: Unit[]; expiresAt: number }>();
 
 // Helper function to convert Firestore data
 const convertTimestamp = (timestamp: any): Date => {
@@ -35,6 +36,77 @@ const convertTimestamp = (timestamp: any): Date => {
     return new Date(timestamp);
   }
   return new Date();
+};
+
+const cloneUnits = (units: Unit[]): Unit[] =>
+  units.map((unit) => ({
+    ...unit,
+    weeks: (unit.weeks || []).map((week) => ({
+      ...week,
+      slides: (week.slides || []).map((slide) => ({ ...slide })),
+    })),
+  }));
+
+const getCachedUnits = (courseId: string): Unit[] | null => {
+  const normalizedCourseId = typeof courseId === 'string' ? courseId.trim() : '';
+  if (!normalizedCourseId) return null;
+
+  const cached = unitsCache.get(normalizedCourseId);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    unitsCache.delete(normalizedCourseId);
+    return null;
+  }
+
+  return cloneUnits(cached.units);
+};
+
+const setCachedUnits = (courseId: string, units: Unit[]): void => {
+  const normalizedCourseId = typeof courseId === 'string' ? courseId.trim() : '';
+  if (!normalizedCourseId) return;
+
+  unitsCache.set(normalizedCourseId, {
+    units: cloneUnits(units),
+    expiresAt: Date.now() + UNIT_CACHE_TTL_MS,
+  });
+};
+
+const invalidateUnitsCache = (courseId?: string): void => {
+  const normalizedCourseId = typeof courseId === 'string' ? courseId.trim() : '';
+  if (!normalizedCourseId) {
+    unitsCache.clear();
+    return;
+  }
+
+  unitsCache.delete(normalizedCourseId);
+};
+
+const getUnitCourseId = async (unitId: string): Promise<string> => {
+  const normalizedUnitId = typeof unitId === 'string' ? unitId.trim() : '';
+  if (!normalizedUnitId) return '';
+
+  const unitSnap = await getDoc(doc(unitsCollection, normalizedUnitId));
+  if (!unitSnap.exists()) return '';
+
+  const data = unitSnap.data() as Record<string, unknown>;
+  return typeof data.courseId === 'string' ? data.courseId.trim() : '';
+};
+
+const getWeekCourseId = async (weekId: string): Promise<string> => {
+  const normalizedWeekId = typeof weekId === 'string' ? weekId.trim() : '';
+  if (!normalizedWeekId) return '';
+
+  const weekSnap = await getDoc(doc(weeksCollection, normalizedWeekId));
+  if (!weekSnap.exists()) return '';
+
+  const weekData = weekSnap.data() as Record<string, unknown>;
+  const directCourseId = typeof weekData.courseId === 'string' ? weekData.courseId.trim() : '';
+  if (directCourseId) return directCourseId;
+
+  const unitId = typeof weekData.unitId === 'string' ? weekData.unitId.trim() : '';
+  if (!unitId) return '';
+
+  return getUnitCourseId(unitId);
 };
 
 const loadUnitFromDoc = async (unitDoc: any): Promise<Unit> => {
@@ -87,7 +159,13 @@ const loadUnitFromDoc = async (unitDoc: any): Promise<Unit> => {
 export const unitService = {
   getByCourse: async (courseId: string): Promise<Unit[]> => {
     try {
-      const q = query(unitsCollection, where('courseId', '==', courseId));
+      const normalizedCourseId = typeof courseId === 'string' ? courseId.trim() : '';
+      if (!normalizedCourseId) return [];
+
+      const cachedUnits = getCachedUnits(normalizedCourseId);
+      if (cachedUnits) return cachedUnits;
+
+      const q = query(unitsCollection, where('courseId', '==', normalizedCourseId));
       const snapshot = await getDocs(q);
       const units: Unit[] = [];
 
@@ -103,11 +181,11 @@ export const unitService = {
           const belongsToCourse = unit.weeks.some((week) => {
             const weekRecord = week as unknown as Record<string, unknown>;
             const weekCourseId = typeof weekRecord.courseId === 'string' ? weekRecord.courseId : '';
-            if (weekCourseId === courseId) return true;
+            if (weekCourseId === normalizedCourseId) return true;
 
             return week.slides.some((slide) => {
               const slideRecord = slide as unknown as Record<string, unknown>;
-              return typeof slideRecord.courseId === 'string' && slideRecord.courseId === courseId;
+              return typeof slideRecord.courseId === 'string' && slideRecord.courseId === normalizedCourseId;
             });
           });
 
@@ -115,18 +193,19 @@ export const unitService = {
 
           units.push({
             ...unit,
-            courseId,
+            courseId: normalizedCourseId,
           });
 
           await updateDoc(doc(unitsCollection, unit.id), {
-            courseId,
+            courseId: normalizedCourseId,
             updatedAt: serverTimestamp(),
           }).catch(() => undefined);
         }
       }
 
       units.sort((a, b) => (a.order || 0) - (b.order || 0));
-      return units;
+      setCachedUnits(normalizedCourseId, units);
+      return cloneUnits(units);
     } catch (error) {
       return [];
     }
@@ -212,6 +291,7 @@ export const unitService = {
         createdAt: serverTimestamp(),
         order: unitData.order || 0
       });
+      invalidateUnitsCache(unitData.courseId);
       return docRef.id;
     } catch (error) {
       throw error;
@@ -222,7 +302,12 @@ export const unitService = {
   update: async (unitId: string, updates: Partial<Omit<Unit, 'id' | 'createdAt'>>): Promise<void> => {
     try {
       const unitRef = doc(unitsCollection, unitId);
+      const currentCourseId = await getUnitCourseId(unitId);
       await updateDoc(unitRef, updates);
+      invalidateUnitsCache(currentCourseId);
+      if (typeof updates.courseId === 'string') {
+        invalidateUnitsCache(updates.courseId);
+      }
     } catch (error) {
       throw error;
     }
@@ -231,6 +316,7 @@ export const unitService = {
   // Eliminar unidad
   delete: async (unitId: string): Promise<void> => {
     try {
+      const currentCourseId = await getUnitCourseId(unitId);
       // Primero, obtener todas las semanas de esta unidad
       const weeksQuery = query(weeksCollection, where('unitId', '==', unitId));
       const weeksSnapshot = await getDocs(weeksQuery);
@@ -251,6 +337,7 @@ export const unitService = {
       
       // Finalmente, eliminar la unidad
       await deleteDoc(doc(unitsCollection, unitId));
+      invalidateUnitsCache(currentCourseId);
     } catch (error) {
       throw error;
     }
@@ -262,6 +349,7 @@ export const unitService = {
   ): Promise<{ weeksUpdated: number; slidesUpdated: number }> => {
     const normalizedCourseId = typeof courseId === 'string' ? courseId.trim() : '';
     if (!normalizedCourseId) return { weeksUpdated: 0, slidesUpdated: 0 };
+    invalidateUnitsCache(normalizedCourseId);
 
     let weeksUpdated = 0;
     let slidesUpdated = 0;
@@ -359,6 +447,7 @@ export const weekService = {
         ...(courseId ? { courseId } : {}),
         createdAt: serverTimestamp()
       });
+      invalidateUnitsCache(courseId);
       return docRef.id;
     } catch (error) {
       throw error;
@@ -369,7 +458,12 @@ export const weekService = {
   update: async (weekId: string, updates: Partial<Omit<Week, 'id' | 'createdAt'>>): Promise<void> => {
     try {
       const weekRef = doc(weeksCollection, weekId);
+      const currentCourseId = await getWeekCourseId(weekId);
       await updateDoc(weekRef, updates);
+      invalidateUnitsCache(currentCourseId);
+      if (typeof updates.courseId === 'string') {
+        invalidateUnitsCache(updates.courseId);
+      }
     } catch (error) {
       throw error;
     }
@@ -378,6 +472,7 @@ export const weekService = {
   // Eliminar semana
   delete: async (weekId: string): Promise<void> => {
     try {
+      const currentCourseId = await getWeekCourseId(weekId);
       // Primero eliminar las diapositivas
       const slidesQuery = query(slidesCollection, where('weekId', '==', weekId));
       const slidesSnapshot = await getDocs(slidesQuery);
@@ -388,6 +483,7 @@ export const weekService = {
       
       // Luego eliminar la semana
       await deleteDoc(doc(weeksCollection, weekId));
+      invalidateUnitsCache(currentCourseId);
     } catch (error) {
       throw error;
     }
@@ -421,6 +517,7 @@ export const slideService = {
         createdAt: serverTimestamp(),
         order: slideData.order || 0
       });
+      invalidateUnitsCache(courseId);
       return docRef.id;
     } catch (error) {
       throw error;
@@ -431,7 +528,21 @@ export const slideService = {
   update: async (slideId: string, updates: Partial<Omit<Slide, 'id' | 'createdAt'>>): Promise<void> => {
     try {
       const slideRef = doc(slidesCollection, slideId);
+      const slideSnap = await getDoc(slideRef);
+      const currentData = slideSnap.exists() ? (slideSnap.data() as Record<string, unknown>) : {};
+      const currentCourseId =
+        typeof currentData.courseId === 'string'
+          ? currentData.courseId.trim()
+          : typeof currentData.weekId === 'string'
+            ? await getWeekCourseId(currentData.weekId)
+            : '';
       await updateDoc(slideRef, updates);
+      invalidateUnitsCache(currentCourseId);
+      if (typeof updates.courseId === 'string') {
+        invalidateUnitsCache(updates.courseId);
+      } else if (typeof updates.weekId === 'string') {
+        invalidateUnitsCache(await getWeekCourseId(updates.weekId));
+      }
     } catch (error) {
       throw error;
     }
@@ -441,7 +552,16 @@ export const slideService = {
   delete: async (slideId: string): Promise<void> => {
     try {
       const slideRef = doc(slidesCollection, slideId);
+      const slideSnap = await getDoc(slideRef);
+      const slideData = slideSnap.exists() ? (slideSnap.data() as Record<string, unknown>) : {};
+      const courseId =
+        typeof slideData.courseId === 'string'
+          ? slideData.courseId.trim()
+          : typeof slideData.weekId === 'string'
+            ? await getWeekCourseId(slideData.weekId)
+            : '';
       await deleteDoc(slideRef);
+      invalidateUnitsCache(courseId);
     } catch (error) {
       throw error;
     }

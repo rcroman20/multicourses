@@ -114,7 +114,6 @@ const pageHeaderRules: HeaderRule[] = [
   { path: '/admin/users', title: 'Users Directory', subtitle: 'Global user directory and operational routing' },
   { path: '/admin/reports', title: 'Reports', subtitle: 'Operational and academic reporting center' },
   { path: '/admin/backups', title: 'Backups', subtitle: 'Snapshots, recovery points, and retention control' },
-  { path: '/admin/audit-log', title: 'Audit Log', subtitle: 'Trace admin actions and governance history' },
   { path: '/admin/notifications', title: 'Notifications', subtitle: 'Admin announcements and delivery control' },
   { path: '/admin/permissions', title: 'Permissions', subtitle: 'Delegated access and module permissions' },
 ];

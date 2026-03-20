@@ -203,6 +203,64 @@ interface Student {
   canDelete: boolean;
 }
 
+type StudentsPageCacheEntry = {
+  students: Student[];
+  sameInstitutionTeacherIds: string[];
+  expiresAt: number;
+};
+
+const STUDENTS_PAGE_CACHE_TTL_MS = 60 * 1000;
+const studentsPageCache = new Map<string, StudentsPageCacheEntry>();
+
+const cloneStudents = (items: Student[]): Student[] =>
+  items.map((student) => ({
+    ...student,
+    createdAt: student.createdAt ? new Date(student.createdAt) : undefined,
+    courses: [...student.courses],
+  }));
+
+const getStudentsPageCacheKey = (input: {
+  userId?: string;
+  role?: string;
+  institutionId?: string;
+  email?: string;
+}): string => {
+  const userId = typeof input.userId === "string" ? input.userId.trim() : "";
+  const role = typeof input.role === "string" ? input.role.trim().toLowerCase() : "";
+  const institutionId =
+    typeof input.institutionId === "string" ? input.institutionId.trim() : "";
+  const email = typeof input.email === "string" ? input.email.trim().toLowerCase() : "";
+  return [userId, role, institutionId, email].join("|");
+};
+
+const readStudentsPageCache = (cacheKey: string): StudentsPageCacheEntry | null => {
+  if (!cacheKey) return null;
+  const cached = studentsPageCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    studentsPageCache.delete(cacheKey);
+    return null;
+  }
+  return {
+    students: cloneStudents(cached.students),
+    sameInstitutionTeacherIds: [...cached.sameInstitutionTeacherIds],
+    expiresAt: cached.expiresAt,
+  };
+};
+
+const writeStudentsPageCache = (
+  cacheKey: string,
+  students: Student[],
+  sameInstitutionTeacherIds: Set<string>,
+): void => {
+  if (!cacheKey) return;
+  studentsPageCache.set(cacheKey, {
+    students: cloneStudents(students),
+    sameInstitutionTeacherIds: Array.from(sameInstitutionTeacherIds),
+    expiresAt: Date.now() + STUDENTS_PAGE_CACHE_TTL_MS,
+  });
+};
+
 const getStudentRoleDisplay = (
   student: Pick<Student, "role" | "requestedRole" | "teacherApprovalStatus">,
 ): StudentRoleDisplay => {
@@ -306,6 +364,16 @@ export default function StudentsPage() {
   const isTeacher = user?.role === "docente";
   const isInstitution = user?.role === "institucion";
   const isAdmin = isAdminEmail(user?.email);
+  const studentsCacheKey = useMemo(
+    () =>
+      getStudentsPageCacheKey({
+        userId: user?.id,
+        role: user?.role,
+        institutionId: user?.institutionId,
+        email: user?.email,
+      }),
+    [user?.email, user?.id, user?.institutionId, user?.role],
+  );
   const canManageUsers = isTeacher || isInstitution;
   const [myCourseStudentIds, setMyCourseStudentIds] = useState<Set<string>>(
     new Set(),
@@ -390,6 +458,14 @@ export default function StudentsPage() {
   const fetchStudents = useCallback(async () => {
     setIsLoading(true);
     try {
+      const cached = readStudentsPageCache(studentsCacheKey);
+      if (cached) {
+        setStudents(cached.students);
+        setSameInstitutionTeacherIds(new Set(cached.sameInstitutionTeacherIds));
+        setError("");
+        return;
+      }
+
       const usersById = new Map<string, Record<string, any>>();
       const studentsById = new Map<string, Record<string, any>>();
       const validCourseIds = new Set<string>();
@@ -552,11 +628,6 @@ export default function StudentsPage() {
         const teacherInstitution = await getUserStoredInstitution(user.id, "docente");
         const teacherInstitutionKey = normalizeInstitutionValue(teacherInstitution);
         if (teacherInstitutionKey && !isInstitutionMissing(teacherInstitution)) {
-          const [allUsersSnapshot, allStudentsSnapshot] = await Promise.all([
-            getDocs(collection(firebaseDB, "usuarios")),
-            getDocs(collection(firebaseDB, "estudiantes")),
-          ]);
-
           allUsersSnapshot.forEach((matchedDoc) => {
             const matchedId = matchedDoc.id;
             const data = matchedDoc.data() as Record<string, unknown>;
@@ -709,6 +780,7 @@ export default function StudentsPage() {
       });
 
       studentList.sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
+      writeStudentsPageCache(studentsCacheKey, studentList, matchedInstitutionTeacherIds);
       setStudents(studentList);
       setSameInstitutionTeacherIds(matchedInstitutionTeacherIds);
       setError("");
@@ -719,7 +791,7 @@ export default function StudentsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, isInstitution, isTeacher, user?.id, user?.institutionId]);
+  }, [isAdmin, isInstitution, isTeacher, studentsCacheKey, user?.id, user?.institutionId]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -1123,7 +1195,11 @@ export default function StudentsPage() {
         canDelete: true,
       };
 
-      setStudents((prev) => [addedStudent, ...prev]);
+      setStudents((prev) => {
+        const nextStudents = [addedStudent, ...prev];
+        writeStudentsPageCache(studentsCacheKey, nextStudents, sameInstitutionTeacherIds);
+        return nextStudents;
+      });
 
       // Reset form
       setNewStudent({
@@ -1159,9 +1235,11 @@ export default function StudentsPage() {
     try {
       // Cloud Function also removes Firebase Auth user to keep identity data in sync.
       await deleteUserByAdmin(studentToDelete.id);
-      setStudents((prev) =>
-        prev.filter((student) => student.id !== studentToDelete.id),
-      );
+      setStudents((prev) => {
+        const nextStudents = prev.filter((student) => student.id !== studentToDelete.id);
+        writeStudentsPageCache(studentsCacheKey, nextStudents, sameInstitutionTeacherIds);
+        return nextStudents;
+      });
       toast.success("User deleted successfully (Firestore + Auth).");
       setStudentToDelete(null);
     } catch (error: unknown) {
@@ -1173,9 +1251,11 @@ export default function StudentsPage() {
             studentToDelete.id,
             studentToDelete.email,
           );
-          setStudents((prev) =>
-            prev.filter((student) => student.id !== studentToDelete.id),
-          );
+          setStudents((prev) => {
+            const nextStudents = prev.filter((student) => student.id !== studentToDelete.id);
+            writeStudentsPageCache(studentsCacheKey, nextStudents, sameInstitutionTeacherIds);
+            return nextStudents;
+          });
           toast.success(
             "Student removed successfully.",
           );

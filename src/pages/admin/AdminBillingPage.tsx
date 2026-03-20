@@ -19,7 +19,7 @@ import { firebaseDB } from "@/lib/firebase";
 import { appendAdminAuditLog } from "@/lib/services/adminAuditLogService";
 import { assertAdminPermission } from "@/lib/services/adminPermissionGuardService";
 import {
-  getTeacherApprovalRequests,
+  getAdminApprovalRequests,
   type TeacherApprovalRequestRecord,
 } from "@/lib/services/teacherApprovalService";
 import {
@@ -34,13 +34,21 @@ import {
   TEACHER_PLAN_OPTIONS,
   type TeacherPlanId,
 } from "@/lib/services/teacherPlanService";
+import {
+  getInstitutionPlanDefinition,
+  getInstitutionPlanExpiryDate,
+  resolveInstitutionPlanId,
+  type InstitutionPlanId,
+} from "@/lib/services/institutionPlanService";
 
-type BillingTeacherRow = {
+type BillingPlanRow = {
   userId: string;
+  accountType: "teacher" | "institution";
   name: string;
   email: string;
-  planId: TeacherPlanId | null;
+  planId: TeacherPlanId | InstitutionPlanId | null;
   planLabel: string;
+  planPriceCop: number;
   planStatus: "payment_pending" | "active" | "expired" | "unknown";
   paymentMethod: string;
   paymentRequestedAt: Date | null;
@@ -94,14 +102,41 @@ const formatCurrencyCop = (value: number): string =>
     maximumFractionDigits: 0,
   }).format(value);
 
-const getPaymentStatusClassName = (status: BillingTeacherRow["planStatus"]): string => {
+const getDayDifference = (target: Date | null, base: Date = new Date()): number | null => {
+  if (!target) return null;
+  const targetDate = new Date(target);
+  const baseDate = new Date(base);
+  targetDate.setHours(12, 0, 0, 0);
+  baseDate.setHours(12, 0, 0, 0);
+  return Math.round((targetDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24));
+};
+
+const getPendingDaysLabel = (requestedAt: Date | null): string => {
+  const dayDifference = getDayDifference(requestedAt);
+  if (dayDifference === null) return "No request date";
+  const daysPending = Math.max(0, Math.abs(dayDifference));
+  if (daysPending === 0) return "Requested today";
+  if (daysPending === 1) return "1 day pending";
+  return `${daysPending} days pending`;
+};
+
+const getExpiryDaysLabel = (expiresAt: Date | null): string => {
+  const dayDifference = getDayDifference(expiresAt);
+  if (dayDifference === null) return "No expiry date";
+  if (dayDifference === 0) return "Expires today";
+  if (dayDifference > 0) return dayDifference === 1 ? "1 day left" : `${dayDifference} days left`;
+  const expiredDays = Math.abs(dayDifference);
+  return expiredDays === 1 ? "Expired 1 day ago" : `Expired ${expiredDays} days ago`;
+};
+
+const getPaymentStatusClassName = (status: BillingPlanRow["planStatus"]): string => {
   if (status === "payment_pending") return "border-amber-200 bg-amber-50 text-amber-700";
   if (status === "expired") return "border-rose-200 bg-rose-50 text-rose-700";
   if (status === "active") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   return "border-slate-200/60 bg-slate-50 text-slate-700";
 };
 
-const getPaymentStatusLabel = (status: BillingTeacherRow["planStatus"]): string => {
+const getPaymentStatusLabel = (status: BillingPlanRow["planStatus"]): string => {
   if (status === "payment_pending") return "Payment pending";
   if (status === "expired") return "Expired";
   if (status === "active") return "Active";
@@ -118,7 +153,7 @@ export default function AdminBillingPage() {
   const { user } = useAuth();
   const [approvalRequests, setApprovalRequests] = useState<TeacherApprovalRequestRecord[]>([]);
   const [pricingRequests, setPricingRequests] = useState<PricingContactRequestRecord[]>([]);
-  const [teacherBillingRows, setTeacherBillingRows] = useState<BillingTeacherRow[]>([]);
+  const [billingRows, setBillingRows] = useState<BillingPlanRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [resolvingPricingById, setResolvingPricingById] = useState<Record<string, boolean>>({});
@@ -128,7 +163,7 @@ export default function AdminBillingPage() {
     setErrorMessage("");
 
     const [approvalsResult, pricingResult, usersResult] = await Promise.allSettled([
-      getTeacherApprovalRequests(),
+      getAdminApprovalRequests(),
       getPricingContactRequests(),
       getDocs(collection(firebaseDB, "usuarios")),
     ]);
@@ -138,61 +173,117 @@ export default function AdminBillingPage() {
 
     if (usersResult.status === "fulfilled") {
       const now = Date.now();
-      const mapped: BillingTeacherRow[] = usersResult.value.docs
+      const mapped: BillingPlanRow[] = usersResult.value.docs
         .map((docSnap) => {
           const data = (docSnap.data() || {}) as Record<string, unknown>;
           const role = String(data.role || data.requestedRole || "").trim().toLowerCase();
           const approval = String(data.teacherApprovalStatus || "").trim().toLowerCase();
-          if (!["docente", "teacher", "profesor", "instructor"].includes(role)) return null;
-          if (approval && approval !== "approved") return null;
+          const institutionPlanStatusRaw = String(data.institutionPlanStatus || "").trim().toLowerCase();
+          const institutionId = String(data.institutionId || "").trim();
+          const isTeacher = ["docente", "teacher", "profesor", "instructor"].includes(role);
+          const isInstitution = ["institucion", "institution", "organization"].includes(role);
 
-          const planId =
-            resolveTeacherPlanId(
-              String(data.teacherPlanId || data.teacherInterestedPlan || "").trim(),
-            ) || null;
-          const planLabel = planId ? getTeacherPlanDefinition(planId).label : "Not specified";
+          if (!isTeacher && !isInstitution) return null;
+          if (isTeacher && approval && approval !== "approved") return null;
+          if (isTeacher && institutionId) return null;
 
-          const assignedAt = toDate(data.teacherPlanAssignedAt);
-          const expiresAtRaw = toDate(data.teacherPlanExpiresAt);
-          const expiresAt =
-            expiresAtRaw ||
-            (planId && assignedAt ? getTeacherPlanExpiryDate(planId, assignedAt) : null);
-          const planStatusRaw = String(data.teacherPlanStatus || "").trim().toLowerCase();
+          if (isTeacher) {
+            const planId =
+              resolveTeacherPlanId(
+                String(data.teacherPlanId || data.teacherInterestedPlan || "").trim(),
+              ) || null;
+            const planDefinition = getTeacherPlanDefinition(planId);
+            const planLabel = planId ? planDefinition.label : "Not specified";
 
-          let planStatus: BillingTeacherRow["planStatus"] = "unknown";
-          if (planStatusRaw === "pending_payment") {
+            const assignedAt = toDate(data.teacherPlanAssignedAt);
+            const expiresAtRaw = toDate(data.teacherPlanExpiresAt);
+            const expiresAt =
+              expiresAtRaw ||
+              (planId && assignedAt ? getTeacherPlanExpiryDate(planId, assignedAt) : null);
+            const planStatusRaw = String(data.teacherPlanStatus || "").trim().toLowerCase();
+
+            let planStatus: BillingPlanRow["planStatus"] = "unknown";
+            if (planStatusRaw === "pending_payment") {
+              planStatus = "payment_pending";
+            } else if (expiresAt && expiresAt.getTime() < now) {
+              planStatus = "expired";
+            } else if (planStatusRaw === "active" || planStatusRaw === "approved" || planStatusRaw === "paid") {
+              planStatus = "active";
+            } else if (!planStatusRaw && expiresAt && expiresAt.getTime() >= now) {
+              planStatus = "active";
+            }
+
+            return {
+              userId: docSnap.id,
+              accountType: "teacher",
+              name: String(data.name || "").trim() || "Teacher",
+              email: String(data.email || "").trim(),
+              planId,
+              planLabel,
+              planPriceCop: planId ? planDefinition.priceCop : 0,
+              planStatus,
+              paymentMethod: String(data.teacherPaymentMethod || "").trim() || "Not set",
+              paymentRequestedAt: toDate(data.teacherPaymentRequestedAt),
+              assignedAt,
+              expiresAt,
+            } satisfies BillingPlanRow;
+          }
+
+          if (!institutionPlanStatusRaw) return null;
+          const institutionPlanId =
+            resolveInstitutionPlanId(String(data.institutionRequestedPlanId || "").trim()) || null;
+          const institutionPlanDefinition = getInstitutionPlanDefinition(institutionPlanId);
+          const institutionName =
+            String(data.institutionName || data.institution || data.name || "").trim() || "Institution";
+          const institutionPrice =
+            Number(data.institutionRequestedPriceCop ?? data.institutionPlanPriceCop) ||
+            institutionPlanDefinition?.priceCop ||
+            0;
+          const institutionAssignedAt =
+            toDate(data.institutionPlanAssignedAt) || toDate(data.updatedAt) || null;
+          const institutionExpiresAt =
+            toDate(data.institutionPlanExpiresAt) ||
+            (institutionPlanId && institutionAssignedAt
+              ? getInstitutionPlanExpiryDate(institutionPlanId, institutionAssignedAt)
+              : null);
+
+          let planStatus: BillingPlanRow["planStatus"] = "unknown";
+          if (institutionPlanStatusRaw === "pending_payment") {
             planStatus = "payment_pending";
-          } else if (expiresAt && expiresAt.getTime() < now) {
+          } else if (institutionExpiresAt && institutionExpiresAt.getTime() < now) {
             planStatus = "expired";
-          } else if (planStatusRaw === "active" || planStatusRaw === "approved" || planStatusRaw === "paid") {
-            planStatus = "active";
-          } else if (!planStatusRaw && expiresAt && expiresAt.getTime() >= now) {
+          } else if (institutionPlanStatusRaw === "active") {
             planStatus = "active";
           }
 
           return {
             userId: docSnap.id,
-            name: String(data.name || "").trim() || "Teacher",
+            accountType: "institution",
+            name: institutionName,
             email: String(data.email || "").trim(),
-            planId,
-            planLabel,
+            planId: institutionPlanId,
+            planLabel:
+              institutionPlanDefinition?.label ||
+              String(data.institutionPlanName || "").trim() ||
+              "Institution plan",
+            planPriceCop: institutionPrice,
             planStatus,
-            paymentMethod: String(data.teacherPaymentMethod || "").trim() || "Not set",
-            paymentRequestedAt: toDate(data.teacherPaymentRequestedAt),
-            assignedAt,
-            expiresAt,
-          } satisfies BillingTeacherRow;
+            paymentMethod: String(data.institutionPaymentMethod || "").trim() || "Not set",
+            paymentRequestedAt: toDate(data.institutionPaymentRequestedAt),
+            assignedAt: institutionAssignedAt,
+            expiresAt: institutionExpiresAt,
+          } satisfies BillingPlanRow;
         })
-        .filter((row): row is BillingTeacherRow => row !== null)
+        .filter((row): row is BillingPlanRow => row !== null)
         .sort((a, b) => {
           const left = a.name.toLowerCase();
           const right = b.name.toLowerCase();
           return left.localeCompare(right);
         });
 
-      setTeacherBillingRows(mapped);
+      setBillingRows(mapped);
     } else {
-      setTeacherBillingRows([]);
+      setBillingRows([]);
     }
 
     if (
@@ -222,18 +313,18 @@ export default function AdminBillingPage() {
   );
   const paymentPendingCount = paymentPendingRequests.length;
   const activePlansCount = useMemo(
-    () => teacherBillingRows.filter((row) => row.planStatus === "active").length,
-    [teacherBillingRows],
+    () => billingRows.filter((row) => row.planStatus === "active").length,
+    [billingRows],
   );
   const expiringSoonCount = useMemo(() => {
     const now = Date.now();
     const nextThirtyDays = now + 30 * 24 * 60 * 60 * 1000;
-    return teacherBillingRows.filter((row) => {
+    return billingRows.filter((row) => {
       if (!row.expiresAt) return false;
       const expiresAt = row.expiresAt.getTime();
       return expiresAt >= now && expiresAt <= nextThirtyDays;
     }).length;
-  }, [teacherBillingRows]);
+  }, [billingRows]);
   const pipelineValueCop = useMemo(
     () =>
       paymentPendingRequests.reduce((accumulator, request) => {
@@ -252,12 +343,13 @@ export default function AdminBillingPage() {
 
   const planMix = useMemo(() => {
     const base: Record<TeacherPlanId, number> = { starter: 0, growth: 0, scale: 0 };
-    teacherBillingRows.forEach((row) => {
+    billingRows.forEach((row) => {
+      if (row.accountType !== "teacher") return;
       if (!row.planId) return;
-      base[row.planId] += 1;
+      base[row.planId as TeacherPlanId] += 1;
     });
     return base;
-  }, [teacherBillingRows]);
+  }, [billingRows]);
 
   const handleResolvePricing = async (request: PricingContactRequestRecord) => {
     setResolvingPricingById((prev) => ({ ...prev, [request.id]: true }));
@@ -416,17 +508,48 @@ export default function AdminBillingPage() {
                                 <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
                                   Payment pending
                                 </span>
+                                <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                                  {request.requestType === "institution" ? "Institution" : "Teacher"}
+                                </span>
                                 <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
-                                  {plan.label}
+                                  {request.requestType === "institution"
+                                    ? request.interestedPlan || request.institutionName || "Institution plan"
+                                    : plan.label}
                                 </span>
                               </div>
                               <p className="mt-1 truncate text-xs text-slate-600">{request.email}</p>
                               <p className="mt-0.5 text-xs text-slate-500">
-                                Method: {request.paymentMethod || "Not set"} • Requested:{" "}
-                                {formatDateTime(request.paymentRequestedAt || request.requestedAt)}
+                                Method: {(request.requestType === "institution" ? request.institutionPaymentMethod : request.paymentMethod) || "Not set"} • Requested:{" "}
+                                {formatDateTime(
+                                  (request.requestType === "institution"
+                                    ? request.institutionPaymentRequestedAt
+                                    : request.paymentRequestedAt) || request.requestedAt,
+                                )}
                               </p>
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                                  Due {formatCurrencyCop(
+                                    request.requestType === "institution"
+                                      ? request.institutionRequestedPriceCop || 0
+                                      : plan.priceCop,
+                                  )}
+                                </span>
+                                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                                  {getPendingDaysLabel(
+                                    (request.requestType === "institution"
+                                      ? request.institutionPaymentRequestedAt
+                                      : request.paymentRequestedAt) || request.requestedAt,
+                                  )}
+                                </span>
+                              </div>
                             </div>
-                            <p className="text-sm font-bold text-slate-900">{formatCurrencyCop(plan.priceCop)}</p>
+                            <p className="text-sm font-bold text-slate-900">
+                              {formatCurrencyCop(
+                                request.requestType === "institution"
+                                  ? request.institutionRequestedPriceCop || 0
+                                  : plan.priceCop,
+                              )}
+                            </p>
                           </div>
                         </article>
                       );
@@ -548,22 +671,27 @@ export default function AdminBillingPage() {
                   </div>
                 </div>
 
-                {teacherBillingRows.length === 0 ? (
+                {billingRows.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-slate-300/60 bg-slate-50 p-5 text-center">
                     <AlertTriangle className="mx-auto h-9 w-9 text-slate-400" />
-                    <p className="mt-2 text-sm font-medium text-slate-700">No teacher billing records found</p>
-                    <p className="text-xs text-slate-500">Approved teacher plan records will appear in this panel.</p>
+                    <p className="mt-2 text-sm font-medium text-slate-700">No billing records found</p>
+                    <p className="text-xs text-slate-500">Teacher and institution plans will appear in this panel.</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {teacherBillingRows.slice(0, 8).map((row) => (
+                    {billingRows.slice(0, 8).map((row) => (
                       <article
                         key={row.userId}
                         className="rounded-xl border border-slate-200/60 bg-white p-3 transition-colors hover:border-slate-300/60 hover:bg-slate-50"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-slate-900">{row.name}</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="truncate text-sm font-semibold text-slate-900">{row.name}</p>
+                              <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                                {row.accountType === "institution" ? "Institution" : "Teacher"}
+                              </span>
+                            </div>
                             <p className="truncate text-xs text-slate-600">{row.email || "No email"}</p>
                           </div>
                           <span
@@ -575,6 +703,24 @@ export default function AdminBillingPage() {
                         <p className="mt-1 text-xs text-slate-500">
                           {row.planLabel} • Expires {formatShortDate(row.expiresAt)}
                         </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-slate-200/60 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                            Value {formatCurrencyCop(row.planPriceCop)}
+                          </span>
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                              row.planStatus === "expired"
+                                ? "border-rose-200 bg-rose-50 text-rose-700"
+                                : row.planStatus === "active"
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-slate-200/60 bg-slate-50 text-slate-700"
+                            }`}
+                          >
+                            {row.planStatus === "payment_pending"
+                              ? getPendingDaysLabel(row.paymentRequestedAt)
+                              : getExpiryDaysLabel(row.expiresAt)}
+                          </span>
+                        </div>
                       </article>
                     ))}
                   </div>

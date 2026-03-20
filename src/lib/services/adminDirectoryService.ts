@@ -16,6 +16,7 @@ export interface AdminDirectoryUserRecord {
   userId: string;
   email: string;
   name: string;
+  hasStoredAccount: boolean;
   role: AdminDirectoryRole;
   requestedRole: AdminDirectoryRole | null;
   institutionWriteRole: AdminDirectoryRole;
@@ -45,6 +46,12 @@ export interface AdminDirectoryDataset {
   users: AdminDirectoryUserRecord[];
   warnings: string[];
 }
+
+const ADMIN_DIRECTORY_CACHE_TTL_MS = 60 * 1000;
+let adminDirectoryCache:
+  | { dataset: AdminDirectoryDataset; expiresAt: number }
+  | null = null;
+let adminDirectoryPendingPromise: Promise<AdminDirectoryDataset> | null = null;
 
 const INSTITUTION_FIELDS = [
   "teacherInstitutionName",
@@ -307,7 +314,7 @@ const normalizeEnrollmentEntry = (entry: unknown): string => {
   return "";
 };
 
-export async function getAdminDirectoryDataset(): Promise<AdminDirectoryDataset> {
+const buildAdminDirectoryDataset = async (): Promise<AdminDirectoryDataset> => {
   const warnings: string[] = [];
   const [usersResult, studentsResult, coursesResult, legacyCoursesResult, approvalsResult] = await Promise.allSettled([
     getDocs(collection(firebaseDB, "usuarios")),
@@ -410,6 +417,10 @@ export async function getAdminDirectoryDataset(): Promise<AdminDirectoryDataset>
 
   const users = Array.from(byKey.values())
     .map((entry) => {
+      const storedUserId =
+        (entry.userId && entry.sourceIds.has(entry.userId) ? entry.userId : "") ||
+        Array.from(entry.sourceIds)[0] ||
+        entry.userId;
       const email = entry.email;
       const role: AdminDirectoryRole =
         isAdminEmail(email) ? "admin" : entry.role || entry.requestedRole || "estudiante";
@@ -450,9 +461,10 @@ export async function getAdminDirectoryDataset(): Promise<AdminDirectoryDataset>
         : 0;
 
       return {
-        userId: entry.userId,
+        userId: storedUserId,
         email,
         name: entry.name || "User",
+        hasStoredAccount: entry.sourceIds.size > 0,
         role,
         requestedRole,
         institutionWriteRole,
@@ -481,6 +493,30 @@ export async function getAdminDirectoryDataset(): Promise<AdminDirectoryDataset>
     .sort((left, right) => left.name.localeCompare(right.name));
 
   return { users, warnings };
+};
+
+export async function getAdminDirectoryDataset(): Promise<AdminDirectoryDataset> {
+  if (adminDirectoryCache && adminDirectoryCache.expiresAt > Date.now()) {
+    return adminDirectoryCache.dataset;
+  }
+
+  if (adminDirectoryPendingPromise) {
+    return adminDirectoryPendingPromise;
+  }
+
+  adminDirectoryPendingPromise = buildAdminDirectoryDataset()
+    .then((dataset) => {
+      adminDirectoryCache = {
+        dataset,
+        expiresAt: Date.now() + ADMIN_DIRECTORY_CACHE_TTL_MS,
+      };
+      return dataset;
+    })
+    .finally(() => {
+      adminDirectoryPendingPromise = null;
+    });
+
+  return adminDirectoryPendingPromise;
 }
 
 export function getInstitutionKey(label: string): string {

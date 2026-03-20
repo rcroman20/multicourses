@@ -11,6 +11,7 @@ import {
 import { firebaseDB } from "@/lib/firebase";
 import { syncPublicInstitutionDirectoryRecord } from "@/lib/services/institutionProfileService";
 import { getInstitutionPlanQuote } from "@/lib/services/institutionPlanService";
+import { getInstitutionPlanExpiryDate, resolveInstitutionPlanId } from "@/lib/services/institutionPlanService";
 import {
   getTeacherPlanDefinition,
   getTeacherPlanExpiryDate,
@@ -421,6 +422,16 @@ export async function approveInstitutionApprovalRequest(
         studentData.institutionRequestedMonthlyEquivalentCop ??
         institutionData.monthlyEquivalentCop,
     ) || institutionQuote?.monthlyEquivalentCop || 0;
+  const institutionPlanId =
+    resolveInstitutionPlanId(
+      toText(userData.institutionRequestedPlanId) ||
+        toText(studentData.institutionRequestedPlanId) ||
+        toText(institutionData.planId),
+    );
+  const approvedAt = new Date();
+  const expiresAt = institutionPlanId
+    ? getInstitutionPlanExpiryDate(institutionPlanId, approvedAt)
+    : null;
 
   await Promise.all([
     setDoc(
@@ -435,6 +446,8 @@ export async function approveInstitutionApprovalRequest(
         institutionPlanName: planName,
         institutionPlanPriceCop: planPriceCop || null,
         institutionPlanMonthlyEquivalentCop: monthlyEquivalentCop || null,
+        institutionPlanAssignedAt: approvedAt,
+        institutionPlanExpiresAt: expiresAt,
         institutionCourseLimit: courseLimit,
         institutionStudentLimit: studentLimit,
         institutionTeacherLimit: null,
@@ -454,6 +467,8 @@ export async function approveInstitutionApprovalRequest(
         institutionPlanName: planName,
         institutionPlanPriceCop: planPriceCop || null,
         institutionPlanMonthlyEquivalentCop: monthlyEquivalentCop || null,
+        institutionPlanAssignedAt: approvedAt,
+        institutionPlanExpiresAt: expiresAt,
         institutionCourseLimit: courseLimit,
         institutionStudentLimit: studentLimit,
         institutionTeacherLimit: null,
@@ -472,6 +487,8 @@ export async function approveInstitutionApprovalRequest(
         planName,
         priceCop: planPriceCop || null,
         monthlyEquivalentCop: monthlyEquivalentCop || null,
+        planAssignedAt: approvedAt,
+        planExpiresAt: expiresAt,
         courseLimit,
         studentLimit,
         teacherLimit: null,

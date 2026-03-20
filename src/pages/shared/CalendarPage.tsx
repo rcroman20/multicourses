@@ -7,7 +7,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getAccessibleCoursesForUser } from "@/lib/courseAccess";
 import { firebaseDB } from "@/lib/firebase";
 import { getPendingAccountDeletionRequests } from "@/lib/services/accountDeletionService";
-import { getAdminAuditLogEntries } from "@/lib/services/adminAuditLogService";
 import { getContactMessages } from "@/lib/services/contactMessageService";
 import { getPricingContactRequests } from "@/lib/services/pricingContactService";
 import { getTeacherApprovalRequests } from "@/lib/services/teacherApprovalService";
@@ -37,8 +36,7 @@ type AdminTimelineFilter =
   | "plans"
   | "inbox"
   | "backups"
-  | "account_deletions"
-  | "course_deletions";
+  | "account_deletions";
 type CalendarEventType =
   | "start"
   | "due"
@@ -50,8 +48,7 @@ type CalendarEventType =
   | "plan_expiring"
   | "inbox_request"
   | "deletion_request"
-  | "backup_created"
-  | "course_deleted";
+  | "backup_created";
 
 interface CalendarEvent {
   id: string;
@@ -197,11 +194,10 @@ function getAdminEventPriority(event: CalendarEvent): number {
   if (event.type === "inbox_request") return 1;
   if (event.type === "plan_expiring") return isUrgentPlanExpiry(event) ? 2 : 4;
   if (event.type === "deletion_request") return 3;
-  if (event.type === "course_deleted") return 5;
-  if (event.type === "plan_purchased") return 6;
-  if (event.type === "account_created") return 7;
-  if (event.type === "course_created") return 8;
-  if (event.type === "backup_created") return 9;
+  if (event.type === "plan_purchased") return 5;
+  if (event.type === "account_created") return 6;
+  if (event.type === "course_created") return 7;
+  if (event.type === "backup_created") return 8;
   return 10;
 }
 
@@ -216,7 +212,6 @@ function getEventIcon(event: CalendarEvent): ComponentType<{ className?: string 
   if (event.type === "inbox_request") return AlertCircle;
   if (event.type === "deletion_request") return X;
   if (event.type === "backup_created") return CheckCircle2;
-  if (event.type === "course_deleted") return X;
   return GraduationCap;
 }
 
@@ -231,7 +226,6 @@ function getEventTypeLabel(event: CalendarEvent): string {
   if (event.type === "inbox_request") return "Inbox request";
   if (event.type === "deletion_request") return "Deletion request";
   if (event.type === "backup_created") return "Backup snapshot";
-  if (event.type === "course_deleted") return "Course deleted";
   return "Class session";
 }
 
@@ -250,7 +244,6 @@ function getTypeTone(event: CalendarEvent): string {
   if (event.type === "inbox_request") return "border-amber-200 bg-amber-50 text-amber-700";
   if (event.type === "deletion_request") return "border-rose-200 bg-rose-50 text-rose-700";
   if (event.type === "backup_created") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (event.type === "course_deleted") return "border-rose-200 bg-rose-50 text-rose-700";
   return "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
@@ -269,7 +262,6 @@ function getTypeIconTone(event: CalendarEvent): string {
   if (event.type === "inbox_request") return "bg-amber-100 text-amber-700";
   if (event.type === "deletion_request") return "bg-rose-100 text-rose-700";
   if (event.type === "backup_created") return "bg-emerald-100 text-emerald-700";
-  if (event.type === "course_deleted") return "bg-rose-100 text-rose-700";
   return "bg-emerald-100 text-emerald-700";
 }
 
@@ -284,7 +276,6 @@ function getEventDotTone(event: CalendarEvent): string {
   if (event.type === "inbox_request") return "bg-amber-500";
   if (event.type === "deletion_request") return "bg-rose-500";
   if (event.type === "backup_created") return "bg-emerald-500";
-  if (event.type === "course_deleted") return "bg-rose-500";
   return "bg-emerald-500";
 }
 
@@ -343,7 +334,7 @@ function getAdminFilterTheme(filter: AdminTimelineFilter) {
       secondaryIcon: "bg-teal-100 text-teal-700",
     };
   }
-  if (filter === "account_deletions" || filter === "course_deletions") {
+  if (filter === "account_deletions") {
     return {
       badge: "border-rose-200 bg-rose-50 text-rose-700",
       leftGlow: "bg-rose-300/25",
@@ -481,10 +472,9 @@ export default function CalendarPage() {
     let isMounted = true;
 
     const loadAdminOperationalEvents = async () => {
-      const [usersResult, studentsResult, auditResult, approvalsResult, deletionRequestsResult, contactResult, pricingResult, backupsResult] = await Promise.allSettled([
+      const [usersResult, studentsResult, approvalsResult, deletionRequestsResult, contactResult, pricingResult, backupsResult] = await Promise.allSettled([
         getDocs(collection(firebaseDB, "usuarios")),
         getDocs(collection(firebaseDB, "estudiantes")),
-        getAdminAuditLogEntries(500),
         getTeacherApprovalRequests(),
         getPendingAccountDeletionRequests(),
         getContactMessages(),
@@ -497,7 +487,6 @@ export default function CalendarPage() {
       const warnings: string[] = [];
       if (usersResult.status === "rejected") warnings.push("accounts");
       if (studentsResult.status === "rejected") warnings.push("students");
-      if (auditResult.status === "rejected") warnings.push("course deletions");
       if (approvalsResult.status === "rejected") warnings.push("teacher approvals");
       if (deletionRequestsResult.status === "rejected") warnings.push("deletion requests");
       if (contactResult.status === "rejected") warnings.push("contact inbox");
@@ -692,30 +681,6 @@ export default function CalendarPage() {
         });
       }
 
-      if (auditResult.status === "fulfilled") {
-        auditResult.value.forEach((entry) => {
-          if (
-            entry.action.trim().toLowerCase() !== "deleted course" &&
-            entry.targetType.trim().toLowerCase() !== "course"
-          ) {
-            return;
-          }
-          if (!entry.createdAt) return;
-          events.push({
-            id: `course-deleted:${entry.id}`,
-            courseId: "__admin__",
-            courseName: "Audit log",
-            courseCode: "AUDIT",
-            title: entry.targetLabel || "Course deleted",
-            type: "course_deleted",
-            date: entry.createdAt,
-            detail: `${entry.actorName || "Unknown user"} • ${entry.detail || "Course removal logged"}`,
-            actorName: entry.actorName,
-            navigationPath: "/admin/audit-log",
-          });
-        });
-      }
-
       events.sort((a, b) => a.date.getTime() - b.date.getTime());
       setAdminOperationalEvents(events);
       setAdminOperationalWarning(
@@ -855,7 +820,7 @@ export default function CalendarPage() {
     if (adminTimelineFilter === "account_deletions") {
       return courseScopedEvents.filter((event) => event.type === "deletion_request");
     }
-    return courseScopedEvents.filter((event) => event.type === "course_deleted");
+    return courseScopedEvents;
   }, [adminTimelineFilter, courseScopedEvents, isAdminView]);
 
   const filteredEvents = useMemo(() => {
@@ -944,7 +909,6 @@ export default function CalendarPage() {
   const deletionRequestCount = adminScopedEvents.filter((event) => event.type === "deletion_request").length;
   const backupCreatedCount = adminScopedEvents.filter((event) => event.type === "backup_created").length;
   const courseCreatedCount = adminScopedEvents.filter((event) => event.type === "course_created").length;
-  const courseDeletedCount = adminScopedEvents.filter((event) => event.type === "course_deleted").length;
   const selectedDayClassCount = selectedDayEvents.filter((event) => event.type === "class").length;
   const visibleCourseCount = useMemo(
     () => new Set(filteredEvents.map((event) => event.courseId).filter((id) => id !== "__admin__")).size,
@@ -978,7 +942,6 @@ export default function CalendarPage() {
           inbox_request: 0,
           deletion_request: 0,
           backup_created: 0,
-          course_deleted: 0,
         } as Record<CalendarEventType, number>,
       ),
     [filteredEvents],
@@ -1037,11 +1000,6 @@ export default function CalendarPage() {
         key: "account_deletions" as const,
         label: "Account deletions",
         count: courseScopedEvents.filter((event) => event.type === "deletion_request").length,
-      },
-      {
-        key: "course_deletions" as const,
-        label: "Course deletions",
-        count: courseScopedEvents.filter((event) => event.type === "course_deleted").length,
       },
     ],
     [courseScopedEvents],
@@ -1150,7 +1108,7 @@ export default function CalendarPage() {
                       {isAdminView ? "Inbox + deletions" : "Today"}
                     </p>
                     <p className="text-lg font-extrabold leading-5 text-slate-900">
-                      {isAdminView ? inboxRequestCount + deletionRequestCount + courseDeletedCount : todayEventsCount}
+                      {isAdminView ? inboxRequestCount + deletionRequestCount : todayEventsCount}
                     </p>
                   </div>
                 </div>
@@ -1305,10 +1263,6 @@ export default function CalendarPage() {
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
                         <span className="h-2 w-2 rounded-full bg-indigo-500" />
                         Course created {visibleTypeCounts.course_created}
-                      </span>
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700">
-                        <span className="h-2 w-2 rounded-full bg-rose-500" />
-                        Course deleted {visibleTypeCounts.course_deleted}
                       </span>
                     </>
                   ) : (
